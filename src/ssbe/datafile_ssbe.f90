@@ -81,7 +81,7 @@ end subroutine write_sbe_rt_energy_line
 
 
 subroutine write_sbe_nex_header(fh)
-    use inputoutput, only: t_unit_ac, t_unit_elec, t_unit_current, t_unit_time, t_unit_length, t_unit_energy
+    use inputoutput, only: t_unit_time
     implicit none
     integer, intent(in) :: fh
     write(fh,'(a)') "# Excitation"
@@ -89,22 +89,29 @@ subroutine write_sbe_nex_header(fh)
     write(fh,'(a)') "# nhole: Number of excited holes"
     write(fh, '("#",99(1X,I0,":",A,"[",A,"]"))') &
         & 1, "time", trim(t_unit_time%name), &
-        & 2, "nelec", trim(t_unit_length%name)//"^-3", &
-        & 3, "nhole", trim(t_unit_length%name)//"^-3"
+        & 2, "nelec", "cm^-3", &
+        & 3, "nhole", "cm^-3"
     return
 end subroutine write_sbe_nex_header
 
 
 
 subroutine write_sbe_nex_line(fh, t, nelec, nhole)
-    use inputoutput, only: t_unit_ac, t_unit_elec, t_unit_current, t_unit_time, t_unit_length, t_unit_energy
+    use inputoutput, only: t_unit_time, au_length_aa
     implicit none
     integer, intent(in) :: fh
     real(8), intent(in) :: t, nelec, nhole
+    ! Number-density conversion a.u.^-3 -> cm^-3, hardcoded regardless of the
+    ! user-selected output length unit (t_unit_length): 1 a.u. of length
+    ! = au_length_aa angstrom = au_length_aa*1e-8 cm, so 1 a.u. of (length)^-3
+    ! = 1 / (au_length_aa*1e-8)^3 cm^-3 = 1e24 / au_length_aa^3 cm^-3.
+    real(8), parameter :: au_to_cm3_inv = 1.0d24
+    real(8) :: au_density_to_cm3
+    au_density_to_cm3 = au_to_cm3_inv / (au_length_aa ** 3)
     write(fh, '(F16.8,99(1X,E23.15E3))') &
         & t * t_unit_time%conv, &
-        & nelec * (t_unit_length%conv ** (-3)), &
-        & nhole * (t_unit_length%conv ** (-3))
+        & nelec * au_density_to_cm3, &
+        & nhole * au_density_to_cm3
     return
 end subroutine write_sbe_nex_line
 
