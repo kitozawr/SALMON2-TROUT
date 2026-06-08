@@ -77,6 +77,14 @@ subroutine main_realtime_ssbe(icomm)
         write(*, "(a)") "---------------------------------------------------------------------------------------"
     end if
 
+    ! Write initial (t=0) nex_k block before the time loop so the population
+    ! at t=0 (equilibrium, all pop_k=0) appears in the output file.
+    if (irank == 0) then
+        pop_k = 0.0d0
+        call write_sbe_nex_k_block(fh_sbe_nex_k, 0.0d0, nk, gs%kpoint, pop_k)
+        flush(fh_sbe_nex_k)
+    end if
+
     call comm_sync_all(icomm)
 
     ! Realtime calculation
