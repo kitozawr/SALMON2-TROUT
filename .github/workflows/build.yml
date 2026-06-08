@@ -19,7 +19,7 @@ jobs:
 
       - name: Configure
         run: |
-          mkdir -p build
+          rm -rf build
           cmake -S . -B build \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_Fortran_COMPILER=mpif90 \
