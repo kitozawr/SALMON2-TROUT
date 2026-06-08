@@ -1,127 +1,83 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Standalone single-machine Python/NumPy/SciPy reference implementation of the
-local Empirical Pseudopotential Method (EPM) ground-state solver for GaAs
-(Cohen-Bergstresser local pseudopotential, zincblende structure).
+Standalone Python/NumPy/SciPy reference implementation of the local EPM 
+for the CONVENTIONAL CUBIC CELL of GaAs (8 atoms, 32 valence electrons).
 
-This is a *debugging reference* for the Fortran `theory='epm'` module
-(src/epm/epm_solver.f90, src/epm/epm_cohen_bergstresser.f90) -- it reproduces
-the same lattice/basis/Hamiltonian/momentum-matrix construction, with no MPI
-and no OpenMP (plain NumPy/SciPy on a single machine), and writes exactly the
-same SYSNAME_k.data / SYSNAME_eigen.data / SYSNAME_tm.data files consumed by
-gs_info_ssbe -- so its output can be diffed against the Fortran output, or fed
-directly into an SBE real-time run for cross-checking.
-
-Monolithic, self-contained: every parameter (lattice constant, plane-wave
-cutoff, k-grid, number of bands/electrons, sysname, output directory) is a
-hardcoded constant below -- edit them directly to change the run. No external
-input files, no command-line arguments.
-
-Run:
-    python3 epm_gaas_reference.py
+This script uses a mathematical "band-folding" trick: it builds the Hamiltonian 
+in a simple cubic plane-wave basis, but applies a parity selection rule to the 
+Cohen-Bergstresser form factors. This naturally and exactly folds the 4 primitive 
+FCC Brillouin zones into 1 simple cubic zone, yielding 16 valence bands and 16+ 
+conduction bands, perfectly matching a DFT/SBE setup that uses the cubic cell.
 """
 
 import numpy as np
-from numpy.linalg import norm
 from scipy.linalg import eigh
 
 # =============================================================================
-# Hardcoded run parameters (edit here -- mirrors a GaAs &epm / &system input)
+# Hardcoded run parameters (Cubic Cell Setup)
 # =============================================================================
 MATERIAL            = 'GaAs'
-SYSNAME             = 'GaAs'
-OUTPUT_DIR          = './'          # written as SYSNAME_k.data etc. in this dir
+SYSNAME             = 'GaAs_cubic'
+OUTPUT_DIR          = './'
 
-A_LATTICE_AU        = 10.68                          # lattice constant a [Bohr]
-PW_CUTOFF_RY        = 11.1                          # |G|^2 cutoff [(2*pi/a)^2 units == Ry-style]
+A_LATTICE_AU        = 10.68         # Cubic lattice constant a [Bohr]
+PW_CUTOFF_RY        = 11.1          # |G|^2 cutoff in (2*pi/a)^2 units
 
-NUM_KGRID           = (4, 4, 4)     # Monkhorst-Pack grid n1 x n2 x n3 (uniform weights, no symmetry)
+NUM_KGRID           = (4, 4, 4)     # Monkhorst-Pack grid for the CUBIC BZ
 
-NSTATE              = 8             # number of bands to keep (must match the &system/&sbe input)
-NELEC               = 8             # number of valence electrons (closed shell -> NELEC/2 occupied bands)
+NSTATE              = 32            # 16 valence + 16 conduction (folded bands)
+NELEC               = 32            # 8 atoms * 4 valence e- = 32 electrons
 
 # =============================================================================
-# Cohen-Bergstresser (1966) local pseudopotential form factors for GaAs,
-# tabulated at G^2 = 3, 4, 8, 11 in units of (2*pi/a)^2, given in Rydberg and
-# converted here to Hartree (SALMON's internal convention) by dividing by 2.
+# Cohen-Bergstresser (1966) form factors (Ry -> Ha)
 # =============================================================================
 RY_TO_HA = 0.5
-
 _CB_FORM_FACTORS_RY = {
-    # G^2 : (V^S [Ry], V^A [Ry])
     3:  (-0.23,  0.07),
-    4:  ( 0.00,  0.05),   # V^S(4) = 0: structure factor vanishes for zincblende
+    4:  ( 0.00,  0.05),
     8:  ( 0.01,  0.00),
     11: ( 0.06,  0.01),
 }
 
-
 def form_factors(material, G2):
-    """Return (V^S, V^A) in Hartree for integer |G|^2 in units of (2*pi/a)^2."""
     if material != 'GaAs':
-        raise ValueError("Only 'GaAs' Cohen-Bergstresser form factors are tabulated")
+        raise ValueError("Only 'GaAs' supported")
     vs_ry, va_ry = _CB_FORM_FACTORS_RY.get(G2, (0.0, 0.0))
     return vs_ry * RY_TO_HA, va_ry * RY_TO_HA
 
+# =============================================================================
+# Simple Cubic Lattice & Basis Generation
+# =============================================================================
+def lattice_vectors_sc(a):
+    """Conventional simple cubic vectors."""
+    return np.array([a, 0, 0]), np.array([0, a, 0]), np.array([0, 0, a])
 
-def lattice_vectors_fcc(a):
-    """Conventional fcc primitive vectors for zincblende (Cohen-Bergstresser convention)."""
-    h = 0.5 * a
-    a1 = np.array([0.0, h,   h])
-    a2 = np.array([h,   0.0, h])
-    a3 = np.array([h,   h,   0.0])
-    return a1, a2, a3
+def reciprocal_lattice_sc(a):
+    """Simple cubic reciprocal lattice."""
+    twopi = 2.0 * np.pi
+    b1 = np.array([twopi/a, 0, 0])
+    b2 = np.array([0, twopi/a, 0])
+    b3 = np.array([0, 0, twopi/a])
+    return b1, b2, b3, a**3
 
-
-def tau_zincblende(a):
-    """Internal two-atom-basis displacement, origin midway between cation/anion."""
-    return np.array([a / 8.0, a / 8.0, a / 8.0])
-
-
-def reciprocal_lattice(a1, a2, a3):
-    """b_i = 2*pi (a_j x a_k)/V,  V = a1.(a2 x a3). Returns (b1,b2,b3,volume)."""
-    a23 = np.cross(a2, a3)
-    a31 = np.cross(a3, a1)
-    a12 = np.cross(a1, a2)
-    volume = np.dot(a1, a23)
-    b1 = (2.0 * np.pi / volume) * a23
-    b2 = (2.0 * np.pi / volume) * a31
-    b3 = (2.0 * np.pi / volume) * a12
-    return b1, b2, b3, volume
-
-
-def build_plane_wave_basis(a_lattice, b_matrix, cutoff_ry):
-    """
-    Fixed (k-independent) set of reciprocal lattice vectors
-    G = m1*b1 + m2*b2 + m3*b3 with |G|^2 <= cutoff [a.u.^2] (same convention
-    as the Fortran build_plane_wave_basis: the cutoff bounds |G|^2 directly).
-    Returns (Gcart[npw,3], G2_units[npw] integer |G|^2 in (2*pi/a)^2 units).
-    """
-    bnorm = norm(b_matrix, axis=1)
-    gcut2 = cutoff_ry
-    nmax = np.ceil(np.sqrt(gcut2) / bnorm).astype(int) + 1
-
-    g2cart_to_units = (a_lattice / (2.0 * np.pi)) ** 2
-
-    Gcart_list = []
-    G2_list = []
-    for m1 in range(-nmax[0], nmax[0] + 1):
-        for m2 in range(-nmax[1], nmax[1] + 1):
-            for m3 in range(-nmax[2], nmax[2] + 1):
-                Gtmp = m1 * b_matrix[0] + m2 * b_matrix[1] + m3 * b_matrix[2]
-                g2_units = np.dot(Gtmp, Gtmp)
-                if g2_units <= gcut2 + 1.0e-8:
-                    Gcart_list.append(Gtmp)
-                    G2_list.append(int(round(g2_units * g2cart_to_units)))
-
-    Gcart = np.array(Gcart_list)
-    G2 = np.array(G2_list, dtype=int)
-    return Gcart, G2
-
+def build_plane_wave_basis_sc(a_lattice, cutoff_ry):
+    """Generate simple cubic G-vectors. Cutoff is on |G|^2 in (2pi/a)^2 units."""
+    twopi_over_a = 2.0 * np.pi / a_lattice
+    nmax = int(np.ceil(np.sqrt(cutoff_ry))) + 1
+    
+    Gcart_list, G2_list = [], []
+    for h in range(-nmax, nmax + 1):
+        for k in range(-nmax, nmax + 1):
+            for l in range(-nmax, nmax + 1):
+                g2_units = h**2 + k**2 + l**2
+                if g2_units <= cutoff_ry + 1.0e-8:
+                    Gcart_list.append(twopi_over_a * np.array([h, k, l]))
+                    G2_list.append(g2_units)
+                    
+    return np.array(Gcart_list), np.array(G2_list, dtype=int)
 
 def monkhorst_pack_grid(b_matrix, num_kgrid):
-    """Uniform MP grid, equal weights 1/nk, no symmetry reduction (matches Fortran ordering)."""
     n1, n2, n3 = num_kgrid
     nk = n1 * n2 * n3
     kpoint = np.zeros((nk, 3))
@@ -137,78 +93,82 @@ def monkhorst_pack_grid(b_matrix, num_kgrid):
                 ik += 1
     return kpoint, kweight
 
-
-def build_hamiltonian(material, kvec, Gcart, a_lattice, tau):
-    """
-    H_{G,G'}(k) = (1/2)|k+G|^2 delta_{G,G'}
-                + V^S(|G-G'|^2) cos((G-G').tau) + i V^A(|G-G'|^2) sin((G-G').tau)
-    """
+# =============================================================================
+# Hamiltonian with Parity Selection Rule (The Band-Folding Trick)
+# =============================================================================
+def build_hamiltonian_sc(material, kvec, Gcart, a_lattice):
     npw = Gcart.shape[0]
     H = np.zeros((npw, npw), dtype=complex)
-    units = (a_lattice / (2.0 * np.pi)) ** 2
+    
+    twopi_over_a = 2.0 * np.pi / a_lattice
+    # Extract integer (h,k,l) indices for all G vectors
+    G_indices = np.round(Gcart / twopi_over_a).astype(int)
 
-    kpg = kvec[None, :] + Gcart                      # (npw,3)
-    diag = 0.5 * np.einsum('ij,ij->i', kpg, kpg)     # (1/2)|k+G|^2
+    kpg = kvec[None, :] + Gcart
+    diag = 0.5 * np.einsum('ij,ij->i', kpg, kpg)
     np.fill_diagonal(H, diag)
 
     for i in range(npw):
         for j in range(i + 1, npw):
-            dG = Gcart[i] - Gcart[j]
-            dG2 = int(round(np.dot(dG, dG) * units))
-            VS, VA = form_factors(material, dG2)
-            if VS == 0.0 and VA == 0.0:
-                continue
-            phase = np.dot(dG, tau)
-            val = complex(VS * np.cos(phase), VA * np.sin(phase))
-            H[i, j] = val
-            H[j, i] = np.conj(val)   # Hermitian: H(j,i) uses dG' = -dG -> phase -> -phase, VS even/VA odd
+            dG_idx = G_indices[i] - G_indices[j]
+            h, k, l = dG_idx
+            
+            # PARITY SELECTION RULE: 
+            # For an FCC lattice embedded in a simple cubic supercell, the structure 
+            # factor is EXACTLY ZERO unless h, k, l are all even or all odd.
+            # This naturally forces the band folding without manual 8-atom summation!
+            if (h % 2 == k % 2) and (k % 2 == l % 2):
+                dG2 = h**2 + k**2 + l**2
+                VS, VA = form_factors(material, dG2)
+                if VS == 0.0 and VA == 0.0:
+                    continue
+                
+                # Phase corresponds to tau = (a/8)(1,1,1)
+                phase = np.pi / 4.0 * (h + k + l)
+                val = complex(VS * np.cos(phase), VA * np.sin(phase))
+                H[i, j] = val
+                H[j, i] = np.conj(val)
+                
     return H
 
-
 def momentum_matrix(kvec, Gcart, evec):
-    """
-    p_mn(k) = sum_G conjg(c_m(G)) (k+G) c_n(G)   (diagonal in the plane-wave basis)
-    evec: (npw, nb) matrix of the lowest `nb` eigenvectors (columns).
-    Returns p_mn[nb,nb,3].
-    """
     npw, nb = evec.shape
-    kpg = kvec[None, :] + Gcart                      # (npw,3)
+    kpg = kvec[None, :] + Gcart
     p_mn = np.zeros((nb, nb, 3), dtype=complex)
     for idir in range(3):
-        Dc = kpg[:, idir][:, None] * evec             # (npw, nb)
+        Dc = kpg[:, idir][:, None] * evec
         p_mn[:, :, idir] = evec.conj().T @ Dc
     return p_mn
 
-
+# =============================================================================
+# Main Execution
+# =============================================================================
 def main():
-    a1, a2, a3 = lattice_vectors_fcc(A_LATTICE_AU)
-    tau = tau_zincblende(A_LATTICE_AU)
-    b1, b2, b3, volume = reciprocal_lattice(a1, a2, a3)
+    a1, a2, a3 = lattice_vectors_sc(A_LATTICE_AU)
+    b1, b2, b3, volume = reciprocal_lattice_sc(A_LATTICE_AU)
     b_matrix = np.array([b1, b2, b3])
 
-    Gcart, G2 = build_plane_wave_basis(A_LATTICE_AU, b_matrix, PW_CUTOFF_RY)
+    Gcart, G2 = build_plane_wave_basis_sc(A_LATTICE_AU, PW_CUTOFF_RY)
     npw = Gcart.shape[0]
 
     kpoint, kweight = monkhorst_pack_grid(b_matrix, NUM_KGRID)
     nk = kpoint.shape[0]
 
     nb = NSTATE
-    nocc = NELEC // 2
+    nocc = NELEC // 2  # 32 / 2 = 16 occupied bands
 
-    print('# EPM (local Cohen-Bergstresser pseudopotential) -- Python/NumPy/SciPy reference')
-    print(f'#   material           = {MATERIAL}')
-    print(f'#   lattice constant a = {A_LATTICE_AU:.5e} a.u.')
-    print(f'#   plane waves        = {npw}')
-    print(f'#   k-points           = {nk}')
-    print(f'#   bands requested    = {nb} / valence electrons = {NELEC}')
+    print(f'# EPM CUBIC CELL (Band-Folded) -- Python Reference')
+    print(f'#   plane waves        = {npw} (Simple Cubic basis)')
+    print(f'#   k-points           = {nk} (Cubic BZ)')
+    print(f'#   bands requested    = {nb} (16 val + 16 cond) / valence e- = {NELEC}')
 
     eigen = np.zeros((nb, nk))
     occup = np.zeros((nb, nk))
     p_tm = np.zeros((nb, nb, 3, nk), dtype=complex)
 
     for ik in range(nk):
-        H = build_hamiltonian(MATERIAL, kpoint[ik], Gcart, A_LATTICE_AU, tau)
-        evals, evecs = eigh(H)              # ascending order, like ZHEEV
+        H = build_hamiltonian_sc(MATERIAL, kpoint[ik], Gcart, A_LATTICE_AU)
+        evals, evecs = eigh(H)              
 
         eigen[:, ik] = evals[:nb]
         occup[:nocc, ik] = 2.0
@@ -222,21 +182,16 @@ def main():
 
     write_epm_files(SYSNAME, OUTPUT_DIR, MATERIAL, kpoint, kweight, eigen, occup, p_tm)
 
-
 # =============================================================================
-# Output writers -- byte-for-byte compatible with gs_info_ssbe::read_k_data /
-# read_eigen_data / read_tm_data (free-format read(fh,*), fixed header-line
-# counts and fixed numeric-field counts per data line; see write_epm_files in
-# src/epm/epm_solver.f90, which this mirrors line-for-line).
+# Output Writers (Byte-for-byte compatible with SALMON gs_info_ssbe)
 # =============================================================================
 def write_epm_files(sysname, outdir, material, kpoint, kweight, eigen, occup, p_tm):
     nk = kpoint.shape[0]
     nb = eigen.shape[0]
 
-    # --- SYSNAME_k.data --- (5 header lines, then "ik kx ky kz weight")
     with open(f'{outdir}{sysname}_k.data', 'w') as f:
         f.write('# k-point data\n')
-        f.write('# generated by EPM (Cohen-Bergstresser local pseudopotential) -- Python reference\n')
+        f.write('# generated by EPM (Cubic Cell / Band-Folded) -- Python reference\n')
         f.write(f'# material = {material}, nk = {nk}\n')
         f.write('# units: kx,ky,kz [a.u.], weight (sums to 1)\n')
         f.write('# ik, kx, ky, kz, weight\n')
@@ -244,20 +199,18 @@ def write_epm_files(sysname, outdir, material, kpoint, kweight, eigen, occup, p_
             f.write('{:6d}{:18.10E}{:18.10E}{:18.10E}{:18.10E}\n'.format(
                 ik + 1, kpoint[ik, 0], kpoint[ik, 1], kpoint[ik, 2], kweight[ik]))
 
-    # --- SYSNAME_eigen.data --- (3 header lines; per ik: 1 header + nb lines)
     with open(f'{outdir}{sysname}_eigen.data', 'w') as f:
         f.write('# eigenvalue data\n')
-        f.write('# generated by EPM (Cohen-Bergstresser local pseudopotential) -- Python reference\n')
+        f.write('# generated by EPM (Cubic Cell / Band-Folded) -- Python reference\n')
         f.write(f'# nk = {nk:6d}, nb = {nb:6d}\n')
         for ik in range(nk):
             f.write(f'# ik = {ik + 1:6d}\n')
             for ib in range(nb):
                 f.write('{:6d}{:18.10E}{:18.10E}\n'.format(ib + 1, eigen[ib, ik], occup[ib, ik]))
 
-    # --- SYSNAME_tm.data --- (3 header lines; block 1 p_tm; 1 header; block 2 rvnl_tm = 0)
     with open(f'{outdir}{sysname}_tm.data', 'w') as f:
         f.write('# transition matrix data\n')
-        f.write('# generated by EPM (Cohen-Bergstresser local pseudopotential) -- Python reference\n')
+        f.write('# generated by EPM (Cubic Cell / Band-Folded) -- Python reference\n')
         f.write('# block 1: p_tm = <u_m|p|u_n>  (ik, ib, jb, Re px, Im px, Re py, Im py, Re pz, Im pz)\n')
         for ik in range(nk):
             for ib in range(nb):
@@ -266,15 +219,14 @@ def write_epm_files(sysname, outdir, material, kpoint, kweight, eigen, occup, p_
                     f.write('{:6d}{:6d}{:6d}{:18.10E}{:18.10E}{:18.10E}{:18.10E}{:18.10E}{:18.10E}\n'.format(
                         ik + 1, ib + 1, jb + 1,
                         px.real, px.imag, py.real, py.imag, pz.real, pz.imag))
-        f.write('# block 2: rvnl_tm = -i[r,Vnl]  (all zero: local pseudopotential, no nonlocal correction)\n')
+        f.write('# block 2: rvnl_tm = -i[r,Vnl]  (all zero: local pseudopotential)\n')
         zeros9 = '{:6d}{:6d}{:6d}' + '{:18.10E}' * 6 + '\n'
         for ik in range(nk):
             for ib in range(nb):
                 for jb in range(nb):
                     f.write(zeros9.format(ik + 1, ib + 1, jb + 1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
 
-    print(f'# EPM (Python reference): wrote ground-state data files for sysname = {sysname}')
-
+    print(f'# EPM (Cubic): wrote ground-state data files for sysname = {sysname}')
 
 if __name__ == '__main__':
     main()
