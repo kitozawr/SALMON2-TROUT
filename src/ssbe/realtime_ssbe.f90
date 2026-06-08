@@ -23,6 +23,8 @@ subroutine main_realtime_ssbe(icomm)
     integer :: nproc, irank, ierr
     integer :: fh_sbe_rt, fh_sbe_rt_energy, fh_sbe_nex
     integer :: nk
+    integer, parameter :: N_KICK = 1
+    real(8) :: dt_kick
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
@@ -67,20 +69,27 @@ subroutine main_realtime_ssbe(icomm)
     end if
 
     call comm_sync_all(icomm)
+    ! Инициализация (один раз перед циклом)
+    call init_adiabatic_dephasing(sbe, gs)
 
     ! Realtime calculation
     do it = 1, nt
         t = dt * it
         
         !---------------------------------------------------------------
-        ! CF4(Gauss-Legendre)+Yoshida unitary step combined with strictly
-        ! CPTP Strang/Hadamard Kuhn-Zurek dephasing: evolve rho from
-        ! t=(it-1)*dt to t=it*dt. The propagator interpolates A(t) at the
-        ! internal Gauss-Legendre/Yoshida sub-nodes from the field values
-        ! at the step endpoints supplied here.
+        ! ETDRK4 Step: Evolve rho from t=(it-1)*dt to t=it*dt
+        ! Uses field A(t) = Ac_ext_t(:, it) as constant on the step
+        ! (matches Taylor-4 convention for direct comparison)
         !---------------------------------------------------------------
-        call dt_evolve_bloch_cf4(sbe, gs, t - dt, dt, Ac_ext_t(:, it - 1), Ac_ext_t(:, it))
-        
+        call dt_evolve_bloch_etdrk4(sbe, gs, Ac_ext_t(:, it), dt)
+        ! 2. Обновление макроскопического разделения Delta x (на каждом шаге)
+        call update_kuehn_dx(sbe, Ac_ext_t(:, it), dt)
+    
+        ! 3. ZHEEV-кик с не-марковской декогеренцией (каждые N_KICK шагов)
+        if (mod(it, N_KICK) == 0) then
+          dt_kick = N_KICK * dt
+        call apply_kuehn_dephasing_kick(sbe, gs, Ac_ext_t(:, it), dt_kick)
+        end if
         !---------------------------------------------------------------
         ! Calculate Current J(t) at t=it*dt (after evolution)
         !---------------------------------------------------------------
