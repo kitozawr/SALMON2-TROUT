@@ -548,11 +548,27 @@ def main():
     parser.add_argument('--energy-range', nargs=2, type=float,
                         default=[-6.0, 12.0], metavar=('EMIN', 'EMAX'),
                         help='Energy window for band structure plot (eV)')
+
+    # Mode shortcuts (each implies the complementary --no-* flag)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--only-sbe', action='store_true',
+                      help='Only SBE RT/energy/nex/nex_k plots — skip band structure '
+                           '(legacy mode, equivalent to --no-bands)')
+    mode.add_argument('--only-bands', action='store_true',
+                      help='Only band structure — skip all RT/nex plots '
+                           '(equivalent to --no-rt)')
+    # Fine-grained toggles kept for backwards compatibility
     parser.add_argument('--no-bands', action='store_true',
                         help='Skip band structure even if *_k.data exists')
     parser.add_argument('--no-rt', action='store_true',
                         help='Skip all RT / nex plots')
     args = parser.parse_args()
+
+    # Resolve mode shortcuts
+    if args.only_sbe:
+        args.no_bands = True
+    if args.only_bands:
+        args.no_rt = True
 
     input_dir  = Path(args.input_dir)
     output_dir = Path(args.output)
