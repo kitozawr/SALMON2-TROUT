@@ -652,13 +652,16 @@ end subroutine houston_dephase
 
 
 ! Population of band `ib_target` resolved per k-point, in the instantaneous
-! Houston (adiabatic) eigenbasis of H_VG(t) = diag(eigen) + A(t).p -- i.e. the
-! same basis used by the CPTP dephasing step. Used to monitor, e.g., the
-! occupation of the lowest conduction band as a function of k during the
-! real-time propagation:
-!   pop_k(ik) = (W^dagger rho W)_{ib_target,ib_target},  H_VG(t) = W diag(E) W^dagger
-! The result is summed over MPI ranks (each rank contributes only its own
-! k-range, zero elsewhere) so that pop_k is identical and complete on every rank.
+! Houston (adiabatic) eigenbasis of H_VG(t).
+!
+! Sorting fix: ZHEEV orders eigenvectors by energy, which swaps bands at avoided
+! crossings and creates spurious population leakage.  We recover physical continuity
+! with an overlap-tracking step: since H_0 = diag(eigen) in the active eigenbasis,
+! U_0 = I, and the overlap matrix S = U_0^dagger W = W.  A greedy bipartite match
+! (pick the globally largest |W_ij|, assign zone_map(j)=i, mask row i + col j,
+! repeat) gives the unique permutation that maximises total overlap and is free of
+! column conflicts even at exact degeneracies.  W is then reordered to W_sorted and
+! the projection rho_H = W_sorted^dagger rho_a W_sorted is computed.
 subroutine calc_houston_population_k(sbe, gs, Ac, ib_target, pop_k, icomm)
     use eigen_lapack, only: eigen_zheev
     implicit none
@@ -669,9 +672,12 @@ subroutine calc_houston_population_k(sbe, gs, Ac, ib_target, pop_k, icomm)
     real(8),                  intent(out) :: pop_k(1:sbe%nk)
     integer,                  intent(in)  :: icomm
 
-    integer :: nba, ia_target, ik, i, j, in, im
+    integer :: nba, ia_target, ik, i, j, in, im, n_done, best_i, best_j
+    real(8)  :: curr_max
+    integer,  allocatable :: zone_map(:)
+    logical,  allocatable :: row_used(:), col_used(:)
     real(8),    allocatable :: pop_local(:), evals(:), p_k_full(:,:,:), eigen_a(:)
-    complex(8), allocatable :: H(:,:), W(:,:), t1(:,:), t2(:,:), rho_a(:,:)
+    complex(8), allocatable :: H(:,:), W(:,:), W_sorted(:,:), t1(:,:), t2(:,:), rho_a(:,:)
 
     nba = sbe%n_active_bands
 
@@ -689,8 +695,9 @@ subroutine calc_houston_population_k(sbe, gs, Ac, ib_target, pop_k, icomm)
     end if
 
     allocate(pop_local(1:sbe%nk))
-    allocate(evals(nba), H(nba,nba), W(nba,nba), t1(nba,nba), t2(nba,nba))
+    allocate(evals(nba), H(nba,nba), W(nba,nba), W_sorted(nba,nba), t1(nba,nba), t2(nba,nba))
     allocate(rho_a(nba,nba), p_k_full(sbe%nb, sbe%nb, 3), eigen_a(nba))
+    allocate(zone_map(nba), row_used(nba), col_used(nba))
     pop_local = 0d0
 
     do ik = sbe%ik_min, sbe%ik_max
@@ -720,14 +727,44 @@ subroutine calc_houston_population_k(sbe, gs, Ac, ib_target, pop_k, icomm)
         ! Diagonalize H_VG: H = W Lambda W^dagger  (LAPACK ZHEEV convention)
         call eigen_zheev(H, evals, W)
 
-        ! rho_Houston = W^dagger rho_a W; diagonal = Houston-basis populations
-        call ZGEMM('C', 'N', nba, nba, nba, dcmplx(1d0,0d0), W,  nba, rho_a, nba, dcmplx(0d0,0d0), t1, nba)
-        call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0,0d0), t1, nba, W,     nba, dcmplx(0d0,0d0), t2, nba)
+        ! Overlap-tracking permutation (greedy bipartite match on |W_ij|).
+        ! H_0 = diag(eigen) => U_0 = I => overlap S = W directly.
+        row_used = .false.
+        col_used = .false.
+        zone_map  = 0
+        do n_done = 1, nba
+            curr_max = -1d0
+            best_i = 1; best_j = 1
+            do j = 1, nba
+                if (col_used(j)) cycle
+                do i = 1, nba
+                    if (row_used(i)) cycle
+                    if (abs(W(i, j)) > curr_max) then
+                        curr_max = abs(W(i, j))
+                        best_i   = i
+                        best_j   = j
+                    end if
+                end do
+            end do
+            zone_map(best_j) = best_i
+            row_used(best_i) = .true.
+            col_used(best_j) = .true.
+        end do
+
+        ! Reorder columns: W_sorted(:, zone_map(j)) = W(:, j)
+        do j = 1, nba
+            W_sorted(:, zone_map(j)) = W(:, j)
+        end do
+
+        ! rho_Houston = W_sorted^dagger rho_a W_sorted
+        call ZGEMM('C', 'N', nba, nba, nba, dcmplx(1d0,0d0), W_sorted, nba, rho_a,    nba, dcmplx(0d0,0d0), t1, nba)
+        call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0,0d0), t1,       nba, W_sorted, nba, dcmplx(0d0,0d0), t2, nba)
         pop_local(ik) = real(t2(ia_target, ia_target))
     end do
 
     call comm_summation(pop_local, pop_k, sbe%nk, icomm)
-    deallocate(pop_local, evals, H, W, t1, t2, rho_a, p_k_full, eigen_a)
+    deallocate(pop_local, evals, H, W, W_sorted, t1, t2, rho_a, p_k_full, eigen_a)
+    deallocate(zone_map, row_used, col_used)
 end subroutine calc_houston_population_k
 
 
