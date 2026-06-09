@@ -669,39 +669,65 @@ subroutine calc_houston_population_k(sbe, gs, Ac, ib_target, pop_k, icomm)
     real(8),                  intent(out) :: pop_k(1:sbe%nk)
     integer,                  intent(in)  :: icomm
 
-    real(8),    allocatable :: pop_local(:)
-    real(8)    :: evals(sbe%nb)
-    complex(8) :: H(sbe%nb, sbe%nb), W(sbe%nb, sbe%nb), t1(sbe%nb, sbe%nb), t2(sbe%nb, sbe%nb)
-    integer :: ik, i, nb
+    integer :: nba, ia_target, ik, i, j, in, im
+    real(8),    allocatable :: pop_local(:), evals(:), p_k_full(:,:,:), eigen_a(:)
+    complex(8), allocatable :: H(:,:), W(:,:), t1(:,:), t2(:,:), rho_a(:,:)
 
-    nb = sbe%nb
+    nba = sbe%n_active_bands
+
+    ! Locate ib_target in the active subspace; return all-zero if it is frozen.
+    ia_target = 0
+    do i = 1, nba
+        if (sbe%active_idx(i) == ib_target) then
+            ia_target = i
+            exit
+        end if
+    end do
+    if (ia_target == 0) then
+        pop_k = 0d0
+        return
+    end if
+
     allocate(pop_local(1:sbe%nk))
+    allocate(evals(nba), H(nba,nba), W(nba,nba), t1(nba,nba), t2(nba,nba))
+    allocate(rho_a(nba,nba), p_k_full(sbe%nb, sbe%nb, 3), eigen_a(nba))
     pop_local = 0d0
 
     do ik = sbe%ik_min, sbe%ik_max
-        H(:, :) = Ac(1) * gs%p_tm_matrix(:, :, 1, ik) &
-                & + Ac(2) * gs%p_tm_matrix(:, :, 2, ik) &
-                & + Ac(3) * gs%p_tm_matrix(:, :, 3, ik)
-        if (sbe%flag_vnl_correction) then
-            H(:, :) = H(:, :) &
-                    & + Ac(1) * gs%rvnl_tm_matrix(:, :, 1, ik) &
-                    & + Ac(2) * gs%rvnl_tm_matrix(:, :, 2, ik) &
-                    & + Ac(3) * gs%rvnl_tm_matrix(:, :, 3, ik)
-        end if
-        do i = 1, nb
-            H(i, i) = H(i, i) + gs%eigen(i, ik)
+        ! Build the full p matrix exactly as the propagator does.
+        p_k_full(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
+        if (sbe%flag_vnl_correction) &
+            p_k_full(:, :, :) = p_k_full(:, :, :) + gs%rvnl_tm_matrix(:, :, :, ik)
+
+        ! Restrict H_VG and rho to the active subspace (mirrors dt_evolve_bloch_cf4).
+        do i = 1, nba
+            eigen_a(i) = gs%eigen(sbe%active_idx(i), ik)
+        end do
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                H(i, j) = Ac(1)*p_k_full(in,im,1) &
+                         + Ac(2)*p_k_full(in,im,2) &
+                         + Ac(3)*p_k_full(in,im,3)
+                rho_a(i, j) = sbe%rho(in, im, ik)
+            end do
+        end do
+        do i = 1, nba
+            H(i, i) = H(i, i) + eigen_a(i)
         end do
 
+        ! Diagonalize H_VG: H = W Lambda W^dagger  (LAPACK ZHEEV convention)
         call eigen_zheev(H, evals, W)
 
-        ! rho~ = W^dagger rho W; diagonal element gives the Houston-basis population
-        call ZGEMM('C', 'N', nb, nb, nb, dcmplx(1d0, 0d0), W,  nb, sbe%rho(:, :, ik), nb, dcmplx(0d0, 0d0), t1, nb)
-        call ZGEMM('N', 'N', nb, nb, nb, dcmplx(1d0, 0d0), t1, nb, W,                 nb, dcmplx(0d0, 0d0), t2, nb)
-        pop_local(ik) = real(t2(ib_target, ib_target))
+        ! rho_Houston = W^dagger rho_a W; diagonal = Houston-basis populations
+        call ZGEMM('C', 'N', nba, nba, nba, dcmplx(1d0,0d0), W,  nba, rho_a, nba, dcmplx(0d0,0d0), t1, nba)
+        call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0,0d0), t1, nba, W,     nba, dcmplx(0d0,0d0), t2, nba)
+        pop_local(ik) = real(t2(ia_target, ia_target))
     end do
 
     call comm_summation(pop_local, pop_k, sbe%nk, icomm)
-    deallocate(pop_local)
+    deallocate(pop_local, evals, H, W, t1, t2, rho_a, p_k_full, eigen_a)
 end subroutine calc_houston_population_k
 
 
