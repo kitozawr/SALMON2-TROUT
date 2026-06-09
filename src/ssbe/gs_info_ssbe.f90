@@ -176,11 +176,11 @@ contains
         real(8) :: tmp(2)
 
         fh = open_filehandle(trim(gs_directory) // trim(sysname) // '_eigen.data', 'old')
-        read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
-        read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
-        read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
+        read(fh, "(a)") dummy
+        read(fh, "(a)") dummy
+        read(fh, "(a)") dummy
         do ik = 1, nk
-            read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
+            read(fh, "(a)") dummy
             do ib = 1, nb
                 read(fh, *) iib, tmp(1:2)
                 if (ib .ne. iib) stop "ib mismatch"
