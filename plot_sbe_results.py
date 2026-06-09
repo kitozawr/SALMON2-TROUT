@@ -40,6 +40,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import argparse
 from scipy.interpolate import RegularGridInterpolator
+import matplotlib.colors as mcolors
 
 plt.switch_backend('Agg')
 
@@ -48,6 +49,17 @@ plt.switch_backend('Agg')
 # ---------------------------------------------------------------------------
 HA_TO_EV = 27.211386245988     # Hartree → eV
 CMAP_POP = 'turbo'             # population heat maps
+
+# ---- Hardcoded default for 2-D colormap scaling ----
+# False = linear (Normalize),  True = logarithmic (LogNorm).
+# Override at runtime with the --log-cmap CLI flag.
+CMAP_LOG_SCALE = False
+
+# ---- Hardcoded default for per-time-step k-space snapshots ----
+# False = only time-k maps are written (automatic, lightweight).
+# True  = additionally write one PNG per time block (can be many files).
+# Override at runtime with the --snapshots CLI flag.
+SNAP_ENABLED = False
 
 # FCC high-symmetry points in reduced coordinates of the conventional cubic BZ.
 # BZ spans [-0.5, 0.5].  Labels correspond to folded FCC points.
@@ -213,16 +225,28 @@ def _interp2d(grid2d, k_a, k_b, factor=8):
     return ka_f, kb_f, interp((KA, KB))
 
 
+def _make_norm(vmin, vmax, log_scale):
+    """Return a matplotlib Normalize or LogNorm for colormap scaling."""
+    if log_scale and vmax > 0:
+        # Floor at 1e-6 × peak so zeros don't break the log scale
+        floor = max(vmax * 1e-6, 1e-30)
+        return mcolors.LogNorm(vmin=max(vmin, floor), vmax=vmax)
+    return mcolors.Normalize(vmin=vmin, vmax=vmax)
+
+
 def _heatmap_ax(ax, k_a, k_b, grid2d, label_a, label_b, title,
-                vmin=None, vmax=None, factor=8):
+                vmin=None, vmax=None, factor=8, log_scale=False):
     if grid2d.size == 0 or np.all(np.isnan(grid2d)):
         ax.set_title(title + " (no data)")
         return None
     ka_f, kb_f, gf = _interp2d(grid2d, k_a, k_b, factor=factor)
+    norm = _make_norm(vmin if vmin is not None else np.nanmin(gf),
+                      vmax if vmax is not None else np.nanmax(gf),
+                      log_scale)
     im = ax.imshow(
         gf.T, origin='lower', aspect='auto',
         extent=[ka_f[0], ka_f[-1], kb_f[0], kb_f[-1]],
-        cmap=CMAP_POP, vmin=vmin, vmax=vmax, interpolation='nearest')
+        cmap=CMAP_POP, norm=norm, interpolation='nearest')
     plt.colorbar(im, ax=ax, shrink=0.8)
     ax.set_xlabel(f'{label_a} [reduced]')
     ax.set_ylabel(f'{label_b} [reduced]')
@@ -230,17 +254,21 @@ def _heatmap_ax(ax, k_a, k_b, grid2d, label_a, label_b, title,
     return im
 
 
-def _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi):
+def _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi,
+                   log_scale=False):
     vmin = np.nanmin(pop3d)
     vmax = max(np.nanmax(pop3d), vmin + 1e-30)
 
     fig, axes = plt.subplots(1, 3, figsize=(19, 5.5))
     _heatmap_ax(axes[0], kx_u, ky_u, _project(pop3d, 2),
-                'kx', 'ky', 'pop_lcb: kx-ky (avg kz)', vmin=vmin, vmax=vmax)
+                'kx', 'ky', 'pop_lcb: kx-ky (avg kz)',
+                vmin=vmin, vmax=vmax, log_scale=log_scale)
     _heatmap_ax(axes[1], kx_u, kz_u, _project(pop3d, 1),
-                'kx', 'kz', 'pop_lcb: kx-kz (avg ky)', vmin=vmin, vmax=vmax)
+                'kx', 'kz', 'pop_lcb: kx-kz (avg ky)',
+                vmin=vmin, vmax=vmax, log_scale=log_scale)
     _heatmap_ax(axes[2], ky_u, kz_u, _project(pop3d, 0),
-                'ky', 'kz', 'pop_lcb: ky-kz (avg kx)', vmin=vmin, vmax=vmax)
+                'ky', 'kz', 'pop_lcb: ky-kz (avg kx)',
+                vmin=vmin, vmax=vmax, log_scale=log_scale)
 
     fig.suptitle(f'Houston-basis LCB population,  t = {t_val:.6f} {t_unit}')
     fig.tight_layout(rect=[0, 0, 1, 0.94])
@@ -260,13 +288,16 @@ def _bin_edges(centers):
     return edges
 
 
-def _save_kt_map(times, t_unit, k_vals, label_k, marginals, output_dir, dpi):
+def _save_kt_map(times, t_unit, k_vals, label_k, marginals, output_dir, dpi,
+                 log_scale=False):
     if not marginals:
         return
     mat = np.array(marginals).T           # (nk_1d, nt)
+    vmin_m, vmax_m = float(np.nanmin(mat)), float(np.nanmax(mat))
+    norm = _make_norm(vmin_m, max(vmax_m, vmin_m + 1e-30), log_scale)
     fig, ax = plt.subplots(figsize=(max(8, len(times) * 0.08 + 2), 5))
     im = ax.pcolormesh(_bin_edges(np.asarray(times)), _bin_edges(k_vals),
-                       mat, cmap=CMAP_POP, shading='flat')
+                       mat, cmap=CMAP_POP, norm=norm, shading='flat')
     plt.colorbar(im, ax=ax, label='population_lcb (avg)')
     ax.set_xlabel(f'time [{t_unit}]')
     ax.set_ylabel(f'{label_k} [reduced]')
@@ -278,8 +309,10 @@ def _save_kt_map(times, t_unit, k_vals, label_k, marginals, output_dir, dpi):
     print(f"  saved {out.name}")
 
 
-def plot_nex_k(filepath, output_dir, dpi=150):
-    print(f"Processing {filepath.name} ...")
+def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False):
+    print(f"Processing {filepath.name}  "
+          f"(cmap={'log' if log_scale else 'linear'}, "
+          f"snapshots={'on' if snapshots else 'off'}) ...")
     kx_u = ky_u = kz_u = ix = iy = iz = None
     pop3d = None
     times, marg_kx, marg_ky, marg_kz = [], [], [], []
@@ -294,7 +327,9 @@ def plot_nex_k(filepath, output_dir, dpi=150):
             pop3d = np.empty((len(kx_u), len(ky_u), len(kz_u)))
         pop3d.fill(np.nan)
         pop3d[ix, iy, iz] = pop
-        _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi)
+        if snapshots:
+            _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi,
+                           log_scale=log_scale)
         times.append(t_val)
         marg_kx.append(np.nanmean(pop3d, axis=(1, 2)))
         marg_ky.append(np.nanmean(pop3d, axis=(0, 2)))
@@ -305,9 +340,12 @@ def plot_nex_k(filepath, output_dir, dpi=150):
         return
 
     print(f"  writing time-k maps ({n_blocks} time steps) ...")
-    _save_kt_map(times, t_unit_last, kx_u, 'kx', marg_kx, output_dir, dpi)
-    _save_kt_map(times, t_unit_last, ky_u, 'ky', marg_ky, output_dir, dpi)
-    _save_kt_map(times, t_unit_last, kz_u, 'kz', marg_kz, output_dir, dpi)
+    _save_kt_map(times, t_unit_last, kx_u, 'kx', marg_kx, output_dir, dpi,
+                 log_scale=log_scale)
+    _save_kt_map(times, t_unit_last, ky_u, 'ky', marg_ky, output_dir, dpi,
+                 log_scale=log_scale)
+    _save_kt_map(times, t_unit_last, kz_u, 'kz', marg_kz, output_dir, dpi,
+                 log_scale=log_scale)
 
 
 # ===========================================================================
@@ -562,6 +600,17 @@ def main():
                         help='Skip band structure even if *_k.data exists')
     parser.add_argument('--no-rt', action='store_true',
                         help='Skip all RT / nex plots')
+    parser.add_argument('--log-cmap', action='store_true',
+                        default=CMAP_LOG_SCALE,
+                        help='Use logarithmic colormap scaling for 2-D population '
+                             'plots (snapshots + time-k maps). '
+                             f'Hardcoded default: CMAP_LOG_SCALE = {CMAP_LOG_SCALE}')
+    parser.add_argument('--snapshots', action='store_true',
+                        default=SNAP_ENABLED,
+                        help='Write one k-space snapshot PNG per time block in '
+                             'nex_k (3 projected planes). Time-k maps are always '
+                             'written regardless of this flag. '
+                             f'Hardcoded default: SNAP_ENABLED = {SNAP_ENABLED}')
     args = parser.parse_args()
 
     # Resolve mode shortcuts
@@ -585,7 +634,8 @@ def main():
 
         for f in sorted(input_dir.glob('*_sbe_nex_k.data')):
             found_any = True
-            plot_nex_k(f, output_dir, dpi=args.dpi)
+            plot_nex_k(f, output_dir, dpi=args.dpi,
+                       log_scale=args.log_cmap, snapshots=args.snapshots)
 
     # --- Band structure -------------------------------------------------
     if not args.no_bands:
