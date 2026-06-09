@@ -140,7 +140,7 @@ subroutine main_realtime_ssbe(icomm)
         ! Written far less often than _sbe_nex.data (out_projection_k_step,
         ! default 10x out_projection_step) since this output scales with nk.
         if (mod(it, out_projection_k_step) == 0) then
-            call calc_houston_population_k(sbe, gs, Ac_ext_t(:, it), ib_lcb, pop_k, icomm)
+            call calc_bloch_population_k(sbe, gs, Ac_ext_t(:, it), ib_lcb, pop_k, icomm)
             if (irank == 0) then
                 call write_sbe_nex_k_block(fh_sbe_nex_k, t, nk, gs%kpoint, pop_k)
             end if

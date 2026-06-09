@@ -8,7 +8,7 @@ module bloch_solver_ssbe
 
     private
     public :: s_sbe_bloch_solver, init_sbe_bloch_solver, calc_current_bloch, &
-              dt_evolve_bloch_cf4, calc_trace, calc_energy, calc_houston_population_k
+              dt_evolve_bloch_cf4, calc_trace, calc_energy, calc_bloch_population_k
 
     type s_sbe_bloch_solver
         !k-points for real-time SBE calculation
@@ -651,18 +651,22 @@ subroutine houston_dephase(nba, rho, H, p_active, Ac, X, lambda, tau, V)
 end subroutine houston_dephase
 
 
-! Population of band `ib_target` resolved per k-point, in the instantaneous
-! Houston (adiabatic) eigenbasis of H_VG(t).
+! Population of band `ib_target` resolved per k-point, in the stationary
+! Bloch (crystal-gauge) eigenbasis.
 !
-! Sorting fix: ZHEEV orders eigenvectors by energy, which swaps bands at avoided
-! crossings and creates spurious population leakage.  We recover physical continuity
-! with an overlap-tracking step: since H_0 = diag(eigen) in the active eigenbasis,
-! U_0 = I, and the overlap matrix S = U_0^dagger W = W.  A greedy bipartite match
-! (pick the globally largest |W_ij|, assign zone_map(j)=i, mask row i + col j,
-! repeat) gives the unique permutation that maximises total overlap and is free of
-! column conflicts even at exact degeneracies.  W is then reordered to W_sorted and
-! the projection rho_H = W_sorted^dagger rho_a W_sorted is computed.
-subroutine calc_houston_population_k(sbe, gs, Ac, ib_target, pop_k, icomm)
+! In the Velocity Gauge (VG) the SBE propagates rho(k,t) at the fixed grid
+! crystal momentum k, while the physical electrons are displaced to
+!   k'(t) = k - A(t)    (A in a.u., e/hbar = 1)
+! The crystal-gauge population at k requires projecting onto the eigenstates
+! of H_0(k'), the field-free Hamiltonian evaluated at the shifted momentum.
+! To first order in A(t) (valid when |A(t)| << BZ size):
+!   H_0(k - A(t)) ≈ H_0(k) + (k'-k)·∂H_0/∂k = H_0(k) - A(t)·p(k)
+!                 = diag(eigen) - A·p   (note: MINUS sign, unlike Houston + sign)
+! We diagonalise H_crystal to get U_shifted, apply a greedy bipartite match
+! on |U_shifted_ij| to correct the energy-sort ambiguity of ZHEEV at near-
+! degeneracies, then form rho_crystal = U_sorted^dagger rho_VG U_sorted and
+! return Re(rho_crystal[ia_target, ia_target]).
+subroutine calc_bloch_population_k(sbe, gs, Ac, ib_target, pop_k, icomm)
     use eigen_lapack, only: eigen_zheev
     implicit none
     type(s_sbe_bloch_solver), intent(in)  :: sbe
@@ -714,9 +718,10 @@ subroutine calc_houston_population_k(sbe, gs, Ac, ib_target, pop_k, icomm)
             im = sbe%active_idx(j)
             do i = 1, nba
                 in = sbe%active_idx(i)
-                H(i, j) = Ac(1)*p_k_full(in,im,1) &
-                         + Ac(2)*p_k_full(in,im,2) &
-                         + Ac(3)*p_k_full(in,im,3)
+                ! H_0(k') = H_0(k) - A·p  (crystal-gauge shift k' = k - A)
+                H(i, j) = -Ac(1)*p_k_full(in,im,1) &
+                          - Ac(2)*p_k_full(in,im,2) &
+                          - Ac(3)*p_k_full(in,im,3)
                 rho_a(i, j) = sbe%rho(in, im, ik)
             end do
         end do
@@ -724,11 +729,11 @@ subroutine calc_houston_population_k(sbe, gs, Ac, ib_target, pop_k, icomm)
             H(i, i) = H(i, i) + eigen_a(i)
         end do
 
-        ! Diagonalize H_VG: H = W Lambda W^dagger  (LAPACK ZHEEV convention)
+        ! Diagonalize H_crystal = H_0(k-A): H = W Lambda W^dagger  (LAPACK ZHEEV)
         call eigen_zheev(H, evals, W)
 
         ! Overlap-tracking permutation (greedy bipartite match on |W_ij|).
-        ! H_0 = diag(eigen) => U_0 = I => overlap S = W directly.
+        ! H_0(k) = diag(eigen) => reference U_0 = I => overlap S = W directly.
         row_used = .false.
         col_used = .false.
         zone_map  = 0
@@ -756,7 +761,7 @@ subroutine calc_houston_population_k(sbe, gs, Ac, ib_target, pop_k, icomm)
             W_sorted(:, zone_map(j)) = W(:, j)
         end do
 
-        ! rho_Houston = W_sorted^dagger rho_a W_sorted
+        ! rho_crystal = U_sorted^dagger rho_VG U_sorted
         call ZGEMM('C', 'N', nba, nba, nba, dcmplx(1d0,0d0), W_sorted, nba, rho_a,    nba, dcmplx(0d0,0d0), t1, nba)
         call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0,0d0), t1,       nba, W_sorted, nba, dcmplx(0d0,0d0), t2, nba)
         pop_local(ik) = real(t2(ia_target, ia_target))
@@ -765,7 +770,7 @@ subroutine calc_houston_population_k(sbe, gs, Ac, ib_target, pop_k, icomm)
     call comm_summation(pop_local, pop_k, sbe%nk, icomm)
     deallocate(pop_local, evals, H, W, W_sorted, t1, t2, rho_a, p_k_full, eigen_a)
     deallocate(zone_map, row_used, col_used)
-end subroutine calc_houston_population_k
+end subroutine calc_bloch_population_k
 
 
 end module
