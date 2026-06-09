@@ -1,53 +1,70 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Plotter for SALMON SBE real-time output files.
+Unified plotter for SALMON-SBE real-time output and EPM/DFT ground-state files.
 
-Drop this script into a calculation directory (next to SYSNAME_sbe_rt.data,
-SYSNAME_sbe_rt_energy.data, SYSNAME_sbe_nex.data, SYSNAME_sbe_nex_k.data, ...)
-and run it.  It scans the directory for these files, plots:
+Drop into a calculation directory and run:
 
-  - SYSNAME_sbe_rt_energy.data  : total energy vs time
-  - SYSNAME_sbe_nex.data        : number of excited electrons/holes vs time
-  - SYSNAME_sbe_nex_k.data      : per-k Houston-basis LCB population
-        * snapshot PNG per saved time: three 2-D projections
-          kx-ky, kx-kz, ky-kz (averaged over passive k-direction)
-          with bicubic interpolation – one PNG per moment, time in filename
-        * time-momentum map PNGs: one for each of kx/ky/kz showing
-          population vs (k_axis, time) by marginalising the other two
-          k-directions.  All time steps combined in a single image.
+    python3 plot_sbe_results.py                     # auto-detect everything
+    python3 plot_sbe_results.py --downsample 200    # thin out large RT curves
+    python3 plot_sbe_results.py --band-path L Gamma X W K
 
-Memory strategy: SYSNAME_sbe_nex_k.data can be many GB.  The file is read
-line-by-line; only one block's data is live at a time.  Snapshot plots are
-saved immediately so the array can be reused.  Time-momentum maps accumulate
-only three small 1-D marginals per time step (one number per unique k-value),
-which is negligible regardless of nk.
+What is plotted
+---------------
+  *_sbe_rt.data          : fields + current vs time  (downsampled if requested)
+  *_sbe_rt_energy.data   : total energy vs time
+  *_sbe_nex.data         : excited electron count vs time
+  *_sbe_nex_k.data       : per-k Houston-basis LCB population:
+                             snapshot PNGs (3 projected planes) + time-k maps
+  *_k.data + *_eigen.data: band structure along the requested path
+                             k in reduced coords, energy shifted to VBM = 0 eV
 
-No interactive windows are opened (Agg backend); everything is saved as PNG
-into an output directory.
+Memory strategy
+---------------
+  Large *_sbe_rt*.data files are read with downsampling (--downsample N keeps
+  every N-th data line).
+  *_sbe_nex_k.data is read line-by-line; only one time block lives in RAM.
+  Band eigenvalues are read fully (typically < 10 MB).
+
+k-vector units
+--------------
+  After the EPM Python fix (PR #34), *_k.data contains dimensionless reduced
+  coordinates kx/(2π/a), BZ ∈ [-0.5, 0.5].  nex_k writes gs%kpoint verbatim,
+  so nex_k k-values are also in reduced units.  All k-axis labels say "reduced".
 """
 
 import re
+import itertools
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
 from pathlib import Path
 import argparse
 from scipy.interpolate import RegularGridInterpolator
-from scipy.ndimage import zoom as ndimage_zoom
 
 plt.switch_backend('Agg')
 
 # ---------------------------------------------------------------------------
-# Colourmap: turbo (perceptually-uniform rainbow, good for population maps)
+# Constants
 # ---------------------------------------------------------------------------
-CMAP_POP   = 'turbo'   # k-space snapshot and time-k maps
-CMAP_CURVE = None      # line plots (default matplotlib colour cycle)
+HA_TO_EV = 27.211386245988     # Hartree → eV
+CMAP_POP = 'turbo'             # population heat maps
+
+# FCC high-symmetry points in reduced coordinates of the conventional cubic BZ.
+# BZ spans [-0.5, 0.5].  Labels correspond to folded FCC points.
+HS_POINTS = {
+    'Gamma': [ 0.000,  0.000,  0.000],
+    'L':     [ 0.500,  0.500,  0.500],
+    'X':     [ 0.000,  0.500,  0.500],
+    'W':     [ 0.500,  0.250, -0.250],   # [0.5,0.25,0.75] wrapped to BZ
+    'K':     [ 0.375,  0.375, -0.250],   # [0.375,0.375,0.75] wrapped
+    'U':     [-0.375,  0.250, -0.375],   # [0.625,0.25,0.625] wrapped
+}
+DEFAULT_BAND_PATH = ['L', 'Gamma', 'X', 'W', 'K']
 
 
-# ---------------------------------------------------------------------------
-# Helpers shared by energy / nex plots
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Shared column-file helpers
+# ===========================================================================
 
 def parse_header(header_line):
     """Extract column names from a numbered header, ignoring units in []."""
@@ -55,23 +72,31 @@ def parse_header(header_line):
 
 
 def find_header(filepath):
-    """Return the first comment line that carries column-index 1 (e.g. '# 1:Time...')."""
+    """Return first comment line that carries column index 1 (e.g. '# 1:Time...')."""
     with open(filepath, 'r') as f:
-        for i, line in enumerate(f):
+        for line in f:
             if re.match(r'#\s*1\s*:\s*\S', line):
-                return line.strip(), i
+                return line.strip()
     raise ValueError(f"Numbered header line not found in {filepath}")
 
 
-def load_columns(filepath):
-    """Load a whitespace-separated SBE .data file into (column_names, 2-D array)."""
-    header_line, _ = find_header(filepath)
+def load_columns_streaming(filepath, downsample=1):
+    """
+    Read a whitespace-separated SBE .data file.
+    With downsample > 1 only every N-th data line is kept (cheap for GB files).
+    Returns (column_names, 2-D numpy array).
+    """
+    header_line = find_header(filepath)
     column_names = parse_header(header_line)
     rows = []
+    data_count = 0
     with open(filepath, 'r') as f:
         for line in f:
             s = line.strip()
             if not s or s.startswith('#'):
+                continue
+            data_count += 1
+            if data_count % downsample != 0:
                 continue
             try:
                 rows.append([float(x) for x in s.split()])
@@ -81,56 +106,53 @@ def load_columns(filepath):
     return column_names, data
 
 
-def plot_xy(time, values, time_name, col_name, output_path, dpi=150):
+# ===========================================================================
+# RT line plots  (*_sbe_rt.data, *_sbe_rt_energy.data, *_sbe_nex.data)
+# ===========================================================================
+
+def _plot_xy(time, values, time_name, col_name, output_path, dpi=150):
     if len(time) == 0:
         print(f"  (skip) no data for {col_name}")
         return
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.plot(time, values, linewidth=1.0)
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(time, values, linewidth=0.8)
     ax.set_xlabel(time_name)
     ax.set_ylabel(col_name)
-    ax.set_title(f'{col_name} vs {time_name}')
+    ax.set_title(f'{col_name}  vs  {time_name}')
     ax.grid(True, alpha=0.3, linestyle='--')
     fig.tight_layout()
     safe_col  = re.sub(r'[^\w\-]', '_', col_name)
     safe_time = re.sub(r'[^\w\-]', '_', time_name)
-    out_file = output_path / f'{safe_col}_vs_{safe_time}.png'
-    fig.savefig(out_file, dpi=dpi, bbox_inches='tight')
+    out = output_path / f'{safe_col}_vs_{safe_time}.png'
+    fig.savefig(out, dpi=dpi, bbox_inches='tight')
     plt.close(fig)
-    print(f"  saved {out_file.name}")
+    print(f"  saved {out.name}")
 
 
-def plot_energy_and_nex(filepath, output_dir, dpi=150):
-    print(f"Processing {filepath.name} ...")
-    cols, data = load_columns(filepath)
+def plot_rt_file(filepath, output_dir, downsample=1, dpi=150):
+    """Plot all non-time columns in a columnar SBE .data file."""
+    print(f"Processing {filepath.name}  (downsample={downsample}) ...")
+    cols, data = load_columns_streaming(filepath, downsample=downsample)
     if data.size == 0:
         print("  (skip) no data")
         return
+    n_kept = data.shape[0]
+    if downsample > 1:
+        print(f"  {n_kept:,} lines kept after downsampling")
     time_name, time = cols[0], data[:, 0]
-    for j in range(1, len(cols)):
-        plot_xy(time, data[:, j], time_name, cols[j], output_dir, dpi=dpi)
+    for j in range(1, min(len(cols), data.shape[1])):
+        _plot_xy(time, data[:, j], time_name, cols[j], output_dir, dpi=dpi)
 
 
-# ---------------------------------------------------------------------------
-# Streaming nex_k parser
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Streaming nex_k  (*_sbe_nex_k.data)
+# ===========================================================================
 
 def _iter_nex_k_blocks(filepath):
-    """
-    Generator: yield (t_value, t_unit, kpoints[nk,3], pop[nk]) one block at a
-    time while reading *filepath* line-by-line.  Only the current block is
-    kept in memory at once.
-    """
+    """Yield (t_val, t_unit, kpoints[nk,3], pop[nk]) one block at a time."""
     time_re = re.compile(r'#\s*t\s*=\s*([-+\d.eEdD]+)\s*(\S*)')
-    t_value = None
-    t_unit  = ''
+    t_value, t_unit = None, ''
     kx, ky, kz, pop = [], [], [], []
-
-    def _flush():
-        if t_value is not None and kx:
-            yield (t_value, t_unit,
-                   np.column_stack([kx, ky, kz]),
-                   np.asarray(pop, dtype=float))
 
     with open(filepath, 'r') as f:
         for line in f:
@@ -139,7 +161,6 @@ def _iter_nex_k_blocks(filepath):
                 continue
             m = time_re.match(s)
             if m:
-                # flush previous block
                 if t_value is not None and kx:
                     yield (t_value, t_unit,
                            np.column_stack([kx, ky, kz]),
@@ -154,31 +175,18 @@ def _iter_nex_k_blocks(filepath):
             if len(parts) < 5:
                 continue
             try:
-                kx.append(float(parts[1]))
-                ky.append(float(parts[2]))
-                kz.append(float(parts[3]))
-                pop.append(float(parts[4]))
+                kx.append(float(parts[1])); ky.append(float(parts[2]))
+                kz.append(float(parts[3])); pop.append(float(parts[4]))
             except ValueError:
                 continue
 
-    # last block
     if t_value is not None and kx:
         yield (t_value, t_unit,
                np.column_stack([kx, ky, kz]),
                np.asarray(pop, dtype=float))
 
 
-# ---------------------------------------------------------------------------
-# K-grid helpers
-# ---------------------------------------------------------------------------
-
 def _build_grid_info(kpoints):
-    """
-    From a flat list of k-points (nk,3) discover the regular 3-D grid
-    structure and return index arrays ix, iy, iz so that pop[ik] belongs
-    to cell (ix[ik], iy[ik], iz[ik]).
-    """
-    rtol = 1e-9
     kx_u = np.unique(np.round(kpoints[:, 0], 9))
     ky_u = np.unique(np.round(kpoints[:, 1], 9))
     kz_u = np.unique(np.round(kpoints[:, 2], 9))
@@ -188,192 +196,105 @@ def _build_grid_info(kpoints):
     return kx_u, ky_u, kz_u, ix, iy, iz
 
 
-def _fill_3d(pop, ix, iy, iz, nx, ny, nz):
-    """Scatter flat pop array into a 3-D grid; cells with no data stay NaN."""
-    g = np.full((nx, ny, nz), np.nan)
-    g[ix, iy, iz] = pop
-    return g
-
-
 def _project(g3d, axis):
-    """Average over *axis* ignoring NaN; returns 2-D array."""
     return np.nanmean(g3d, axis=axis)
 
 
 def _interp2d(grid2d, k_a, k_b, factor=8):
-    """
-    Bicubic interpolation of a 2-D population grid onto a finer mesh.
-    Returns (ka_fine, kb_fine, grid_fine).
-    """
-    na, nb = grid2d.shape
-    if na < 2 or nb < 2:
+    na, nb_ = grid2d.shape
+    if na < 2 or nb_ < 2:
         return k_a, k_b, grid2d
-
-    # Replace NaN with nearest-neighbour fill before interpolation
     filled = np.where(np.isnan(grid2d), 0.0, grid2d)
-
     interp = RegularGridInterpolator(
         (k_a, k_b), filled, method='linear', bounds_error=False, fill_value=None)
-
-    ka_fine = np.linspace(k_a[0], k_a[-1], na * factor)
-    kb_fine = np.linspace(k_b[0], k_b[-1], nb * factor)
-    KA, KB  = np.meshgrid(ka_fine, kb_fine, indexing='ij')
-    grid_fine = interp((KA, KB))
-    return ka_fine, kb_fine, grid_fine
+    ka_f = np.linspace(k_a[0], k_a[-1], na  * factor)
+    kb_f = np.linspace(k_b[0], k_b[-1], nb_ * factor)
+    KA, KB = np.meshgrid(ka_f, kb_f, indexing='ij')
+    return ka_f, kb_f, interp((KA, KB))
 
 
 def _heatmap_ax(ax, k_a, k_b, grid2d, label_a, label_b, title,
                 vmin=None, vmax=None, factor=8):
-    """
-    Draw a projected + bicubic-interpolated heatmap on *ax*.
-    k_a → horizontal axis, k_b → vertical axis.
-    """
     if grid2d.size == 0 or np.all(np.isnan(grid2d)):
         ax.set_title(title + " (no data)")
         return None
-
     ka_f, kb_f, gf = _interp2d(grid2d, k_a, k_b, factor=factor)
-
-    # imshow: rows = kb (vertical), cols = ka (horizontal), origin='lower'
-    # extent: [ka_min, ka_max, kb_min, kb_max]
     im = ax.imshow(
-        gf.T,                       # .T so rows=kb, cols=ka
-        origin='lower',
-        aspect='auto',
+        gf.T, origin='lower', aspect='auto',
         extent=[ka_f[0], ka_f[-1], kb_f[0], kb_f[-1]],
-        cmap=CMAP_POP,
-        vmin=vmin, vmax=vmax,
-        interpolation='nearest',
-    )
+        cmap=CMAP_POP, vmin=vmin, vmax=vmax, interpolation='nearest')
     plt.colorbar(im, ax=ax, shrink=0.8)
-    ax.set_xlabel(f'{label_a} [a.u.]')
-    ax.set_ylabel(f'{label_b} [a.u.]')
+    ax.set_xlabel(f'{label_a} [reduced]')
+    ax.set_ylabel(f'{label_b} [reduced]')
     ax.set_title(title)
     return im
 
 
-# ---------------------------------------------------------------------------
-# Snapshot: 3 projected planes for one time step
-# ---------------------------------------------------------------------------
-
 def _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi):
-    """
-    Save one PNG with three heatmap panels (projected kx-ky, kx-kz, ky-kz).
-    pop3d has shape (nx, ny, nz) with axes in (kx, ky, kz) order.
-    """
     vmin = np.nanmin(pop3d)
-    vmax = max(np.nanmax(pop3d), vmin + 1e-30)   # avoid zero-range cmap
+    vmax = max(np.nanmax(pop3d), vmin + 1e-30)
 
     fig, axes = plt.subplots(1, 3, figsize=(19, 5.5))
-
-    # kx-ky: average over kz (axis 2)
     _heatmap_ax(axes[0], kx_u, ky_u, _project(pop3d, 2),
-                'kx', 'ky', 'pop_lcb: kx-ky (avg kz)',
-                vmin=vmin, vmax=vmax)
-
-    # kx-kz: average over ky (axis 1)
+                'kx', 'ky', 'pop_lcb: kx-ky (avg kz)', vmin=vmin, vmax=vmax)
     _heatmap_ax(axes[1], kx_u, kz_u, _project(pop3d, 1),
-                'kx', 'kz', 'pop_lcb: kx-kz (avg ky)',
-                vmin=vmin, vmax=vmax)
-
-    # ky-kz: average over kx (axis 0)
+                'kx', 'kz', 'pop_lcb: kx-kz (avg ky)', vmin=vmin, vmax=vmax)
     _heatmap_ax(axes[2], ky_u, kz_u, _project(pop3d, 0),
-                'ky', 'kz', 'pop_lcb: ky-kz (avg kx)',
-                vmin=vmin, vmax=vmax)
+                'ky', 'kz', 'pop_lcb: ky-kz (avg kx)', vmin=vmin, vmax=vmax)
 
     fig.suptitle(f'Houston-basis LCB population,  t = {t_val:.6f} {t_unit}')
     fig.tight_layout(rect=[0, 0, 1, 0.94])
-
-    safe_t = f'{t_val:.6f}'.replace('-', 'm').replace('+', 'p')
-    out_file = output_dir / f'nex_k_snap_t{safe_t}{t_unit}.png'
-    fig.savefig(out_file, dpi=dpi, bbox_inches='tight')
+    safe_t  = f'{t_val:.6f}'.replace('-', 'm').replace('+', 'p')
+    out = output_dir / f'nex_k_snap_t{safe_t}{t_unit}.png'
+    fig.savefig(out, dpi=dpi, bbox_inches='tight')
     plt.close(fig)
-    print(f"  saved {out_file.name}")
-
-
-# ---------------------------------------------------------------------------
-# Time–k maps (one per axis direction)
-# ---------------------------------------------------------------------------
-
-def _save_kt_map(times, t_unit, k_vals, label_k, marginals, output_dir, dpi):
-    """
-    2-D colour map: horizontal axis = time, vertical axis = k_axis.
-    *marginals* is a list of 1-D arrays (one per time step), each of length
-    len(k_vals) = population averaged over the other two k-directions.
-    """
-    if not marginals:
-        return
-    mat = np.array(marginals).T           # shape (nk_1d, nt)
-    nt  = len(times)
-    nk  = len(k_vals)
-
-    fig, ax = plt.subplots(figsize=(max(8, nt * 0.08 + 2), 5))
-
-    # Use pcolormesh so each cell is exactly one (time, k) bin
-    t_edges = _bin_edges(np.asarray(times))
-    k_edges = _bin_edges(k_vals)
-    im = ax.pcolormesh(t_edges, k_edges, mat, cmap=CMAP_POP, shading='flat')
-    plt.colorbar(im, ax=ax, label='population_lcb (avg)')
-    ax.set_xlabel(f'time [{t_unit}]')
-    ax.set_ylabel(f'{label_k} [a.u.]')
-    ax.set_title(f'LCB population vs time and {label_k}')
-    fig.tight_layout()
-
-    out_file = output_dir / f'nex_k_ktmap_{label_k}.png'
-    fig.savefig(out_file, dpi=dpi, bbox_inches='tight')
-    plt.close(fig)
-    print(f"  saved {out_file.name}")
+    print(f"  saved {out.name}")
 
 
 def _bin_edges(centers):
-    """Convert bin centres to edges (one extra element)."""
     c = np.asarray(centers, dtype=float)
-    if len(c) == 1:
-        delta = 1.0
-    else:
-        delta = np.diff(c)
-        delta = np.append(delta, delta[-1])
+    delta = np.append(np.diff(c), np.diff(c)[-1]) if len(c) > 1 else np.array([1.0])
     edges = np.empty(len(c) + 1)
-    edges[0]  = c[0]  - 0.5 * (delta[0] if len(c) > 1 else delta)
+    edges[0]  = c[0]  - 0.5 * delta[0]
     edges[1:] = c + 0.5 * delta
     return edges
 
 
-# ---------------------------------------------------------------------------
-# Main nex_k driver (streaming)
-# ---------------------------------------------------------------------------
+def _save_kt_map(times, t_unit, k_vals, label_k, marginals, output_dir, dpi):
+    if not marginals:
+        return
+    mat = np.array(marginals).T           # (nk_1d, nt)
+    fig, ax = plt.subplots(figsize=(max(8, len(times) * 0.08 + 2), 5))
+    im = ax.pcolormesh(_bin_edges(np.asarray(times)), _bin_edges(k_vals),
+                       mat, cmap=CMAP_POP, shading='flat')
+    plt.colorbar(im, ax=ax, label='population_lcb (avg)')
+    ax.set_xlabel(f'time [{t_unit}]')
+    ax.set_ylabel(f'{label_k} [reduced]')
+    ax.set_title(f'LCB population vs time and {label_k}')
+    fig.tight_layout()
+    out = output_dir / f'nex_k_ktmap_{label_k}.png'
+    fig.savefig(out, dpi=dpi, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  saved {out.name}")
+
 
 def plot_nex_k(filepath, output_dir, dpi=150):
     print(f"Processing {filepath.name} ...")
-
-    # Grid structure (filled from first block)
-    kx_u = ky_u = kz_u = None
-    ix = iy = iz = None
-    nx = ny = nz = 0
-    pop3d = None   # reused each block
-
-    # Marginal accumulators (small, kept for all time steps)
-    times = []
+    kx_u = ky_u = kz_u = ix = iy = iz = None
+    pop3d = None
+    times, marg_kx, marg_ky, marg_kz = [], [], [], []
     t_unit_last = ''
-    marg_kx, marg_ky, marg_kz = [], [], []
-
     n_blocks = 0
+
     for t_val, t_unit, kpoints, pop in _iter_nex_k_blocks(filepath):
         t_unit_last = t_unit
         n_blocks   += 1
-
         if kx_u is None:
             kx_u, ky_u, kz_u, ix, iy, iz = _build_grid_info(kpoints)
-            nx, ny, nz = len(kx_u), len(ky_u), len(kz_u)
-            pop3d = np.empty((nx, ny, nz))
-
+            pop3d = np.empty((len(kx_u), len(ky_u), len(kz_u)))
         pop3d.fill(np.nan)
         pop3d[ix, iy, iz] = pop
-
-        # Snapshot plot – save immediately, reuse pop3d next iteration
         _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi)
-
-        # Accumulate marginals for kt-maps
         times.append(t_val)
         marg_kx.append(np.nanmean(pop3d, axis=(1, 2)))
         marg_ky.append(np.nanmean(pop3d, axis=(0, 2)))
@@ -383,46 +304,311 @@ def plot_nex_k(filepath, output_dir, dpi=150):
         print("  (skip) no data blocks found")
         return
 
-    # Time–k maps
     print(f"  writing time-k maps ({n_blocks} time steps) ...")
     _save_kt_map(times, t_unit_last, kx_u, 'kx', marg_kx, output_dir, dpi)
     _save_kt_map(times, t_unit_last, ky_u, 'ky', marg_ky, output_dir, dpi)
     _save_kt_map(times, t_unit_last, kz_u, 'kz', marg_kz, output_dir, dpi)
 
 
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Band structure  (*_k.data + *_eigen.data)
+# ===========================================================================
+
+def _load_kpoints(kfile):
+    """
+    Parse SYSNAME_k.data.
+    k-vectors are in reduced (dimensionless) coordinates: kx/(2π/a) ∈ [-0.5, 0.5].
+    Returns ndarray (nk, 3).
+    """
+    pts = []
+    with open(kfile, 'r') as f:
+        for line in f:
+            s = line.strip()
+            if not s or s.startswith('#'):
+                continue
+            parts = s.split()
+            if len(parts) >= 4:
+                try:
+                    pts.append([float(parts[1]), float(parts[2]), float(parts[3])])
+                except ValueError:
+                    continue
+    if not pts:
+        raise ValueError(f"No k-points found in {kfile}")
+    return np.array(pts)
+
+
+def _load_eigenvalues(eigenfile, nk):
+    """
+    Parse SYSNAME_eigen.data (EPM/SALMON format).
+    Block headers are comment lines '# ik = N'.
+    Data lines: 'ib  energy_Ha  occup'.
+    Returns (eigen[nb, nk] in Ha, vbm_ha).
+    """
+    ik_re = re.compile(r'#\s*ik\s*=\s*(\d+)')
+    eigen_map = {}     # 1-based ik → list of (energy_Ha, occup)
+    current_k = None
+    vbm = -np.inf
+
+    with open(eigenfile, 'r') as f:
+        for line in f:
+            s = line.strip()
+            if not s:
+                continue
+            if s.startswith('#'):
+                m = ik_re.match(s)
+                if m:
+                    current_k = int(m.group(1))
+                    eigen_map.setdefault(current_k, [])
+                continue
+            if current_k is None:
+                continue
+            parts = s.split()
+            if len(parts) < 3:
+                continue
+            try:
+                e, occ = float(parts[1]), float(parts[2])
+                eigen_map[current_k].append((e, occ))
+                if occ > 0.1 and e > vbm:
+                    vbm = e
+            except ValueError:
+                continue
+
+    if not eigen_map:
+        raise ValueError(f"No eigenvalue blocks found in {eigenfile}")
+
+    nb = max(len(v) for v in eigen_map.values())
+    eigen = np.full((nb, nk), np.nan)
+    for ik, entries in eigen_map.items():
+        if 1 <= ik <= nk:
+            for ib, (e, _) in enumerate(entries[:nb]):
+                eigen[ib, ik - 1] = e
+
+    return eigen, vbm
+
+
+def _sym_equivalents(point):
+    """
+    Generate all distinct cubic symmetry equivalents of *point*
+    (all permutations × all sign flips), each wrapped to (-0.5, 0.5].
+    """
+    p = np.asarray(point, dtype=float)
+    seen, result = set(), []
+    for perm in itertools.permutations(p):
+        for signs in itertools.product([1, -1], repeat=3):
+            c = np.array(perm) * np.array(signs)
+            c = c - np.floor(c + 0.5)          # wrap to (-0.5, 0.5]
+            key = tuple(np.round(c, 8))
+            if key not in seen:
+                seen.add(key)
+                result.append(c)
+    return result
+
+
+def _nearest_k(ideal, k_db, snap_tol):
+    """
+    Return index (1-based) of the grid k-point nearest to *ideal*,
+    accounting for all cubic symmetry equivalents of *ideal*.
+    Returns (k_idx, dist) or (None, dist) if dist > snap_tol.
+    """
+    equivs = _sym_equivalents(ideal)
+    best_id, best_dist = None, np.inf
+    for kp in k_db:
+        d = min(np.linalg.norm(kp['c'] - eq) for eq in equivs)
+        if d < best_dist:
+            best_dist, best_id = d, kp['id']
+    return (best_id if best_dist <= snap_tol else None), best_dist
+
+
+def plot_band_structure(kfile, eigenfile, output_dir,
+                        path_labels=None, hs_points=None,
+                        energy_range_ev=(-6, 12), dpi=150):
+    """
+    Plot band structure from *_k.data and *_eigen.data.
+    k-points must be in reduced (dimensionless) coordinates.
+    Eigenvalues are read in Hartree, shifted to VBM = 0, plotted in eV.
+    """
+    if path_labels is None:
+        path_labels = DEFAULT_BAND_PATH
+    if hs_points is None:
+        hs_points = HS_POINTS
+
+    # Validate path labels
+    unknown = [l for l in path_labels if l not in hs_points]
+    if unknown:
+        raise ValueError(f"Unknown high-symmetry labels: {unknown}. "
+                         f"Available: {list(hs_points)}")
+
+    print(f"Processing band structure: {kfile.name} + {eigenfile.name}")
+
+    # --- k-points -------------------------------------------------------
+    kpts = _load_kpoints(kfile)
+    nk   = len(kpts)
+    k_db = [{'id': i + 1, 'c': kpts[i]} for i in range(nk)]
+    print(f"  {nk} k-points")
+
+    # Estimate grid spacing → snap tolerance (use full grid spacing)
+    kx_uniq = np.unique(np.round(kpts[:, 0], 8))
+    grid_sp  = float(np.min(np.diff(kx_uniq))) if len(kx_uniq) > 1 else 0.5
+    snap_tol = grid_sp            # snap within one grid step
+
+    # --- eigenvalues ----------------------------------------------------
+    eigen_ha, vbm_ha = _load_eigenvalues(eigenfile, nk)
+    nb = eigen_ha.shape[0]
+    print(f"  {nb} bands, VBM = {vbm_ha:.6f} Ha = {vbm_ha * HA_TO_EV:.4f} eV")
+
+    eigen_ev = (eigen_ha - vbm_ha) * HA_TO_EV      # shift VBM → 0, convert
+
+    # --- build path -----------------------------------------------------
+    full_path  = []    # list of {dist, energies[nb]}
+    node_dists = [0.0]
+    cum_dist   = 0.0
+    steps      = 40
+
+    for seg in range(len(path_labels) - 1):
+        la, lb  = path_labels[seg], path_labels[seg + 1]
+        pa = np.asarray(hs_points[la], dtype=float)
+        pb = np.asarray(hs_points[lb], dtype=float)
+        seg_len = np.linalg.norm(pb - pa)
+        print(f"  {la} → {lb}  (|Δk| = {seg_len:.4f} r.l.u.)")
+
+        for s in range(steps + 1):
+            ideal  = pa + (s / steps) * (pb - pa)
+            kid, _ = _nearest_k(ideal, k_db, snap_tol)
+            if kid is None:
+                continue
+            if full_path and full_path[-1]['kid'] == kid:
+                continue
+            full_path.append({
+                'dist':     cum_dist + (s / steps) * seg_len,
+                'energies': eigen_ev[:, kid - 1],
+                'kid':      kid,
+            })
+
+        cum_dist += seg_len
+        node_dists.append(cum_dist)
+
+    if not full_path:
+        print(f"  WARNING: no k-points mapped (snap_tol = {snap_tol:.4f}). "
+              "Try a finer k-grid.")
+        return
+
+    print(f"  {len(full_path)} unique k-points on path")
+
+    # --- plot -----------------------------------------------------------
+    dists = np.array([p['dist'] for p in full_path])
+    bands = np.array([p['energies'] for p in full_path])    # (npath, nb)
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+
+    for b in range(bands.shape[1]):
+        ax.plot(dists, bands[:, b], 'k-', lw=0.8, alpha=0.6)
+
+    for pos in node_dists:
+        ax.axvline(pos, color='#888888', linestyle='--', lw=0.7)
+    ax.axhline(0.0, color='tab:red', linestyle='-', lw=0.8, alpha=0.7,
+               label='VBM = 0')
+
+    tick_labels = [r'$\Gamma$' if l == 'Gamma' else f'${l}$'
+                   for l in path_labels]
+    ax.set_xticks(node_dists)
+    ax.set_xticklabels(tick_labels, fontsize=12)
+    ax.set_ylabel('Energy (eV)', fontsize=11)
+    ax.set_xlim(0.0, node_dists[-1])
+    ax.set_ylim(*energy_range_ev)
+    ax.set_title(f'Band structure — {kfile.stem.replace("_k", "")}', fontsize=11)
+    ax.legend(fontsize=9, loc='upper right')
+    fig.tight_layout()
+
+    path_str = '-'.join(path_labels)
+    out = output_dir / f'band_structure_{path_str}.png'
+    fig.savefig(out, dpi=dpi, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  saved {out.name}")
+
+
+# ===========================================================================
 # Entry point
-# ---------------------------------------------------------------------------
+# ===========================================================================
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Plot SALMON SBE real-time output files.')
+        description='Plot SALMON SBE real-time data and EPM/DFT band structure.',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-i', '--input-dir', default='.',
-                        help='Directory with SYSNAME_sbe_*.data files')
+                        help='Directory containing data files')
     parser.add_argument('-o', '--output', default='sbe_plots',
-                        help='Output directory for PNGs')
+                        help='Output directory for PNG files')
     parser.add_argument('--dpi', type=int, default=150,
-                        help='Image resolution')
+                        help='Image resolution (DPI)')
+    parser.add_argument('--downsample', type=int, default=1,
+                        help='Keep every N-th line in RT files (1 = all lines)')
+    parser.add_argument('--band-path', nargs='+', default=DEFAULT_BAND_PATH,
+                        metavar='PT',
+                        help='High-symmetry path for band structure plot')
+    parser.add_argument('--energy-range', nargs=2, type=float,
+                        default=[-6.0, 12.0], metavar=('EMIN', 'EMAX'),
+                        help='Energy window for band structure plot (eV)')
+
+    # Mode shortcuts (each implies the complementary --no-* flag)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--only-sbe', action='store_true',
+                      help='Only SBE RT/energy/nex/nex_k plots — skip band structure '
+                           '(legacy mode, equivalent to --no-bands)')
+    mode.add_argument('--only-bands', action='store_true',
+                      help='Only band structure — skip all RT/nex plots '
+                           '(equivalent to --no-rt)')
+    # Fine-grained toggles kept for backwards compatibility
+    parser.add_argument('--no-bands', action='store_true',
+                        help='Skip band structure even if *_k.data exists')
+    parser.add_argument('--no-rt', action='store_true',
+                        help='Skip all RT / nex plots')
     args = parser.parse_args()
+
+    # Resolve mode shortcuts
+    if args.only_sbe:
+        args.no_bands = True
+    if args.only_bands:
+        args.no_rt = True
 
     input_dir  = Path(args.input_dir)
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    energy_files = sorted(input_dir.glob('*_sbe_rt_energy.data'))
-    nex_files    = sorted(input_dir.glob('*_sbe_nex.data'))
-    nex_k_files  = sorted(input_dir.glob('*_sbe_nex_k.data'))
+    found_any = False
 
-    for f in energy_files:
-        plot_energy_and_nex(f, output_dir, dpi=args.dpi)
-    for f in nex_files:
-        plot_energy_and_nex(f, output_dir, dpi=args.dpi)
-    for f in nex_k_files:
-        plot_nex_k(f, output_dir, dpi=args.dpi)
+    # --- RT line files --------------------------------------------------
+    if not args.no_rt:
+        for pattern in ('*_sbe_rt.data', '*_sbe_rt_energy.data', '*_sbe_nex.data'):
+            for f in sorted(input_dir.glob(pattern)):
+                found_any = True
+                plot_rt_file(f, output_dir, downsample=args.downsample, dpi=args.dpi)
 
-    if not (energy_files or nex_files or nex_k_files):
-        print(f"No *_sbe_rt_energy.data / *_sbe_nex.data / *_sbe_nex_k.data "
-              f"files found in {input_dir.resolve()}")
+        for f in sorted(input_dir.glob('*_sbe_nex_k.data')):
+            found_any = True
+            plot_nex_k(f, output_dir, dpi=args.dpi)
+
+    # --- Band structure -------------------------------------------------
+    if not args.no_bands:
+        for kf in sorted(input_dir.glob('*_k.data')):
+            stem = kf.name[:-len('_k.data')]
+            ef   = kf.parent / f'{stem}_eigen.data'
+            if not ef.exists():
+                print(f"  (skip bands) {ef.name} not found alongside {kf.name}")
+                continue
+            found_any = True
+            try:
+                plot_band_structure(
+                    kf, ef, output_dir,
+                    path_labels=args.band_path,
+                    energy_range_ev=tuple(args.energy_range),
+                    dpi=args.dpi)
+            except Exception as exc:
+                print(f"  ERROR in band structure for {kf.name}: {exc}")
+
+    if not found_any:
+        print(f"No data files found in {input_dir.resolve()}")
+        print("Expected: *_sbe_rt.data, *_sbe_rt_energy.data, *_sbe_nex.data, "
+              "*_sbe_nex_k.data, *_k.data + *_eigen.data")
         return
 
     print(f"\nDone.  Output: {output_dir.resolve()}")
