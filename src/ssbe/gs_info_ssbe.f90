@@ -153,11 +153,11 @@ contains
         integer :: fh, ik, iik
         real(8) :: tmp(4)
         fh = open_filehandle(trim(gs_directory) // trim(sysname) // '_k.data', 'old')
-        read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
-        read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
-        read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
-        read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
-        read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
+        read(fh, "(a)") dummy
+        read(fh, "(a)") dummy
+        read(fh, "(a)") dummy
+        read(fh, "(a)") dummy
+        read(fh, "(a)") dummy
         do ik = 1, nk
             read(fh, *) iik, tmp(1:4)
             if (ik .ne. iik) stop "ik mismatch"
