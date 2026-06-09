@@ -34,6 +34,12 @@ Thumbs.db
 #Logs
 *.log
 
+#EPM / SBE generated output files (calculation artefacts, not source)
+*_k.data
+*_eigen.data
+*_tm.data
+sbe_plots/
+
 #Coverage
 coverage/
 htmlcov/
