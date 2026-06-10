@@ -24,14 +24,20 @@ jobs:
       - name: Install Toolchain (gfortran, cmake, lapack)
         run: |
           sudo apt-get update
-          sudo apt-get install -y gfortran cmake make liblapack-dev libblas-dev
+          sudo apt-get install -y gfortran cmake make liblapack-dev libblas-dev liblapack-doc pkg-config
+
+      - name: Verify LAPACK Installation
+        run: |
+          pkg-config --modversion lapack
+          dpkg -l | grep lapack
 
       - name: Configure SALMON (serial, no MPI)
         run: |
           cmake -B build -S . \
             -D CMAKE_BUILD_TYPE=Release \
             -D USE_MPI=OFF \
-            -D CMAKE_Fortran_FLAGS="-fallow-argument-mismatch -fallow-invalid-boz"
+            -D CMAKE_Fortran_FLAGS="-fallow-argument-mismatch -fallow-invalid-boz" \
+            -D BLA_PREFER_STATIC_LIBS=ON
 
       - name: Build SALMON
         run: cmake --build build -j "$(nproc)"
