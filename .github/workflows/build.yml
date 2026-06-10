@@ -1,12 +1,5 @@
 name: Build
 
-# Minimal compile-check CI: configure and build SALMON (serial, no MPI) with
-# gfortran on Ubuntu to catch Fortran compilation errors early on every push/PR.
-
-# NOTE: the key is quoted as "on" on purpose. In YAML 1.1 (used by PyYAML and
-# many linters) a bare `on:` is parsed as the boolean True ("Norway problem");
-# GitHub's YAML 1.2 parser treats it as a string either way, so quoting keeps
-# both happy.
 "on":
   push:
     branches: [ "**" ]
@@ -21,37 +14,39 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Clean previous build artifacts
-        run: |
-          rm -rf build/
-          rm -rf ~/.cmake/
-
-      - name: Install Toolchain (gfortran, cmake, lapack)
+      # 1. Install toolchain along with standard Ubuntu LAPACK & BLAS libraries
+      - name: Install Toolchain (gfortran, cmake, LAPACK/BLAS)
         run: |
           sudo apt-get update
-          sudo apt-get install -y gfortran cmake make liblapack-dev libblas-dev libopenblas-dev libopenblas-base
+          sudo apt-get install -y gfortran cmake make libblas-dev liblapack-dev
 
-      - name: Verify LAPACK Installation
+      # 2. Assert that the required BLAS/LAPACK runtime environments exist
+      - name: Verify System Libraries Installed
         run: |
-          dpkg -l | grep -E "lapack|blas"
-          pkg-config --list-all | grep -E "lapack|blas"
+          echo "Verifying shared numerical library paths..."
+          ldconfig -p | grep -E "libblas|liblapack"
 
+      # 3. Explicitly scrub any lingering workspace path states from the repo template
+      - name: Clean Stale Build Directories
+        run: rm -rf build
+
+      # 4. Configure SALMON (system libraries are auto-detected by find_package)
       - name: Configure SALMON (serial, no MPI)
         run: |
           cmake -B build -S . \
             -D CMAKE_BUILD_TYPE=Release \
             -D USE_MPI=OFF \
-            -D CMAKE_Fortran_FLAGS="-fallow-argument-mismatch -fallow-invalid-boz" \
-            -D CMAKE_C_FLAGS="-O2" \
-            -D BLA_PREFER_STATIC_LIBS=ON
+            -D CMAKE_Fortran_FLAGS="-fallow-argument-mismatch -fallow-invalid-boz"
 
+      # 5. Compile using all available virtual cores
       - name: Build SALMON
         run: cmake --build build -j "$(nproc)"
 
+      # 6. Verify successful generation of the final executable binary
       - name: Verify Build Execution
         run: |
           if [ -f "build/salmon" ]; then
-            echo "SALMON binary successfully built!"
+            echo "SALMON binary successfully built using system libraries!"
             ls -la build/salmon
           else
             echo "Error: SALMON binary compilation failed."
