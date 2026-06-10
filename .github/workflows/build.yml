@@ -21,19 +21,10 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Toolchain (gfortran, cmake)
+      - name: Install Toolchain (gfortran, cmake, lapack)
         run: |
           sudo apt-get update
-          sudo apt-get install -y gfortran cmake make
-
-      - name: Cache built LAPACK
-        uses: actions/cache@v4
-        with:
-          path: build/lapack
-          key: lapack-${{ runner.os }}-${{ hashFiles('cmakefiles/Builder/build_lapack.cmake') }}
-                # Add this step to delete the conflicting files
-      - name: Clear Invalid CMake Cache
-        run: rm -f build/CMakeCache.txt
+          sudo apt-get install -y gfortran cmake make liblapack-dev libblas-dev
 
       - name: Configure SALMON (serial, no MPI)
         run: |
