@@ -18,6 +18,9 @@ What is plotted
                              snapshot PNGs (3 projected planes) + time-k maps
   *_k.data + *_eigen.data: band structure along the requested path
                              k in reduced coords, energy shifted to VBM = 0 eV
+  band.dat               : band structure from a theory='dft_band' run,
+                             plotted vs path distance (energy shifted to the
+                             band index given by --band-vbm, default nb//2)
 
 Spinor (spin-orbit split) input files
 -------------------------------------
@@ -633,6 +636,173 @@ def plot_band_structure(kfile, eigenfile, output_dir,
 
 
 # ===========================================================================
+# Band structure from a dft_band run  (band.dat)
+# ===========================================================================
+
+def _load_band_dat(bandfile):
+    """
+    Parse the 'band.dat' written by theory='dft_band'.
+
+    Layout:
+      Number_of_Bands:            <nb>
+      Number_of_kpt_in_each_block:<nk_block>
+      Number_of_blocks:           <nblocks>
+      <ik  kred(1:3)  kcart(1:3)>      x (nk_block*nblocks)   (7 columns)
+      <ik  ib  e(spin1) [e(spin2)]>    eigenvalues, Hartree   (3-4 columns)
+
+    Eigenvalues are written one block at a time with ik restarting at 1 each
+    block, so the global path index is reconstructed from ik wrap-arounds.
+    Returns (kcart[N,3], eigen_ha[N, nb], nspin).
+    """
+    header = {}
+    coords = []          # (kx, ky, kz) Cartesian, global order
+    eig_rows = []        # (global_ik, ib, [energies])
+    nb = nk_block = None
+    block_offset = 0
+    prev_ik = 0
+
+    with open(bandfile, 'r') as f:
+        for line in f:
+            s = line.strip()
+            if not s:
+                continue
+            if ':' in s:                       # header line
+                key, _, val = s.partition(':')
+                try:
+                    header[key.strip()] = int(val.strip())
+                except ValueError:
+                    pass
+                if 'Number_of_Bands' in key:
+                    nb = header.get('Number_of_Bands')
+                if 'Number_of_kpt_in_each_block' in key:
+                    nk_block = header.get('Number_of_kpt_in_each_block')
+                continue
+            parts = s.split()
+            if len(parts) == 7:                # coordinate line
+                try:
+                    coords.append([float(parts[4]), float(parts[5]), float(parts[6])])
+                except ValueError:
+                    continue
+            elif len(parts) in (3, 4):         # eigenvalue line
+                try:
+                    ik = int(parts[0]); ib = int(parts[1])
+                    energies = [float(x) for x in parts[2:]]
+                except ValueError:
+                    continue
+                if nk_block and ik < prev_ik:  # ik wrapped -> next block
+                    block_offset += nk_block
+                prev_ik = ik
+                eig_rows.append((block_offset + ik, ib, energies))
+
+    if nb is None or not eig_rows:
+        raise ValueError(f"No band data parsed from {bandfile}")
+
+    nspin = max(len(e) for _, _, e in eig_rows)
+    nk_tot = max(gik for gik, _, _ in eig_rows)
+    eigen = np.full((nk_tot, nb, nspin), np.nan)
+    for gik, ib, energies in eig_rows:
+        if 1 <= gik <= nk_tot and 1 <= ib <= nb:
+            for isp, e in enumerate(energies):
+                eigen[gik - 1, ib - 1, isp] = e
+
+    kcart = np.array(coords) if coords else np.full((nk_tot, 3), np.nan)
+    # Guard against a coordinate/eigen length mismatch (e.g. trailing fill).
+    if kcart.shape[0] != nk_tot:
+        n = min(kcart.shape[0], nk_tot)
+        kcart = kcart[:n]
+        eigen = eigen[:n]
+    return kcart, eigen, nspin
+
+
+def _path_distance_and_nodes(kcart):
+    """
+    Cumulative |Δk| distance along the Cartesian path and the indices where the
+    path direction changes (segment end points), used to draw vertical guides.
+    """
+    n = kcart.shape[0]
+    dist = np.zeros(n)
+    seg = np.diff(kcart, axis=0)
+    seglen = np.linalg.norm(seg, axis=1)
+    dist[1:] = np.cumsum(seglen)
+
+    nodes = [0]
+    for i in range(1, n - 1):
+        a, b = seg[i - 1], seg[i]
+        na, nb_ = np.linalg.norm(a), np.linalg.norm(b)
+        if na < 1e-10 or nb_ < 1e-10:
+            nodes.append(i)
+            continue
+        cosang = np.dot(a, b) / (na * nb_)
+        if cosang < 1.0 - 1e-4:                # direction changed -> node
+            nodes.append(i)
+    nodes.append(n - 1)
+    # De-duplicate consecutive nodes
+    nodes = sorted(set(nodes))
+    return dist, nodes
+
+
+def plot_band_dat(bandfile, output_dir, energy_range_ev=(-6, 12), dpi=150,
+                  vbm_index=None):
+    """
+    Plot the band structure produced by theory='dft_band' (band.dat).
+
+    band.dat stores no occupations, so the valence-band-maximum reference is
+    taken as band index `vbm_index` (1-based); defaults to nb//2 (half filling,
+    spin-degenerate), override with --band-vbm. Energies are in Hartree and
+    converted to eV; the path nodes (high-symmetry points) are detected from
+    direction changes and annotated with their reduced... here Cartesian-based
+    distance only (labels are not stored in band.dat).
+    """
+    print(f"Processing dft_band output: {bandfile.name}")
+    kcart, eigen_ha, nspin = _load_band_dat(bandfile)
+    nk, nb = eigen_ha.shape[0], eigen_ha.shape[1]
+    print(f"  {nk} path k-points, {nb} bands, {nspin} spin channel(s)")
+
+    if vbm_index is None:
+        vbm_index = nb // 2                    # half filling (spin-degenerate)
+    vbm_index = max(1, min(vbm_index, nb))
+    vbm_ha = np.nanmax(eigen_ha[:, vbm_index - 1, :])
+    print(f"  VBM taken at band index {vbm_index}: "
+          f"{vbm_ha:.6f} Ha = {vbm_ha * HA_TO_EV:.4f} eV "
+          f"(override with --band-vbm)")
+
+    eigen_ev = (eigen_ha - vbm_ha) * HA_TO_EV
+    dist, nodes = _path_distance_and_nodes(kcart)
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    spin_colors = ['k', 'tab:blue']
+    for isp in range(nspin):
+        col = spin_colors[isp % len(spin_colors)]
+        for b in range(nb):
+            ax.plot(dist, eigen_ev[:, b, isp], '-', color=col, lw=0.8, alpha=0.6)
+    if nspin == 2:
+        ax.plot([], [], 'k-', label='spin up')
+        ax.plot([], [], '-', color='tab:blue', label='spin down')
+
+    for idx in nodes:
+        ax.axvline(dist[idx], color='#888888', linestyle='--', lw=0.7)
+    ax.axhline(0.0, color='tab:red', linestyle='-', lw=0.8, alpha=0.7,
+               label=f'VBM (band {vbm_index}) = 0')
+
+    # Annotate nodes with their reduced k (rounded) since labels aren't stored.
+    ax.set_xticks([dist[i] for i in nodes])
+    ax.set_xticklabels([str(i + 1) for i in nodes], fontsize=9)
+    ax.set_xlabel('k-point index at path nodes', fontsize=10)
+    ax.set_ylabel('Energy (eV)', fontsize=11)
+    ax.set_xlim(0.0, dist[-1])
+    ax.set_ylim(*energy_range_ev)
+    ax.set_title(f'Band structure (dft_band) — {bandfile.stem}', fontsize=11)
+    if nspin == 2 or True:
+        ax.legend(fontsize=9, loc='upper right')
+    fig.tight_layout()
+
+    out = output_dir / f'band_dat_{bandfile.stem}.png'
+    fig.savefig(out, dpi=dpi, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  saved {out.name}")
+
+
+# ===========================================================================
 # Entry point
 # ===========================================================================
 
@@ -660,6 +830,10 @@ def main():
                              'adjacent spin sub-bands into levels (occupations '
                              'summed, energy = pair mean). "auto" detects '
                              'spinor input from occupations <= 1 per band.')
+    parser.add_argument('--band-vbm', type=int, default=None, metavar='IDX',
+                        help='1-based band index taken as the valence-band '
+                             'maximum (energy zero) when plotting band.dat from '
+                             'a dft_band run. Default: nb//2 (half filling).')
 
     # Mode shortcuts (each implies the complementary --no-* flag)
     mode = parser.add_mutually_exclusive_group()
@@ -729,10 +903,21 @@ def main():
             except Exception as exc:
                 print(f"  ERROR in band structure for {kf.name}: {exc}")
 
+        # dft_band output (band.dat)
+        for bf in sorted(input_dir.glob('band.dat')):
+            found_any = True
+            try:
+                plot_band_dat(
+                    bf, output_dir,
+                    energy_range_ev=tuple(args.energy_range),
+                    dpi=args.dpi, vbm_index=args.band_vbm)
+            except Exception as exc:
+                print(f"  ERROR in dft_band plot for {bf.name}: {exc}")
+
     if not found_any:
         print(f"No data files found in {input_dir.resolve()}")
         print("Expected: *_sbe_rt.data, *_sbe_rt_energy.data, *_sbe_nex.data, "
-              "*_sbe_nex_k.data, *_k.data + *_eigen.data")
+              "*_sbe_nex_k.data, *_k.data + *_eigen.data, band.dat")
         return
 
     print(f"\nDone.  Output: {output_dir.resolve()}")

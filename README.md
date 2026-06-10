@@ -113,7 +113,8 @@ Real-time SBE propagation writes three diagnostic files (`SYSNAME_sbe_rt_energy.
 The repository root contains a self-contained `plot_sbe_results.py` script (matplotlib + numpy, not part of the Fortran build — copy it into the calculation directory and run it there). It scans the directory for `SYSNAME_sbe_rt_energy.data`, `SYSNAME_sbe_nex.data` and `SYSNAME_sbe_nex_k.data`, and produces (with no interactive windows, `Agg` backend):
 * line plots of total energy and excited-electron/hole counts vs time;
 * for `SYSNAME_sbe_nex_k.data`, one PNG per saved time step (the time value is encoded in the file name), each showing the Houston-basis lowest-conduction-band population as three 2D heatmap slices of the k-grid ($k_x$-$k_y$, $k_x$-$k_z$, $k_y$-$k_z$);
-* a band-structure plot from `SYSNAME_k.data` + `SYSNAME_eigen.data` along a high-symmetry path (`--band-path`, default `L Γ X W K`), energies shifted to VBM = 0.
+* a band-structure plot from `SYSNAME_k.data` + `SYSNAME_eigen.data` along a high-symmetry path (`--band-path`, default `L Γ X W K`), energies shifted to VBM = 0;
+* a band-structure plot from `band.dat` (a `theory='dft_band'` run) vs path distance, energies shifted to the `--band-vbm` band index (default `nb//2`).
 
 ```sh
 cp plot_sbe_results.py /path/to/calculation/
@@ -311,7 +312,15 @@ The path is given explicitly in the `&band` namelist (reduced reciprocal coordin
 /
 ```
 
-`band.dat` starts with a small header (`Number_of_Bands`, `Number_of_kpt_in_each_block`, `Number_of_blocks`), then one `ik  k_red(1:3)  k_cart(1:3)` line per k-point, followed by `ik  ib  energy(spin...)` eigenvalue lines (energies in the chosen `unit_system`). For the sample above the silicon valence-band top sits at $\Gamma$ with the conduction-band minimum near $X$ (indirect gap), as expected for an LDA silicon band structure.
+`band.dat` starts with a small header (`Number_of_Bands`, `Number_of_kpt_in_each_block`, `Number_of_blocks`), then one `ik  k_red(1:3)  k_cart(1:3)` line per k-point, followed by `ik  ib  energy(spin...)` eigenvalue lines (energies in Hartree). For the sample above the silicon valence-band top sits at $\Gamma$ with the conduction-band minimum near $X$ (indirect gap), as expected for an LDA silicon band structure.
+
+`plot_sbe_results.py` plots `band.dat` directly (it is picked up automatically alongside the other band-structure files): energies are converted to eV and shifted to a valence-band-maximum reference, with vertical guides drawn at the detected path nodes (direction changes). Since `band.dat` carries no occupations, the VBM band index defaults to `nb//2` (half filling); override it with `--band-vbm IDX`.
+
+```sh
+cp plot_sbe_results.py /path/to/band_calculation/
+cd /path/to/band_calculation/
+python3 plot_sbe_results.py --only-bands --energy-range -13 7   # -> sbe_plots/band_dat_band.png
+```
 
 | `&band` parameter | Default | Description |
 | :--- | :--- | :--- |

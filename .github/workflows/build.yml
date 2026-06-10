@@ -3,7 +3,11 @@ name: Build
 # Minimal compile-check CI: configure and build SALMON (serial, no MPI) with
 # gfortran on Ubuntu to catch Fortran compilation errors early on every push/PR.
 
-on:
+# NOTE: the key is quoted as "on" on purpose. In YAML 1.1 (used by PyYAML and
+# many linters) a bare `on:` is parsed as the boolean True ("Norway problem");
+# GitHub's YAML 1.2 parser treats it as a string either way, so quoting keeps
+# both happy.
+"on":
   push:
     branches: [ "**" ]
   pull_request:
