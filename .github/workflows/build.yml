@@ -1,6 +1,13 @@
 name: Build
 
-on:
+# Minimal compile-check CI: configure and build SALMON (serial, no MPI) with
+# gfortran on Ubuntu to catch Fortran compilation errors early on every push/PR.
+
+# NOTE: the key is quoted as "on" on purpose. In YAML 1.1 (used by PyYAML and
+# many linters) a bare `on:` is parsed as the boolean True ("Norway problem");
+# GitHub's YAML 1.2 parser treats it as a string either way, so quoting keeps
+# both happy.
+"on":
   push:
     branches: [ "**" ]
   pull_request:
@@ -9,47 +16,38 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Toolchain (gfortran, OpenMPI, LAPACK)
+      - name: Install Toolchain (gfortran, cmake)
         run: |
           sudo apt-get update
-          sudo apt-get install -y gfortran openmpi-bin libopenmpi-dev liblapack-dev libblas-dev cmake python3
+          sudo apt-get install -y gfortran cmake make
 
-      - name: Clean and Configure SALMON
+      - name: Cache built LAPACK
+        uses: actions/cache@v4
+        with:
+          path: build/lapack
+          key: lapack-${{ runner.os }}-${{ hashFiles('cmakefiles/Builder/build_lapack.cmake') }}
+
+      - name: Configure SALMON (serial, no MPI)
         run: |
-          # Eliminate stale tracking or Docker cache directories causing conflicts
-          rm -rf build CMakeCache.txt CMakeFiles/
-          
-          mkdir -p build
-          cd build
-          
-          # Use official SALMON documentation build convention
-          python3 ../configure.py \
-            CC=mpicc \
-            FC=mpif90 \
-            --prefix=../
+          cmake -B build -S . \
+            -D CMAKE_BUILD_TYPE=Release \
+            -D USE_MPI=OFF \
+            -D CMAKE_Fortran_FLAGS="-fallow-argument-mismatch -fallow-invalid-boz"
 
       - name: Build SALMON
-        run: |
-          cd build
-          make -j$(nproc)
-
-      - name: Install SALMON
-        run: |
-          cd build
-          make install
+        run: cmake --build build -j "$(nproc)"
 
       - name: Verify Build Execution
         run: |
-          # Verify binary generation in installation prefix bin folder
-          if [ -f "./bin/salmon" ]; then
-            echo "SALMON binary successfully installed!"
-            # Execution check (may exit non-zero without input file; verify path presence)
-            ls -la ./bin/salmon
+          if [ -f "build/salmon" ]; then
+            echo "SALMON binary successfully built!"
+            ls -la build/salmon
           else
-            echo "Error: SALMON binary compilation/installation failed."
+            echo "Error: SALMON binary compilation failed."
             exit 1
           fi
