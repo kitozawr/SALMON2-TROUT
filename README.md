@@ -34,6 +34,15 @@ Computes the total current as $J = \text{Tr}[(\mathbf{p} + \mathbf{A}) \rho]$ (i
 ### 5. Local Empirical Pseudopotential Method (EPM) ground states
 A self-contained local-EPM ground-state solver (`theory='epm'`, `src/epm`) that computes the Cohen-Bergstresser band structure and momentum matrix elements for zincblende GaAs directly in SALMON, and writes `SYSNAME_k.data`/`SYSNAME_eigen.data`/`SYSNAME_tm.data` in exactly the format read by `gs_info_ssbe` — closing the EPM → SBE pipeline end-to-end without external scripts (`rvnl_tm` is written as identically zero, since a local pseudopotential has no nonlocal velocity correction).
 
+### 6. Spinor (spin-orbit split) EPM input + `yn_sbe_spinor`
+The Python EPM reference (`epm_gaas_reference.py`, hardcoded flag `INCLUDE_SPIN_ORBIT = True`) promotes the scalar $N_{PW}$ problem to the **spinor $2N_{PW}$ problem**: the plane-wave basis is doubled to $|G,s\rangle$, and
+
+$$\hat H_0^{\rm spinor}(k) = \hat H^{\rm loc}(k)\otimes\mathbb 1_2 + \hat H_{SO}(k),$$
+
+with the projected Weisz/Bloom-Bergstresser spin-orbit operator (Chelikowsky-Cohen form) whose single strength constant $\mu$ is auto-calibrated at $\Gamma$ to the GaAs split-off gap $\Delta_0 = 0.341$ eV ($\Gamma_8$–$\Gamma_7$). Because $\hat H_{SO}$ is **nonlocal**, the velocity acquires the mandatory correction $\hat v_{SO} = -i[\hat r,\hat H_{SO}] = \nabla_k\hat H_{SO}$, which the script computes **analytically** (verified against finite differences) and writes into block 2 (`rvnl_tm`) of the `_tm.data` file — so a spinor SBE run must set `yn_vnl_correction='y'` to use the full $\hat\pi^{\rm spinor} = \hat p\otimes\mathbb 1_2 + \hat v_{SO}$ consistently in $H_{VG}$, the decoherence branch velocities and the current.
+
+On the SBE side the new `&sbe` flag **`yn_sbe_spinor`** switches the solver to such spin-orbit split input files: occupations become **1 per spinor band** over the first `nelec` bands (instead of 2 per band over `nelec/2`), and every `nelec/2`-derived index (Fermi level for the frozen core, lowest conduction band for `_sbe_nex_k`, valence trace for `_sbe_nex`, automatic minimum-gap search) consistently uses `nelec` valence bands. The spinor Bloch equation stays a **single** $2N_b\times 2N_b$ equation — spin-orbit couples the spin channels, so it does not factorize.
+
 ---
 
 ## The CF4 + Suzuki-Yoshida + CPTP Operator Splitting
@@ -66,6 +75,7 @@ The `&sbe` namelist now accepts the following parameters:
 | `sbe_decoh_tau_m_fs` | fs | `-1.0d0` | Wave-packet momentum-relaxation time $\tau_m$ entering $\lambda=k_B T/\tau_m$. |
 | `frozen_core_threshold_ev` | eV | `0.0d0` | Freeze bands below $E_F + \text{threshold}$. (Use negative values, e.g., `-15.0`). |
 | `frozen_free_threshold_ev` | eV | `0.0d0` | Freeze bands above $E_F + \text{threshold}$. (Use positive values, e.g., `+20.0`). |
+| `yn_sbe_spinor` | — | `'n'` | `'y'`: ground-state input files come from a **spinor (spin-orbit split)** system — occupation 1 per spinor band, `nelec` valence bands instead of `nelec/2`. Combine with `yn_vnl_correction='y'` when the dataset carries the $\hat v_{SO}=\nabla_k\hat H_{SO}$ correction in `rvnl_tm`. |
 
 *Note: Internal conversions to atomic units (Hartree) are handled automatically (`kB_au`, `au_fs`).*
 
@@ -79,18 +89,26 @@ Real-time SBE propagation writes three diagnostic files (`SYSNAME_sbe_rt_energy.
 | `out_projection_step` | `100` | Stride for `SYSNAME_sbe_nex.data` (number of excited electrons/holes, summed over k). |
 | `out_projection_k_step` | `1000` | Stride for `SYSNAME_sbe_nex_k.data` (Houston-basis population of the lowest conduction band, resolved per k-point). Defaults to 10× `out_projection_step` to avoid producing terabyte-scale output on dense k-grids; increase the stride (larger value) further for very large `nk`/`nt`. |
 
-`SYSNAME_sbe_nex_k.data` reports, for every saved time `t`, one block of `nk` lines `ik, kx, ky, kz, population_lcb`, where `population_lcb = (W^\dagger \rho W)_{aa}` is the diagonal element of the density matrix rotated into the instantaneous Houston (adiabatic) eigenbasis $W$ of $H_{VG}(t)$ for the lowest conduction band $a = N_{elec}/2+1$ — i.e. the same gauge-independent basis used internally by the CPTP dephasing step.
+`SYSNAME_sbe_nex_k.data` reports, for every saved time `t`, one block of `nk` lines `ik, kx, ky, kz, population_lcb`, where `population_lcb = (W^\dagger \rho W)_{aa}` is the diagonal element of the density matrix rotated into the instantaneous Houston (adiabatic) eigenbasis $W$ of $H_{VG}(t)$ for the lowest conduction band $a = N_{elec}/2+1$ — i.e. the same gauge-independent basis used internally by the CPTP dephasing step. With `yn_sbe_spinor='y'` the lowest conduction band is $a = N_{elec}+1$ (the lower spin sub-band of the first conduction level).
 
 ### Plotting the real-time output (`plot_sbe_results.py`)
 
 The repository root contains a self-contained `plot_sbe_results.py` script (matplotlib + numpy, not part of the Fortran build — copy it into the calculation directory and run it there). It scans the directory for `SYSNAME_sbe_rt_energy.data`, `SYSNAME_sbe_nex.data` and `SYSNAME_sbe_nex_k.data`, and produces (with no interactive windows, `Agg` backend):
 * line plots of total energy and excited-electron/hole counts vs time;
-* for `SYSNAME_sbe_nex_k.data`, one PNG per saved time step (the time value is encoded in the file name), each showing the Houston-basis lowest-conduction-band population as three 2D heatmap slices of the k-grid ($k_x$-$k_y$, $k_x$-$k_z$, $k_y$-$k_z$).
+* for `SYSNAME_sbe_nex_k.data`, one PNG per saved time step (the time value is encoded in the file name), each showing the Houston-basis lowest-conduction-band population as three 2D heatmap slices of the k-grid ($k_x$-$k_y$, $k_x$-$k_z$, $k_y$-$k_z$);
+* a band-structure plot from `SYSNAME_k.data` + `SYSNAME_eigen.data` along a high-symmetry path (`--band-path`, default `L Γ X W K`), energies shifted to VBM = 0.
 
 ```sh
 cp plot_sbe_results.py /path/to/calculation/
 cd /path/to/calculation/
 python3 plot_sbe_results.py            # writes PNGs into ./sbe_plots/
+```
+
+**Spinor (spin-orbit split) datasets:** the plotter detects a spinor `_eigen.data` automatically from the occupation column (1 electron per band instead of 2) and then **sums the spins of each level**: adjacent (Kramers partner) spin sub-bands are merged into one level — occupations summed ($1+1=2$ per valence level), level energy = mean of the pair. The band plot draws one solid curve per level on top of the faint spin-resolved sub-bands, so tiny Dresselhaus splittings don't render as doubled lines while the real spin-orbit splittings ($\Gamma_8$/$\Gamma_7$, $\Delta_0 = 0.341$ eV for GaAs) stay visible between levels. Control with `--spin-sum {auto,on,off}` (default `auto`):
+
+```sh
+python3 plot_sbe_results.py                 # auto-detects spinor input, sums spins per level
+python3 plot_sbe_results.py --spin-sum off  # raw 2*Nb spin-resolved bands
 ```
 
 The `&epm` namelist configures the local-EPM ground-state solver (`theory='epm'`):
@@ -138,7 +156,7 @@ The `&epm` namelist configures the local-EPM ground-state solver (`theory='epm'`
 
 ### Standalone Python reference (`epm_gaas_reference.py`)
 
-For quick debugging without building/running SALMON, the repository root also contains `epm_gaas_reference.py` -- a monolithic, single-machine NumPy/SciPy reimplementation of the GaAs Cohen-Bergstresser local-EPM solver (no MPI/OpenMP). It builds the same lattice/plane-wave basis/Hamiltonian/momentum matrices as `src/epm`, and writes byte-compatible `SYSNAME_k.data`/`_eigen.data`/`_tm.data` files that `gs_info_ssbe` can read directly -- so its output can be diffed against the Fortran `theory='epm'` run, or fed straight into an SBE real-time calculation. All parameters (lattice constant, plane-wave cutoff, k-grid, number of bands/electrons, sysname) are hardcoded constants at the top of the script -- edit them there and run:
+For quick debugging without building/running SALMON, the repository root also contains `epm_gaas_reference.py` -- a monolithic, single-machine NumPy/SciPy reimplementation of the GaAs Cohen-Bergstresser local-EPM solver (no MPI/OpenMP). It builds the same lattice/plane-wave basis/Hamiltonian/momentum matrices as `src/epm`, and writes byte-compatible `SYSNAME_k.data`/`_eigen.data`/`_tm.data` files that `gs_info_ssbe` can read directly -- so its output can be diffed against the Fortran `theory='epm'` run, or fed straight into an SBE real-time calculation. All parameters (lattice constant, plane-wave cutoff, k-grid, number of bands/electrons, sysname) are hardcoded constants at the top of the script -- including the spinor switch `INCLUDE_SPIN_ORBIT` (see the spinor pipeline example below) -- edit them there and run:
 
 ```sh
 python3 epm_gaas_reference.py
@@ -166,6 +184,66 @@ This is a debugging aid only -- `theory='epm'` in SALMON remains the primary, MP
   ! sysname, lattice vectors, num_kgrid, nstate, nelec must match the EPM run
 /
 ```
+
+## Spinor (spin-orbit) EPM → SBE Pipeline Example
+
+Step 1 — generate the spin-orbit split ground state with the Python reference (the spinor switch is a hardcoded constant at the top of the script):
+
+```sh
+# epm_gaas_reference.py:  INCLUDE_SPIN_ORBIT = True   (default)
+python3 epm_gaas_reference.py
+# writes GaAs_cubic_so_k.data / _eigen.data / _tm.data:
+#   64 spin-orbit split bands (occupation 1 per band),
+#   mu auto-calibrated at Gamma to Delta0 = 0.341 eV (Gamma8-Gamma7),
+#   v_SO = grad_k H_SO written analytically into block 2 (rvnl_tm)
+```
+
+Step 2 — real-time SBE propagation on the spinor dataset (note `nstate` doubled, `yn_sbe_spinor` and `yn_vnl_correction` both `'y'`):
+
+```fortran
+&calculation
+  theory = 'sbe'
+/
+&control
+  sysname = 'GaAs_cubic_so'
+/
+&units
+  unit_system = 'au'
+/
+&system
+  yn_periodic = 'y'
+  al(1:3) = 10.68d0, 10.68d0, 10.68d0   ! must match the EPM run
+  nelec  = 32
+  nstate = 64                            ! 2*Nb spinor bands
+/
+&kgrid
+  num_kgrid(1:3) = 4, 4, 4               ! must match the EPM run
+/
+&tgrid
+  dt = 0.05d0
+  nt = 20000
+/
+&emfield
+  ae_shape1 = "Acos2"
+  epdir_re1(1:3) = 0.0d0, 0.0d0, 1.0d0
+  I_wcm2_1 = 1.0d+11
+  tw1 = 500.0d0
+  omega1 = 0.056d0
+/
+&sbe
+  yn_sbe_spinor     = 'y'   ! spinor input: occupation 1/band, nelec valence bands
+  yn_vnl_correction = 'y'   ! use pi = p + v_SO from rvnl_tm everywhere
+/
+```
+
+Step 3 — plot (spin pairs are summed into levels automatically):
+
+```sh
+python3 plot_sbe_results.py
+```
+
+Setting `INCLUDE_SPIN_ORBIT = False` in the script restores the scalar pipeline (`GaAs_cubic`, 32 bands, occupation 2 per band) byte-for-byte; the SBE input then keeps `yn_sbe_spinor = 'n'` (default).
+
 ---
 
 ## References & Theoretical Background
@@ -175,8 +253,9 @@ This is a debugging aid only -- `theory='epm'` in SALMON remains the primary, MP
 3. **CPTP / Lindblad & RBF-kernel positivity:** Schoenberg, I. J. "Metric spaces and completely monotone functions." *Ann. Math.* 39, 811-841 (1938) (Bochner/Schoenberg PSD criterion for Gaussian/RBF kernels); Schur product theorem (Hadamard maps of PSD matrices are PSD).
 4. **Caldeira-Leggett / Kuhn-Zurek Decoherence:** Caldeira, A. O., & Leggett, A. J. "Path integral approach to quantum Brownian motion." *Physica A* 121, 587-616 (1983); Zurek, W. H. "Decoherence, einselection, and the quantum origins of the classical." *Rev. Mod. Phys.* 75, 715 (2003).
 5. **Cohen-Bergstresser Local Pseudopotentials:** Cohen, M. L., & Bergstresser, T. K. "Band Structures and Pseudopotential Form Factors for Fourteen Semiconductors of the Diamond and Zinc-blende Structures." *Phys. Rev.* 141, 789 (1966).
-6. **Velocity-Gauge SBE / Houston Basis:** Wismer, M. S., & Yakovlev, V. S. "Gauge-independent decoherence models for solids in external fields." *Phys. Rev. B* 97, 144302 (2018).
-7. **Original SALMON SBE:** Sato, S. A. et al. "Multiscale computational approach for light-matter interactions." *Phys. Rev. B* 92, 115145 (2015).
+6. **Spin-Orbit in EPM:** Weisz, G. "Band Structure and Fermi Surface of White Tin." *Phys. Rev.* 149, 504 (1966); Bloom, S., & Bergstresser, T. K. "Band structure of α-Sn, InSb and CdTe including spin-orbit effects." *Solid State Commun.* 6, 465 (1968); Chelikowsky, J. R., & Cohen, M. L. "Nonlocal pseudopotential calculations for the electronic structure of eleven diamond and zinc-blende semiconductors." *Phys. Rev. B* 14, 556 (1976).
+7. **Velocity-Gauge SBE / Houston Basis:** Wismer, M. S., & Yakovlev, V. S. "Gauge-independent decoherence models for solids in external fields." *Phys. Rev. B* 97, 144302 (2018).
+8. **Original SALMON SBE:** Sato, S. A. et al. "Multiscale computational approach for light-matter interactions." *Phys. Rev. B* 92, 115145 (2015).
 
 ## License
 
