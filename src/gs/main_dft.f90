@@ -168,6 +168,9 @@ Band_Iteration : do iter_band_kpt= 1, iter_band_kpt_end, iter_band_kpt_stride
 
 if(theory=='dft_band')then
    call calc_band_write(iter_band_kpt,system,band,info)
+   ! vec_k has changed: refresh the cached nonlocal-projector phase factors
+   ! e^{-ik.r} (ppg%zekr_uV); the kinetic stencil reads system%vec_k directly.
+   call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
 end if
 
 

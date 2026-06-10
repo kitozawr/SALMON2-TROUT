@@ -50,26 +50,32 @@ end subroutine init_band_dft
 
 subroutine calc_band_write(iter_band_kpt,system,band,info)
   use structures, only: s_dft_system,s_band_dft,s_parallel_info
+  use math_constants, only: pi
   implicit none
   type(s_dft_system), intent(inout)  :: system
   type(s_band_dft), intent(inout) ::band
   type(s_parallel_info),intent(in) :: info
   integer :: iter_band_kpt, ik
+  real(8) :: k_red(3)
 
    band%check_conv_esp=.false.
+   ! band%band_kpt is already in Cartesian coordinates (get_band_kpt converts
+   ! the reduced input once); copy it into vec_k WITHOUT a second primitive_b
+   ! multiplication. Set all nk entries (not only the local ik range) so the
+   ! root-rank printout below is also correct under k-distributed MPI.
    do ik=1,system%nk
-      if ( info%ik_s <= ik .and. ik <= info%ik_e ) then
-         system%vec_k(:,ik) = matmul( system%primitive_b, band%band_kpt(:,iter_band_kpt+ik-1) )
-      end if
+      system%vec_k(:,ik) = band%band_kpt(:,iter_band_kpt+ik-1)
    end do
-  
+
    if( comm_is_root(nproc_id_global) ) then
       write(*,10) iter_band_kpt, iter_band_kpt+system%nk-1
-      write(*,20) "kpoints","kpoints in Cartesian"
+      write(*,20) "kpoints (reduced)","kpoints in Cartesian"
       open(100,file='band.dat',position="append")
       do ik=iter_band_kpt,iter_band_kpt+system%nk-1
-         write(*,30) ik, band%band_kpt(:,ik), system%vec_k(:,ik-iter_band_kpt+1)
-         write(100,30) ik, band%band_kpt(:,ik), system%vec_k(:,ik-iter_band_kpt+1)
+         ! reduced coordinates: k_red(i) = a_i . k_cart / (2*pi)
+         k_red(:) = matmul( transpose(system%primitive_a), band%band_kpt(:,ik) )/(2.0d0*pi)
+         write(*,30) ik, k_red(:), system%vec_k(:,ik-iter_band_kpt+1)
+         write(100,30) ik, k_red(:), system%vec_k(:,ik-iter_band_kpt+1)
       end do
       close(100)
    end if
@@ -120,10 +126,10 @@ subroutine read_bandcalc_param( lattice, nref_band, ndiv_segment, kpt, kpt_label
   !read(unit,*) lattice; write(*,*) lattice
   !read(unit,*) nref_band
   lattice=lattice_nml
-  nref_band=nref_band_nml; write(*,*) "nref",nref_band,nproc_id_global
+  nref_band=nref_band_nml
+  if ( comm_is_root(nproc_id_global) ) write(*,*) "nref_band =",nref_band
   if ( lattice == "non" ) then
   else
-     close(unit)
      if ( comm_is_root(nproc_id_global) ) then
         write(*,'(a50)') repeat("-",23)//"read_bandcalc_param(return)"
      end if
@@ -135,9 +141,10 @@ subroutine read_bandcalc_param( lattice, nref_band, ndiv_segment, kpt, kpt_label
   allocate( kpt(3,num_of_segments+1)      ); kpt=0.0d0
   allocate( kpt_label(num_of_segments+1)  ); kpt_label=""
   !read(unit,*) ndiv_segment(:)
+  ! A path of N segments has N+1 end points: slice up to num_of_segments+1
   ndiv_segment=ndiv_segment_nml(1:num_of_segments)
-  kpt=kpt_nml(:,1:num_of_segments)
-  kpt_label=kpt_label_nml(1:num_of_segments)
+  kpt=kpt_nml(:,1:num_of_segments+1)
+  kpt_label=kpt_label_nml(1:num_of_segments+1)
   !call check_data_format( unit, iformat )
   !select case( iformat )
   !case( 0 )

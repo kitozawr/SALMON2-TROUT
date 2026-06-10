@@ -158,8 +158,10 @@ DFT_Iteration : do iter=Miter+1,nscf
    endif
    if(calc_mode=='DFT_BAND')then
       if(all(band%check_conv_esp)) then
-        if ( comm_is_root(nproc_id_global) ) write(*,*) "cycle!!! : iter=",iter
-        cycle DFT_Iteration
+        flag_conv = .true.
+        if ( comm_is_root(nproc_id_global) ) &
+           write(*,'(a,i6)') "  #band eigenvalues converged at",iter-1
+        exit DFT_Iteration
       end if
    end if
 

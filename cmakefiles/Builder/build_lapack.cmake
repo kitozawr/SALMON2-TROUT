@@ -20,6 +20,7 @@ else ()
       PREFIX           "${CMAKE_BINARY_DIR}/lapack"
       CMAKE_ARGS       -D BUILD_SHARED_LIBS=off -D BUILD_TESTING=off
                        -D CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -D CMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}
+                       -D CMAKE_INSTALL_LIBDIR=lib64
                        -D CMAKE_Fortran_COMPILER=${CMAKE_Fortran_COMPILER}
                        -D CMAKE_Fortran_FLAGS=${CMAKE_Fortran_FLAGS}
                        -D CMAKE_Fortran_FLAGS_DEBUG=${CMAKE_Fortran_FLAGS_DEBUG}

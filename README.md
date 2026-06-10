@@ -4,6 +4,23 @@ This repository is a fork of the original [SALMON project](http://salmon-tddft.j
 
 This fork extends SALMON's Semiconductor Bloch Equations (SBE) module with a **commutator-free Magnus 4 (CF4) / Suzuki-Yoshida exponential propagator**, a **strictly CPTP Kuhn-Zurek/Caldeira-Leggett decoherence model**, **frozen-core optimizations**, and a self-contained **local Empirical Pseudopotential Method (EPM)** ground-state solver (Cohen-Bergstresser, GaAs) that closes the EPM → SBE pipeline without external scripts.
 
+## Contents
+
+- [Key Fork Features](#key-fork-features)
+- [The CF4 + Suzuki-Yoshida + CPTP Operator Splitting](#the-cf4--suzuki-yoshida--cptp-operator-splitting)
+- [Configuration Parameters](#configuration-parameters)
+  - [Real-time output frequency (`&analysis`)](#real-time-output-frequency-analysis)
+  - [Plotting the real-time output (`plot_sbe_results.py`)](#plotting-the-real-time-output-plot_sbe_resultspy)
+  - [EPM ground-state solver (`&epm`)](#epm-ground-state-solver-epm)
+- [Examples](#examples)
+  - [Minimal SBE Input Example](#minimal-sbe-input-example)
+  - [Minimal EPM → SBE Pipeline Example](#minimal-epm--sbe-pipeline-example)
+  - [Spinor (spin-orbit) EPM → SBE Pipeline Example](#spinor-spin-orbit-epm--sbe-pipeline-example)
+  - [Band-structure calculation (`theory='dft_band'`)](#band-structure-calculation-theorydft_band)
+- [Building & Continuous Integration](#building--continuous-integration)
+- [References & Theoretical Background](#references--theoretical-background)
+- [License](#license)
+
 
 ## Key Fork Features
 
@@ -111,6 +128,8 @@ python3 plot_sbe_results.py                 # auto-detects spinor input, sums sp
 python3 plot_sbe_results.py --spin-sum off  # raw 2*Nb spin-resolved bands
 ```
 
+### EPM ground-state solver (`&epm`)
+
 The `&epm` namelist configures the local-EPM ground-state solver (`theory='epm'`):
 
 | Parameter | Units | Default | Description |
@@ -121,7 +140,9 @@ The `&epm` namelist configures the local-EPM ground-state solver (`theory='epm'`
 
 ---
 
-## Minimal SBE Input Example
+## Examples
+
+### Minimal SBE Input Example
 
 ```fortran
 &calculation
@@ -152,9 +173,9 @@ The `&epm` namelist configures the local-EPM ground-state solver (`theory='epm'`
 * Set `sbe_decoh_temperature_k` and/or `sbe_decoh_tau_m_fs` to a non-positive value to recover the original purely-coherent (no dephasing, $D\equiv 0$, trivially CPTP) behavior.
 * Set both `frozen_core_threshold_ev` and `frozen_free_threshold_ev` to `0.0d0` to force all bands into the active nonlinear subspace.
 
-## Minimal EPM → SBE Pipeline Example
+### Minimal EPM → SBE Pipeline Example
 
-### Standalone Python reference (`epm_gaas_reference.py`)
+#### Standalone Python reference (`epm_gaas_reference.py`)
 
 For quick debugging without building/running SALMON, the repository root also contains `epm_gaas_reference.py` -- a monolithic, single-machine NumPy/SciPy reimplementation of the GaAs Cohen-Bergstresser local-EPM solver (no MPI/OpenMP). It builds the same lattice/plane-wave basis/Hamiltonian/momentum matrices as `src/epm`, and writes byte-compatible `SYSNAME_k.data`/`_eigen.data`/`_tm.data` files that `gs_info_ssbe` can read directly -- so its output can be diffed against the Fortran `theory='epm'` run, or fed straight into an SBE real-time calculation. All parameters (lattice constant, plane-wave cutoff, k-grid, number of bands/electrons, sysname) are hardcoded constants at the top of the script -- including the spinor switch `INCLUDE_SPIN_ORBIT` (see the spinor pipeline example below) -- edit them there and run:
 
@@ -185,7 +206,7 @@ This is a debugging aid only -- `theory='epm'` in SALMON remains the primary, MP
 /
 ```
 
-## Spinor (spin-orbit) EPM → SBE Pipeline Example
+### Spinor (spin-orbit) EPM → SBE Pipeline Example
 
 Step 1 — generate the spin-orbit split ground state with the Python reference (the spinor switch is a hardcoded constant at the top of the script):
 
@@ -243,6 +264,81 @@ python3 plot_sbe_results.py
 ```
 
 Setting `INCLUDE_SPIN_ORBIT = False` in the script restores the scalar pipeline (`GaAs_cubic`, 32 bands, occupation 2 per band) byte-for-byte; the SBE input then keeps `yn_sbe_spinor = 'n'` (default).
+
+### Band-structure calculation (`theory='dft_band'`)
+
+`theory='dft_band'` diagonalizes the **converged** Kohn-Sham Hamiltonian at k-points along a high-symmetry path and writes the eigenvalues to `band.dat`. It is a post-processing step: run a normal `theory='dft'` ground state first, then restart from it. A ready-to-run pair lives in `samples/exercise_04_bulkSi_gs/` (`Si_gs.inp` + `Si_band.inp`).
+
+```sh
+cd samples/exercise_04_bulkSi_gs
+
+# 1. Ground state (writes the restart directory data_for_restart/)
+salmon < Si_gs.inp
+
+# 2. dft_band restarts from ./restart — point it at the GS output
+ln -s data_for_restart restart
+
+# 3. Band structure along L-G-X-M-G  ->  band.dat
+salmon < Si_band.inp
+```
+
+The path is given explicitly in the `&band` namelist (reduced reciprocal coordinates):
+
+```fortran
+&calculation
+  theory = 'dft_band'
+/
+&control
+  sysname    = 'Si'
+  yn_restart = 'y'      ! restart from the ground-state density in ./restart
+/
+&band
+  lattice         = 'non'              ! use the explicit kpt/ndiv_segment path below
+  nref_band       = 20                 ! converge eigenvalues up to this band index
+  tol_esp_diff    = 1.0d-5             ! per-band convergence tolerance on |dE| (a.u.)
+  num_of_segments = 4                  ! L-G-X-M-G : 4 segments, 5 end points
+  ndiv_segment(1:4) = 16, 16, 16, 16   ! k-points per segment
+  kpt(1:3,1) = 0.5d0, 0.5d0, 0.5d0     ! L
+  kpt(1:3,2) = 0.0d0, 0.0d0, 0.0d0     ! G
+  kpt(1:3,3) = 0.5d0, 0.0d0, 0.0d0     ! X
+  kpt(1:3,4) = 0.5d0, 0.5d0, 0.0d0     ! M
+  kpt(1:3,5) = 0.0d0, 0.0d0, 0.0d0     ! G
+  kpt_label(1) = 'L'
+  kpt_label(2) = 'G'
+  kpt_label(3) = 'X'
+  kpt_label(4) = 'M'
+  kpt_label(5) = 'G'
+/
+```
+
+`band.dat` starts with a small header (`Number_of_Bands`, `Number_of_kpt_in_each_block`, `Number_of_blocks`), then one `ik  k_red(1:3)  k_cart(1:3)` line per k-point, followed by `ik  ib  energy(spin...)` eigenvalue lines (energies in the chosen `unit_system`). For the sample above the silicon valence-band top sits at $\Gamma$ with the conduction-band minimum near $X$ (indirect gap), as expected for an LDA silicon band structure.
+
+| `&band` parameter | Default | Description |
+| :--- | :--- | :--- |
+| `lattice` | `''` | `'non'`: take the path from `kpt`/`ndiv_segment` below. `'sc'`/`'fcc'`/`'bcc'`/`'hex'`: use a built-in default path for that Bravais lattice. |
+| `nref_band` | `0` | Eigenvalues are converged (and convergence is checked) up to this band index. |
+| `tol_esp_diff` | `1.0d-5` | Per-band convergence tolerance on the eigenvalue change between iterations (a.u.). |
+| `num_of_segments` | `0` | Number of straight segments in the path (a path of `N` segments has `N+1` end points). |
+| `ndiv_segment(:)` | `0` | Number of k-points sampled along each segment. |
+| `kpt(1:3,:)` | `0` | Segment end points in **reduced reciprocal** coordinates (one more than `num_of_segments`). |
+| `kpt_label(:)` | `''` | Optional labels for the end points (`'G'`, `'X'`, ...). |
+
+---
+
+## Building & Continuous Integration
+
+The simplest serial (no-MPI) build, which the GitHub Actions workflow (`.github/workflows/build.yml`) also runs on every push and pull request to catch compilation errors:
+
+```sh
+cmake -B build -S . \
+  -D CMAKE_BUILD_TYPE=Release \
+  -D USE_MPI=OFF \
+  -D CMAKE_Fortran_FLAGS="-fallow-argument-mismatch -fallow-invalid-boz"
+cmake --build build -j "$(nproc)"
+# -> ./build/salmon
+```
+
+The `-fallow-argument-mismatch -fallow-invalid-boz` flags are needed for the bundled serial-communication stub under modern gfortran (≥ 10). For production runs configure with `-D USE_MPI=ON` and an MPI Fortran compiler, or use `configure.py` as in the upstream SALMON documentation.
 
 ---
 
