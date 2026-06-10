@@ -31,6 +31,9 @@ jobs:
         with:
           path: build/lapack
           key: lapack-${{ runner.os }}-${{ hashFiles('cmakefiles/Builder/build_lapack.cmake') }}
+                # Add this step to delete the conflicting files
+      - name: Clear Invalid CMake Cache
+        run: rm -f build/CMakeCache.txt
 
       - name: Configure SALMON (serial, no MPI)
         run: |
