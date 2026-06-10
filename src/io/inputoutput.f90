@@ -595,7 +595,8 @@ contains
       & frozen_core_threshold_ev, &
       & frozen_free_threshold_ev, &
       & sbe_decoh_temperature_k, &
-      & sbe_decoh_tau_m_fs
+      & sbe_decoh_tau_m_fs, &
+      & yn_sbe_spinor
 
     namelist/epm/ &
       & epm_material, &
@@ -1032,6 +1033,8 @@ contains
                                             ! Both thresholds are now relative to the Fermi energy for universality across materials
     sbe_decoh_temperature_k = -1.0d0     ! Default: <=0 disables Kuhn-Zurek decoherence (lambda = 0, exactly CPTP)
     sbe_decoh_tau_m_fs      = -1.0d0     ! Momentum relaxation time tau_m [fs]; both must be > 0 to enable decoherence
+    yn_sbe_spinor           = 'n'        ! 'y': GS input files from a spinor (spin-orbit split) system
+                                            ! (occupation 1 per spinor band, nelec valence bands instead of nelec/2)
 !! == default for &epm
     epm_material            = 'GaAs'
     epm_lattice_constant_au = 10.68d0    ! GaAs zincblende lattice constant (a = 5.65 Angstrom = 10.68 Bohr)
@@ -1670,6 +1673,7 @@ contains
     call comm_bcast(frozen_free_threshold_ev, nproc_group_global)
     call comm_bcast(sbe_decoh_temperature_k, nproc_group_global)
     call comm_bcast(sbe_decoh_tau_m_fs,      nproc_group_global)
+    call comm_bcast(yn_sbe_spinor,           nproc_group_global)
 !! == bcast for epm
     call comm_bcast(epm_material,            nproc_group_global)
     call comm_bcast(epm_lattice_constant_au, nproc_group_global)
@@ -2655,6 +2659,11 @@ contains
       end if
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_decoh_temperature_k', sbe_decoh_temperature_k
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_decoh_tau_m_fs', sbe_decoh_tau_m_fs
+      if(yn_sbe_spinor == 'y')then
+        write(fh_variables_log, '("# info: spinor (spin-orbit split) GS input: occupation 1 per band, ", &
+          & "nelec valence bands")')
+      end if
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_spinor', yn_sbe_spinor
 
       if(inml_epm >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'epm', inml_epm
@@ -2771,6 +2780,7 @@ contains
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)
+    call yn_argument_check(yn_sbe_spinor)
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
       stop "Nk must be 1 when yn_periodic=='n'"

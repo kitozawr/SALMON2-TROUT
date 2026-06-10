@@ -24,7 +24,7 @@ subroutine main_realtime_ssbe(icomm)
     integer :: nproc, irank, ierr
     integer :: fh_sbe_rt, fh_sbe_rt_energy, fh_sbe_nex, fh_sbe_nex_k
     integer :: nk
-    integer :: ib_lcb
+    integer :: ib_lcb, nb_vb
     real(8), allocatable :: pop_k(:)
 
     call comm_get_groupinfo(icomm, irank, nproc)
@@ -51,8 +51,16 @@ subroutine main_realtime_ssbe(icomm)
     E(:) = 0.0d0
     Jmat(:) = 0.0d0
 
+    ! Number of valence bands: nelec spinor bands (occupation 1 each) when the
+    ! GS input comes from a spin-orbit split system, nelec/2 scalar bands otherwise.
+    if (yn_sbe_spinor == 'y') then
+        nb_vb = nelec
+    else
+        nb_vb = nelec / 2
+    end if
+
     ! Lowest conduction band index (Houston-basis population output)
-    ib_lcb = nelec / 2 + 1
+    ib_lcb = nb_vb + 1
     allocate(pop_k(1:nk))
 
     if (irank == 0) then
@@ -130,7 +138,7 @@ subroutine main_realtime_ssbe(icomm)
 
         if (mod(it, out_projection_step) == 0) then
             tr_all = calc_trace(sbe, gs, nstate_sbe(1), icomm)
-            tr_vb = calc_trace(sbe, gs, nelec / 2, icomm)
+            tr_vb = calc_trace(sbe, gs, nb_vb, icomm)
             if (irank == 0) then
                 call write_sbe_nex_line(fh_sbe_nex, t, (tr_all - tr_vb) / gs%volume, (nelec - tr_vb) / gs%volume)
             end if

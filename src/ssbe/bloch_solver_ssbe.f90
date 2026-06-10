@@ -54,7 +54,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     use util_ssbe
     use communication, only: comm_get_groupinfo, comm_summation, comm_bcast
     use salmon_global, only: frozen_core_threshold_ev, frozen_free_threshold_ev, &
-                             sbe_decoh_temperature_k, sbe_decoh_tau_m_fs
+                             sbe_decoh_temperature_k, sbe_decoh_tau_m_fs, yn_sbe_spinor
     use phys_constants, only: au_fs, kB_au
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
@@ -120,13 +120,17 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     ! =========================================================================
     
     ! 1. Calculate Fermi Energy (Assumes closed-shell / even number of electrons)
-    
-    homo_idx = gs%ne / 2
-    lumo_idx = homo_idx + 1
-    
-    if (mod(gs%ne, 2) /= 0 .and. irank == 0) then
-        write(*, '(a)') 'WARNING: Odd number of electrons. Fermi energy assumes closed-shell.'
+
+    if (yn_sbe_spinor == 'y') then
+        ! Spinor bands: one electron per band, ne occupied bands
+        homo_idx = gs%ne
+    else
+        homo_idx = gs%ne / 2
+        if (mod(gs%ne, 2) /= 0 .and. irank == 0) then
+            write(*, '(a)') 'WARNING: Odd number of electrons. Fermi energy assumes closed-shell.'
+        end if
     end if
+    lumo_idx = homo_idx + 1
 
     fermi_energy_ev = ((gs%eigen(homo_idx, 1) + gs%eigen(lumo_idx, 1)) * 0.5d0) 
 
@@ -493,7 +497,8 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
             if (.not. (sbe%is_active(i) .and. sbe%is_active(j))) then
                 if (i == j) then
                     if (gs%occup(i, ik) > 0.5d0) then
-                        sbe%rho(i, j, ik) = dcmplx(2.0d0, 0.0d0)
+                        ! Ground-state occupation: 2 (scalar bands) or 1 (spinor bands)
+                        sbe%rho(i, j, ik) = dcmplx(gs%occup(i, ik), 0.0d0)
                     else
                         sbe%rho(i, j, ik) = dcmplx(0.0d0, 0.0d0)
                     end if
