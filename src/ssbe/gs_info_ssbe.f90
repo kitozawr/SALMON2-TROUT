@@ -39,6 +39,7 @@ contains
 subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, read_bin, icomm)
     use communication
     use filesystem, only: open_filehandle, get_filehandle
+    use salmon_global, only: yn_sbe_spinor
     implicit none
     type(s_sbe_gs_info), intent(inout) :: gs
     character(*), intent(in) :: sysname
@@ -109,7 +110,12 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
 
     !Initial Occupation Number
     gs%occup(:,:) = 0d0 !!Experimental!!
-    gs%occup(1:(ne/2),:) = 2d0 !!Experimental!!
+    if (yn_sbe_spinor == 'y') then
+        ! Spinor (spin-orbit split) input: one electron per spinor band
+        gs%occup(1:ne,:) = 1d0
+    else
+        gs%occup(1:(ne/2),:) = 2d0 !!Experimental!!
+    end if
 
     ! Calculate minimum band gap in atomic units (for gauge-covariant decoherence)
     call calc_eg_au()
@@ -306,20 +312,25 @@ contains
     subroutine calc_eg_au()
         use salmon_global, only: eg_ev
         implicit none
-        integer :: ik, ib_cb, ib_vb
+        integer :: ik, ib_cb, ib_vb, nb_vb
         real(8) :: eg_tmp
-        
+
+        ! Highest occupied band: ne spinor bands (occupation 1) or ne/2 scalar bands (occupation 2)
+        if (yn_sbe_spinor == 'y') then
+            nb_vb = gs%ne
+        else
+            nb_vb = gs%ne / 2
+        end if
+
         ! Check if user specified eg_ev = -1 (automatic calculation from band structure)
         if (eg_ev < 0.0d0) then
             ! Automatic calculation: find minimum band gap across all k-points
-            ! Assuming ne/2 is the highest occupied band (vb_max) and ne/2+1 is the lowest unoccupied (cb_min)
             gs%eg_au = 1.0d99  ! Initialize with large value
-            
+
             do ik = 1, gs%nk
                 ! For each k-point, find the minimum gap between conduction and valence bands
-                ! Using ne/2 as the top of valence band
-                do ib_cb = gs%ne/2 + 1, gs%nb
-                    do ib_vb = 1, gs%ne/2
+                do ib_cb = nb_vb + 1, gs%nb
+                    do ib_vb = 1, nb_vb
                         eg_tmp = gs%eigen(ib_cb, ik) - gs%eigen(ib_vb, ik)
                         if (eg_tmp > 0.0d0 .and. eg_tmp < gs%eg_au) then
                             gs%eg_au = eg_tmp

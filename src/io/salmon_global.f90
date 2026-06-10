@@ -443,6 +443,9 @@ character(256),allocatable :: atom_name(:)
   ! lambda_au = kB_au * sbe_decoh_temperature_k / (hartree_kelvin_relationship * tau_m_au)
   real(8)        :: sbe_decoh_temperature_k
   real(8)        :: sbe_decoh_tau_m_fs
+  ! 'y': ground-state input files come from a spinor (spin-orbit split) system:
+  !      2*Nb spinor bands, occupation 1 per band, nelec valence bands (not nelec/2)
+  character(1)   :: yn_sbe_spinor
 
   !! &epm (local empirical pseudopotential method, Cohen-Bergstresser)
   character(32)  :: epm_material

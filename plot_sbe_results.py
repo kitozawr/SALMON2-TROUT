@@ -19,6 +19,20 @@ What is plotted
   *_k.data + *_eigen.data: band structure along the requested path
                              k in reduced coords, energy shifted to VBM = 0 eV
 
+Spinor (spin-orbit split) input files
+-------------------------------------
+  Datasets generated with spin-orbit coupling (epm_gaas_reference.py with
+  INCLUDE_SPIN_ORBIT = True, consumed by SBE with yn_sbe_spinor = 'y') carry
+  2*Nb spinor bands with occupation 1 per band instead of 2.  The plotter
+  detects this automatically from the occupation column of *_eigen.data
+  (max occupation <= 1) and then treats each pair of adjacent (Kramers
+  partner) bands as ONE level: occupations of the two spin sub-bands are
+  summed (1+1 = 2 per valence level) and the band plot draws one curve per
+  level (energy = mean of the spin pair) on top of the faint spin-resolved
+  sub-bands, so tiny Dresselhaus splittings don't render as doubled lines
+  while the real spin-orbit splittings (e.g. Gamma8/Gamma7) stay visible.
+  Control with --spin-sum {auto,on,off}.
+
 Memory strategy
 ---------------
   Large *_sbe_rt*.data files are read with downsampling (--downsample N keeps
@@ -380,7 +394,7 @@ def _load_eigenvalues(eigenfile, nk):
     Parse SYSNAME_eigen.data (EPM/SALMON format).
     Block headers are comment lines '# ik = N'.
     Data lines: 'ib  energy_Ha  occup'.
-    Returns (eigen[nb, nk] in Ha, vbm_ha).
+    Returns (eigen[nb, nk] in Ha, occup[nb, nk], vbm_ha).
     """
     ik_re = re.compile(r'#\s*ik\s*=\s*(\d+)')
     eigen_map = {}     # 1-based ik → list of (energy_Ha, occup)
@@ -416,12 +430,24 @@ def _load_eigenvalues(eigenfile, nk):
 
     nb = max(len(v) for v in eigen_map.values())
     eigen = np.full((nb, nk), np.nan)
+    occup = np.full((nb, nk), np.nan)
     for ik, entries in eigen_map.items():
         if 1 <= ik <= nk:
-            for ib, (e, _) in enumerate(entries[:nb]):
+            for ib, (e, occ) in enumerate(entries[:nb]):
                 eigen[ib, ik - 1] = e
+                occup[ib, ik - 1] = occ
 
-    return eigen, vbm
+    return eigen, occup, vbm
+
+
+def _detect_spinor(occup):
+    """
+    True if the occupation column looks like a spinor (spin-orbit split)
+    dataset: occupied bands carry 1 electron each instead of 2
+    (epm_gaas_reference.py with INCLUDE_SPIN_ORBIT, SBE with yn_sbe_spinor='y').
+    """
+    occ_max = np.nanmax(occup)
+    return bool(0.0 < occ_max <= 1.0 + 1e-6)
 
 
 def _sym_equivalents(point):
@@ -459,11 +485,18 @@ def _nearest_k(ideal, k_db, snap_tol):
 
 def plot_band_structure(kfile, eigenfile, output_dir,
                         path_labels=None, hs_points=None,
-                        energy_range_ev=(-6, 12), dpi=150):
+                        energy_range_ev=(-6, 12), dpi=150, spin_sum='auto'):
     """
     Plot band structure from *_k.data and *_eigen.data.
     k-points must be in reduced (dimensionless) coordinates.
     Eigenvalues are read in Hartree, shifted to VBM = 0, plotted in eV.
+
+    spin_sum: 'auto' — detect a spinor (spin-orbit split) dataset from the
+              occupation column (max occ <= 1) and merge adjacent (Kramers
+              partner) spin sub-bands into levels: occupations summed,
+              level energy = mean of the pair; the spin-resolved sub-bands
+              are kept as faint lines underneath.
+              'on'  — force the merge, 'off' — plot all bands as-is.
     """
     if path_labels is None:
         path_labels = DEFAULT_BAND_PATH
@@ -490,9 +523,28 @@ def plot_band_structure(kfile, eigenfile, output_dir,
     snap_tol = grid_sp            # snap within one grid step
 
     # --- eigenvalues ----------------------------------------------------
-    eigen_ha, vbm_ha = _load_eigenvalues(eigenfile, nk)
+    eigen_ha, occup, vbm_ha = _load_eigenvalues(eigenfile, nk)
     nb = eigen_ha.shape[0]
     print(f"  {nb} bands, VBM = {vbm_ha:.6f} Ha = {vbm_ha * HA_TO_EV:.4f} eV")
+
+    # Spinor (spin-orbit split) input: merge spin pairs into levels?
+    if spin_sum == 'on':
+        spinor_merge = True
+    elif spin_sum == 'off':
+        spinor_merge = False
+    else:  # 'auto'
+        spinor_merge = _detect_spinor(occup)
+    if spinor_merge and nb % 2 != 0:
+        print(f"  WARNING: odd band count ({nb}) — cannot pair spin sub-bands, "
+              "plotting bands as-is")
+        spinor_merge = False
+    if spinor_merge:
+        n_lvl = nb // 2
+        lvl_occ = occup[0::2, :] + occup[1::2, :]     # spins summed per level
+        n_occ_lvl = int(np.nanmax(np.sum(lvl_occ > 0.1, axis=0)))
+        print(f"  spinor input detected (occupation <= 1 per band): "
+              f"summing spin pairs -> {n_lvl} levels "
+              f"({n_occ_lvl} occupied, {2:.0f} e- per occupied level)")
 
     eigen_ev = (eigen_ha - vbm_ha) * HA_TO_EV      # shift VBM → 0, convert
 
@@ -538,8 +590,21 @@ def plot_band_structure(kfile, eigenfile, output_dir,
 
     fig, ax = plt.subplots(figsize=(7, 6))
 
-    for b in range(bands.shape[1]):
-        ax.plot(dists, bands[:, b], 'k-', lw=0.8, alpha=0.6)
+    if spinor_merge:
+        # Faint spin-resolved sub-bands underneath ...
+        for b in range(bands.shape[1]):
+            ax.plot(dists, bands[:, b], '-', color='#7799cc', lw=0.5, alpha=0.45)
+        # ... one solid curve per level (Kramers pair, spins summed)
+        levels = 0.5 * (bands[:, 0::2] + bands[:, 1::2])
+        for b in range(levels.shape[1]):
+            ax.plot(dists, levels[:, b], 'k-', lw=0.9, alpha=0.75)
+        ax.plot([], [], '-', color='#7799cc', lw=0.8,
+                label='spin sub-bands')
+        ax.plot([], [], 'k-', lw=0.9,
+                label=f'levels (spin pairs, {levels.shape[1]})')
+    else:
+        for b in range(bands.shape[1]):
+            ax.plot(dists, bands[:, b], 'k-', lw=0.8, alpha=0.6)
 
     for pos in node_dists:
         ax.axvline(pos, color='#888888', linestyle='--', lw=0.7)
@@ -553,7 +618,10 @@ def plot_band_structure(kfile, eigenfile, output_dir,
     ax.set_ylabel('Energy (eV)', fontsize=11)
     ax.set_xlim(0.0, node_dists[-1])
     ax.set_ylim(*energy_range_ev)
-    ax.set_title(f'Band structure — {kfile.stem.replace("_k", "")}', fontsize=11)
+    title = f'Band structure — {kfile.stem.replace("_k", "")}'
+    if spinor_merge:
+        title += '  (spinor: spins summed per level)'
+    ax.set_title(title, fontsize=11)
     ax.legend(fontsize=9, loc='upper right')
     fig.tight_layout()
 
@@ -586,6 +654,12 @@ def main():
     parser.add_argument('--energy-range', nargs=2, type=float,
                         default=[-6.0, 12.0], metavar=('EMIN', 'EMAX'),
                         help='Energy window for band structure plot (eV)')
+    parser.add_argument('--spin-sum', choices=['auto', 'on', 'off'],
+                        default='auto',
+                        help='Spinor (spin-orbit split) eigen files: merge '
+                             'adjacent spin sub-bands into levels (occupations '
+                             'summed, energy = pair mean). "auto" detects '
+                             'spinor input from occupations <= 1 per band.')
 
     # Mode shortcuts (each implies the complementary --no-* flag)
     mode = parser.add_mutually_exclusive_group()
@@ -651,7 +725,7 @@ def main():
                     kf, ef, output_dir,
                     path_labels=args.band_path,
                     energy_range_ev=tuple(args.energy_range),
-                    dpi=args.dpi)
+                    dpi=args.dpi, spin_sum=args.spin_sum)
             except Exception as exc:
                 print(f"  ERROR in band structure for {kf.name}: {exc}")
 
