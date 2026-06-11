@@ -596,7 +596,11 @@ contains
       & frozen_free_threshold_ev, &
       & sbe_decoh_temperature_k, &
       & sbe_decoh_tau_m_fs, &
-      & yn_sbe_spinor
+      & yn_sbe_spinor, &
+      & yn_sbe_impact_ionization, &
+      & sbe_ii_prefactor, &
+      & sbe_ii_threshold_ev, &
+      & sbe_ii_ramp_ev
 
     namelist/epm/ &
       & epm_material, &
@@ -1034,6 +1038,10 @@ contains
     sbe_decoh_temperature_k = -1.0d0     ! Default: <=0 disables Kuhn-Zurek decoherence (lambda = 0, exactly CPTP)
     sbe_decoh_tau_m_fs      = -1.0d0     ! Momentum relaxation time tau_m [fs]; both must be > 0 to enable decoherence
     yn_sbe_spinor           = 'n'        ! 'y': GS input files from a spinor (spin-orbit split) system
+    yn_sbe_impact_ionization = 'n'       ! 'y': enable the k-local impact-ionization Lindblad channel (optional, may be slow)
+    sbe_ii_prefactor        = 2.0d12     ! Stobbe fit prefactor P [s^-1 eV^-4] (GaAs, PRB 49, 4494)
+    sbe_ii_threshold_ev     = 2.1d0      ! Stobbe fit threshold E_th [eV] above the CBM
+    sbe_ii_ramp_ev          = 0.2d0      ! linear Theta-smoothing width [eV] (fit resolution); <=0: hard step
                                             ! (occupation 1 per spinor band, nelec valence bands instead of nelec/2)
 !! == default for &epm
     epm_material            = 'GaAs'
@@ -1674,6 +1682,10 @@ contains
     call comm_bcast(sbe_decoh_temperature_k, nproc_group_global)
     call comm_bcast(sbe_decoh_tau_m_fs,      nproc_group_global)
     call comm_bcast(yn_sbe_spinor,           nproc_group_global)
+    call comm_bcast(yn_sbe_impact_ionization, nproc_group_global)
+    call comm_bcast(sbe_ii_prefactor,        nproc_group_global)
+    call comm_bcast(sbe_ii_threshold_ev,     nproc_group_global)
+    call comm_bcast(sbe_ii_ramp_ev,          nproc_group_global)
 !! == bcast for epm
     call comm_bcast(epm_material,            nproc_group_global)
     call comm_bcast(epm_lattice_constant_au, nproc_group_global)
@@ -2664,6 +2676,15 @@ contains
           & "nelec valence bands")')
       end if
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_spinor', yn_sbe_spinor
+      if(yn_sbe_impact_ionization == 'y')then
+        write(fh_variables_log, '("# info: impact ionization enabled (Stobbe fit): P=",ES12.5,&
+          & " s^-1 eV^-4, E_th=",ES12.5," eV, ramp=",ES12.5," eV")') &
+          & sbe_ii_prefactor, sbe_ii_threshold_ev, sbe_ii_ramp_ev
+      end if
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_impact_ionization', yn_sbe_impact_ionization
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_ii_prefactor', sbe_ii_prefactor
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_ii_threshold_ev', sbe_ii_threshold_ev
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_ii_ramp_ev', sbe_ii_ramp_ev
 
       if(inml_epm >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'epm', inml_epm
@@ -2781,6 +2802,7 @@ contains
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)
     call yn_argument_check(yn_sbe_spinor)
+    call yn_argument_check(yn_sbe_impact_ionization)
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
       stop "Nk must be 1 when yn_periodic=='n'"

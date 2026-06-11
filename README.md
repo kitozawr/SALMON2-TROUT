@@ -60,6 +60,15 @@ with the projected Weisz/Bloom-Bergstresser spin-orbit operator (Chelikowsky-Coh
 
 On the SBE side the new `&sbe` flag **`yn_sbe_spinor`** switches the solver to such spin-orbit split input files: occupations become **1 per spinor band** over the first `nelec` bands (instead of 2 per band over `nelec/2`), and every `nelec/2`-derived index (Fermi level for the frozen core, lowest conduction band for `_sbe_nex_k`, valence trace for `_sbe_nex`, automatic minimum-gap search) consistently uses `nelec` valence bands. The spinor Bloch equation stays a **single** $2N_b\times 2N_b$ equation — spin-orbit couples the spin channels, so it does not factorize.
 
+### 7. k-local impact ionization (optional Lindblad channel, `yn_sbe_impact_ionization`)
+A fully **optional** carrier-multiplication channel for GaAs (off by default — it can be slow, and for a first estimate the purely coherent + dephasing code is sufficient). Hot conduction electrons with kinetic energy above the threshold ionize a valence electron, creating a "cold" e–h pair at the band edges, with the rate taken from the verified **Stobbe–Redmer–Schattke fit** (PRB 49, 4494) to a full Fermi-golden-rule calculation on the *same* Cohen-Bergstresser band structure as our EPM:
+
+$$\gamma_{\rm St}(\varepsilon^{\rm kin}) = P\,(\varepsilon^{\rm kin}-E_{\rm th})^4\,\Theta(\varepsilon^{\rm kin}-E_{\rm th}),\qquad P = 2\times10^{12}\ {\rm s^{-1}eV^{-4}},\quad E_{\rm th}=2.1\ {\rm eV},$$
+
+with $\varepsilon^{\rm kin}$ measured from the field-free CBM (the $\tfrac12 A^2$ scalar dropped in $H_{VG}$ is restored exactly here; by the Houston identity $\varepsilon^{\rm kin}=E_h(k+A)-E_{\rm CBM}$ — the scale on which the fit is defined). The quartic two-particle event $\hat A_h=\sqrt{\gamma_{\rm St}}\,c^\dagger_{h'}c^\dagger_{c_1}c_{v_1}c_h$ is closed **k-locally** (no momentum transfer — k-points stay independent, VG parallelism intact) and Hartree-Fock-factorized (two-particle closure, Rosati–Iotti–Dolcini–Rossi PRB 90, 125140) into two **frozen-rate amplitude-damping channels** in the same Houston basis as the Kuhn-Zurek dephasing (no extra ZHEEV): primary relaxation $h\to h'$ (the conduction branch closest to $\varepsilon_h-E_g$) and cold-pair creation $v_1\to c_1$, with partner populations and Pauli blockers entering as scalar factors clamped to $[0,1]$ — every map is **exactly CPTP** for any step. In the Boltzmann limit the diagonals reproduce the canonical impact-ionization collision integral $W_h=\gamma_{\rm St}\tilde\rho_{hh}\tilde\rho_{v_1v_1}(1-\tilde\rho_{c_1c_1})(1-\tilde\rho_{h'h'})$ (one e–h pair per event, $\dot n_c = \gamma_{\rm St} n_{\rm hot}$ in the dilute limit), and ionization additionally **destroys the coherences** of the participating branches — a decoherence channel of its own. A threshold gate keeps the cost at $O(N_C)$ comparisons per k-point while no populated branch exceeds $E_{\rm th}$ ("rare impact events").
+
+**Declared limitations of the fit** (Stobbe): direction-averaged (their matrix elements are nearly isotropic — energy is the dominant variable); electron-initiated channel only (hole-initiated omitted); no phonon-assisted ionization, collisional broadening, or field-induced threshold softening (Quade–Schöll–Rossi: at MV/cm there is strictly no fixed threshold — near-threshold rates are underestimated, a known limitation); fit energy resolution $\delta E = 0.2$ eV (the $\Theta$ step is smoothed by a linear ramp of this width). Electron–electron scattering ($O(N_k^2)$, expensive) and Auger recombination ($\gamma_{\rm Auger}\sim10^6$ s$^{-1}$, negligible on sub-ps scales) are deliberately excluded.
+
 ---
 
 ## The CF4 + Suzuki-Yoshida + CPTP Operator Splitting
@@ -93,6 +102,10 @@ The `&sbe` namelist now accepts the following parameters:
 | `frozen_core_threshold_ev` | eV | `0.0d0` | Freeze bands below $E_F + \text{threshold}$. (Use negative values, e.g., `-15.0`). |
 | `frozen_free_threshold_ev` | eV | `0.0d0` | Freeze bands above $E_F + \text{threshold}$. (Use positive values, e.g., `+20.0`). |
 | `yn_sbe_spinor` | — | `'n'` | `'y'`: ground-state input files come from a **spinor (spin-orbit split)** system — occupation 1 per spinor band, `nelec` valence bands instead of `nelec/2`. Combine with `yn_vnl_correction='y'` when the dataset carries the $\hat v_{SO}=\nabla_k\hat H_{SO}$ correction in `rvnl_tm`. |
+| `yn_sbe_impact_ionization` | — | `'n'` | `'y'`: enable the **k-local impact-ionization** Lindblad channel (Stobbe rate fit, GaAs). Fully optional; threshold-gated, so it costs ~nothing while no populated branch exceeds $E_{\rm th}$. |
+| `sbe_ii_prefactor` | s⁻¹eV⁻⁴ | `2.0d12` | Stobbe fit prefactor $P$ in $\gamma_{\rm St}=P(\varepsilon^{\rm kin}-E_{\rm th})^4$. |
+| `sbe_ii_threshold_ev` | eV | `2.1d0` | Ionization threshold $E_{\rm th}$ above the field-free CBM. |
+| `sbe_ii_ramp_ev` | eV | `0.2d0` | Linear $\Theta$-smoothing width (the fit's energy resolution); `<= 0` gives a hard step. |
 
 *Note: Internal conversions to atomic units (Hartree) are handled automatically (`kB_au`, `au_fs`).*
 

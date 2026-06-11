@@ -32,6 +32,22 @@ module bloch_solver_ssbe
         ! Kuhn-Zurek/Caldeira-Leggett decoherence: lambda = kB*T / tau_m
         real(8) :: lambda_decoh = 0d0
         logical :: flag_decoh   = .false.
+
+        ! k-local impact-ionization Lindblad channel (Stobbe rate fit):
+        !   gamma(e_kin) = P (e_kin - E_th)^4 Theta(e_kin - E_th),
+        ! e_kin measured from the global field-free CBM. Each event is split
+        ! (Hartree-Fock / two-particle closure) into two frozen-rate
+        ! amplitude-damping channels: primary relaxation h -> h' and cold-pair
+        ! creation v1 -> c1, applied in the same Houston basis as the
+        ! Kuhn-Zurek dephasing (no extra ZHEEV).
+        logical :: flag_impact  = .false.
+        real(8) :: ii_pref_au   = 0d0   ! P in 1/(Ha^4 a.u.time)
+        real(8) :: ii_eth_au    = 0d0   ! threshold E_th [Ha]
+        real(8) :: ii_ramp_au   = 0d0   ! linear Theta-smoothing width [Ha]
+        real(8) :: ii_ecbm_au   = 0d0   ! global CBM of the field-free bands [Ha]
+        real(8) :: ii_eg_au     = 0d0   ! band gap E_g [Ha] (primary loses E_g)
+        integer :: nv_act       = 0     ! valence branches inside the active subspace
+        real(8) :: occ_max      = 2d0   ! 2 (scalar bands) / 1 (spinor bands)
     end type
 
     !=========================================================================
@@ -54,8 +70,10 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     use util_ssbe
     use communication, only: comm_get_groupinfo, comm_summation, comm_bcast
     use salmon_global, only: frozen_core_threshold_ev, frozen_free_threshold_ev, &
-                             sbe_decoh_temperature_k, sbe_decoh_tau_m_fs, yn_sbe_spinor
-    use phys_constants, only: au_fs, kB_au
+                             sbe_decoh_temperature_k, sbe_decoh_tau_m_fs, yn_sbe_spinor, &
+                             yn_sbe_impact_ionization, sbe_ii_prefactor, &
+                             sbe_ii_threshold_ev, sbe_ii_ramp_ev
+    use phys_constants, only: au_fs, kB_au, au_ev
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info), intent(in) :: gs
@@ -186,6 +204,39 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
         ! Modern Fortran handles zero-sized arrays natively. 
         ! If downstream legacy code crashes on size 0, revert to allocate(sbe%active_idx(1))
         allocate(sbe%active_idx(0))  
+    end if
+
+    ! =========================================================================
+    ! k-local impact-ionization channel (optional, yn_sbe_impact_ionization)
+    ! =========================================================================
+    sbe%occ_max = merge(1d0, 2d0, yn_sbe_spinor == 'y')
+    sbe%flag_impact = (yn_sbe_impact_ionization == 'y')
+    if (sbe%flag_impact) then
+        ! Stobbe prefactor P [s^-1 eV^-4] -> [1/(Ha^4 a.u.time)]:
+        ! rate_au = P * t_au[s] * (dE[Ha] * au_ev)^4
+        sbe%ii_pref_au = sbe_ii_prefactor * (au_fs * 1d-15) * au_ev**4
+        sbe%ii_eth_au  = sbe_ii_threshold_ev / au_ev
+        sbe%ii_ramp_au = sbe_ii_ramp_ev / au_ev
+        ! Global CBM of the field-free band structure (kinetic-energy zero of
+        ! the Stobbe fit) and the gap lost by the primary electron per event.
+        if (homo_idx + 1 > gs%nb) stop "impact ionization: no conduction bands"
+        sbe%ii_ecbm_au = minval(gs%eigen(homo_idx + 1, :))
+        sbe%ii_eg_au   = gs%eg_au
+        ! Valence branches inside the active subspace: v1 = sbe%nv_act,
+        ! c1 = sbe%nv_act + 1 in active (energy-ordered Houston) indexing.
+        sbe%nv_act = 0
+        do ib = 1, sbe%n_active_bands
+            if (sbe%active_idx(ib) <= homo_idx) sbe%nv_act = sbe%nv_act + 1
+        end do
+        if (irank == 0) then
+            write(*, '(a)') '# impact ionization (k-local Lindblad, Stobbe fit) enabled:'
+            write(*, '(a,ES12.5,a)') '#   P     = ', sbe%ii_pref_au, ' 1/(Ha^4 a.u.t)'
+            write(*, '(a,ES12.5,a,ES12.5,a)') '#   E_th  = ', sbe%ii_eth_au, ' Ha, ramp = ', sbe%ii_ramp_au, ' Ha'
+            write(*, '(a,ES12.5,a,ES12.5,a)') '#   E_CBM = ', sbe%ii_ecbm_au, ' Ha, E_g  = ', sbe%ii_eg_au, ' Ha'
+            write(*, '(a,i4,a,i4)') '#   active valence branches = ', sbe%nv_act, ' / ', sbe%n_active_bands
+            if (sbe%nv_act < 1 .or. sbe%nv_act >= sbe%n_active_bands) &
+                write(*, '(a)') '#   WARNING: no valence or no conduction branches active -- channel is inert'
+        end if
     end if
 
     ! 7. Diagnostic Print
@@ -437,12 +488,14 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
             end do
 
             !-----------------------------------------------------------------
-            ! Step 1: D(h/2) -- Strang/Hadamard dephasing, tau = +h/2 > 0
+            ! Step 1: D(h/2) -- Strang dissipative half-step: Hadamard
+            ! Kuhn-Zurek dephasing and/or impact-ionization channels, both in
+            ! the same Houston basis (one shared ZHEEV), tau = +h/2 > 0
             !-----------------------------------------------------------------
-            if (sbe%flag_decoh) then
+            if (sbe%flag_decoh .or. sbe%flag_impact) then
                 call build_HVG(nba, eigen_active, p_active, Ac_begin, HVG)
-                call houston_dephase(nba, rho_a, HVG, p_active, Ac_begin, X_a, &
-                                     sbe%lambda_decoh, 0.5d0 * dt, V_begin)
+                call houston_dissipate(sbe, nba, rho_a, HVG, p_active, Ac_begin, X_a, &
+                                       0.5d0 * dt, V_begin)
             else
                 V_begin = 0d0
             end if
@@ -461,12 +514,12 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
             end do
 
             !-----------------------------------------------------------------
-            ! Step 3: D(h/2) -- Strang/Hadamard dephasing, tau = +h/2 > 0
+            ! Step 3: D(h/2) -- Strang dissipative half-step (see Step 1)
             !-----------------------------------------------------------------
-            if (sbe%flag_decoh) then
+            if (sbe%flag_decoh .or. sbe%flag_impact) then
                 call build_HVG(nba, eigen_active, p_active, Ac_end, HVG)
-                call houston_dephase(nba, rho_a, HVG, p_active, Ac_end, X_a, &
-                                     sbe%lambda_decoh, 0.5d0 * dt, V_end)
+                call houston_dissipate(sbe, nba, rho_a, HVG, p_active, Ac_end, X_a, &
+                                       0.5d0 * dt, V_end)
             else
                 V_end = 0d0
             end if
@@ -591,29 +644,31 @@ subroutine apply_unitary_rotation(nba, rho, Omega)
 end subroutine apply_unitary_rotation
 
 
-! Strang/Hadamard Kuhn-Zurek/Caldeira-Leggett dephasing step (exactly CPTP for
-! any tau >= 0, by the Schoenberg/Bochner positive-definiteness of the
-! Gaussian/RBF kernel combined with the Schur product theorem):
-!   1) diagonalize the instantaneous H_VG(t) -> Houston (adiabatic) basis U, {E_a}
+! Strang dissipative half-step in the instantaneous Houston (adiabatic) basis.
+! One ZHEEV serves both dissipative channels:
+!   1) diagonalize the instantaneous H_VG(t) -> Houston basis U, {eps_a}
 !   2) rotate rho~ = U^dagger rho U
-!   3) rho~_ab <- exp[-lambda (X_a - X_b)^2 * tau] * rho~_ab     (Hadamard product
-!      with a positive-semi-definite Gram/RBF matrix => exactly CPTP)
-!   4) rotate back rho = U rho~ U^dagger
+!   3) [flag_decoh ] rho~_ab <- exp[-lambda (X_a - X_b)^2 * tau] * rho~_ab
+!      (Hadamard product with a PSD Gram/RBF matrix => exactly CPTP, by
+!      Schoenberg/Bochner positive-definiteness + the Schur product theorem)
+!   4) [flag_impact] k-local impact-ionization jump channels (see
+!      apply_impact_ionization below) -- each an exact amplitude-damping map,
+!      CPTP for any tau >= 0
+!   5) rotate back rho = U rho~ U^dagger
 ! Also returns the instantaneous branch (group) velocities in the field
-! polarization direction, V_a = [(U^dagger pi U)_aa . e_hat] + (A . e_hat),
-! i.e. the projection of v = p + A onto the unit vector of the external
-! vector potential (or a fixed reference axis when A ~ 0). These feed the
-! midpoint update of the branch positions X_a used by the next dephasing step.
-subroutine houston_dephase(nba, rho, H, p_active, Ac, X, lambda, tau, V)
+! polarization direction, V_a = [(U^dagger pi U)_aa . e_hat] + (A . e_hat)
+! (computed only when the Kuhn-Zurek dephasing needs the branch positions).
+subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V)
     use eigen_lapack, only: eigen_zheev
     implicit none
+    type(s_sbe_bloch_solver), intent(in) :: sbe
     integer,    intent(in)    :: nba
     complex(8), intent(inout) :: rho(nba, nba)
     complex(8), intent(in)    :: H(nba, nba)
     complex(8), intent(in)    :: p_active(nba, nba, 3)
     real(8),    intent(in)    :: Ac(3)
     real(8),    intent(in)    :: X(nba)
-    real(8),    intent(in)    :: lambda, tau
+    real(8),    intent(in)    :: tau
     real(8),    intent(out)   :: V(nba)
 
     real(8)    :: evals(nba), ehat(3), Ac_norm
@@ -626,34 +681,156 @@ subroutine houston_dephase(nba, rho, H, p_active, Ac, X, lambda, tau, V)
     call ZGEMM('C', 'N', nba, nba, nba, dcmplx(1d0, 0d0), W,  nba, rho, nba, dcmplx(0d0, 0d0), t1, nba)
     call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0, 0d0), t1, nba, W,   nba, dcmplx(0d0, 0d0), t2, nba)
 
-    ! Exact Hadamard/Gaussian kernel (PSD for tau >= 0)
-    do j = 1, nba
-        do i = 1, nba
-            t2(i, j) = t2(i, j) * exp(-lambda * (X(i) - X(j))**2 * tau)
+    ! Exact Hadamard/Gaussian dephasing kernel (PSD for tau >= 0)
+    if (sbe%flag_decoh) then
+        do j = 1, nba
+            do i = 1, nba
+                t2(i, j) = t2(i, j) * exp(-sbe%lambda_decoh * (X(i) - X(j))**2 * tau)
+            end do
         end do
-    end do
+    end if
+
+    ! k-local impact-ionization channels (threshold-gated, frozen rates)
+    if (sbe%flag_impact) then
+        call apply_impact_ionization(sbe, nba, t2, evals, Ac, tau)
+    end if
 
     ! rho = U rho~ U^dagger
     call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0, 0d0), W,  nba, t2, nba, dcmplx(0d0, 0d0), t1, nba)
     call ZGEMM('N', 'C', nba, nba, nba, dcmplx(1d0, 0d0), t1, nba, W,  nba, dcmplx(0d0, 0d0), rho, nba)
 
-    ! Branch velocities, projected on the polarization direction of A(t)
-    Ac_norm = sqrt(dot_product(Ac, Ac))
-    if (Ac_norm > 1.0d-12) then
-        ehat = Ac / Ac_norm
-    else
-        ehat = (/ 1d0, 0d0, 0d0 /)
-    end if
-
+    ! Branch velocities, projected on the polarization direction of A(t);
+    ! only the Kuhn-Zurek branch positions consume them.
     V = 0d0
-    do idir = 1, 3
-        call ZGEMM('C', 'N', nba, nba, nba, dcmplx(1d0, 0d0), W,  nba, p_active(:, :, idir), nba, dcmplx(0d0, 0d0), t1, nba)
-        call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0, 0d0), t1, nba, W,                     nba, dcmplx(0d0, 0d0), t2, nba)
-        do i = 1, nba
-            V(i) = V(i) + ehat(idir) * (real(t2(i, i)) + Ac(idir))
+    if (sbe%flag_decoh) then
+        Ac_norm = sqrt(dot_product(Ac, Ac))
+        if (Ac_norm > 1.0d-12) then
+            ehat = Ac / Ac_norm
+        else
+            ehat = (/ 1d0, 0d0, 0d0 /)
+        end if
+
+        do idir = 1, 3
+            call ZGEMM('C', 'N', nba, nba, nba, dcmplx(1d0, 0d0), W,  nba, p_active(:, :, idir), nba, &
+                       dcmplx(0d0, 0d0), t1, nba)
+            call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0, 0d0), t1, nba, W, nba, dcmplx(0d0, 0d0), t2, nba)
+            do i = 1, nba
+                V(i) = V(i) + ehat(idir) * (real(t2(i, i)) + Ac(idir))
+            end do
         end do
+    end if
+end subroutine houston_dissipate
+
+
+!=============================================================================
+! k-local impact ionization (Stobbe-Redmer-Schattke rate fit, PRB 49, 4494)
+! in the Houston basis. The quartic two-particle event
+!   A_h = sqrt(gamma_St) c+_h' c+_c1 c_v1 c_h
+! is closed k-locally (no momentum transfer) and Hartree-Fock-factorized
+! (two-particle closure, Rosati-Iotti-Dolcini-Rossi PRB 90, 125140) into two
+! effective single-particle amplitude-damping channels with FROZEN scalar
+! rates (partner population and Pauli blockers enter as factors clamped to
+! [0,1], guaranteeing Gamma >= 0 => each map is exactly CPTP):
+!   rel : branch h  -> h'  with Gamma_rel  = gamma_St * f_v1 (1-f_c1)(1-f_h')
+!   pair: branch v1 -> c1  with Gamma_pair = gamma_St * f_h  (1-f_c1)(1-f_h')
+! "Cold pair": secondaries are born at the band-edge branches v1/c1 with no
+! kinetic energy; the primary drops to the conduction branch closest to
+! eps_h - E_g. The hot set is gated on the kinetic energy from the global CBM,
+!   eps_kin = eps_h + |A|^2/2 - E_CBM
+! (the A^2/2 scalar dropped in H_VG is restored here, where the comparison
+! against the field-free constant E_CBM requires it; by the Houston identity
+! this equals E_h(k+A) - E_CBM -- the scale on which the Stobbe fit is
+! defined). For most k-points and times the gate is empty and the channel
+! costs O(N_C) comparisons -- the "rare impact events" mechanism.
+!=============================================================================
+subroutine apply_impact_ionization(sbe, nba, rho_ad, evals, Ac, tau)
+    implicit none
+    type(s_sbe_bloch_solver), intent(in) :: sbe
+    integer,    intent(in)    :: nba
+    complex(8), intent(inout) :: rho_ad(nba, nba)   ! adiabatic-basis rho~
+    real(8),    intent(in)    :: evals(nba)         ! Houston branch energies
+    real(8),    intent(in)    :: Ac(3)
+    real(8),    intent(in)    :: tau
+
+    integer :: iv1, ic1, ih, ihp, a
+    real(8) :: a2half, ekin, d, gam, etgt, f
+    real(8) :: pv1, phh, bc1, bhp, g_rel, g_pair
+    real(8), parameter :: occ_eps = 1d-12
+
+    if (sbe%nv_act < 1 .or. sbe%nv_act >= nba) return
+    iv1 = sbe%nv_act        ! topmost valence branch (energy-ordered)
+    ic1 = sbe%nv_act + 1    ! lowest conduction branch
+    f = sbe%occ_max
+    a2half = 0.5d0 * dot_product(Ac, Ac)
+
+    do ih = ic1, nba
+        ! Threshold gate on the kinetic energy from the field-free CBM
+        ekin = evals(ih) + a2half - sbe%ii_ecbm_au
+        d = ekin - sbe%ii_eth_au
+        if (d <= 0d0) cycle
+        if (real(rho_ad(ih, ih)) < occ_eps) cycle
+
+        ! Stobbe rate, with optional linear ramp over the fit resolution
+        gam = sbe%ii_pref_au * d**4
+        if (sbe%ii_ramp_au > 0d0 .and. d < sbe%ii_ramp_au) gam = gam * d / sbe%ii_ramp_au
+
+        ! Receiving branch of the primary electron: closest to eps_h - E_g
+        etgt = evals(ih) - sbe%ii_eg_au
+        ihp = ic1
+        do a = ic1, nba
+            if (abs(evals(a) - etgt) < abs(evals(ihp) - etgt)) ihp = a
+        end do
+        if (ihp == ih) cycle   ! no receiving state below: event suppressed
+
+        ! Frozen scalar factors (partner population + Pauli blockers),
+        ! clamped to [0,1] so that Gamma >= 0 (each map strictly CPTP)
+        pv1 = min(max(real(rho_ad(iv1, iv1)) / f, 0d0), 1d0)
+        phh = min(max(real(rho_ad(ih,  ih )) / f, 0d0), 1d0)
+        bc1 = min(max(1d0 - real(rho_ad(ic1, ic1)) / f, 0d0), 1d0)
+        bhp = min(max(1d0 - real(rho_ad(ihp, ihp)) / f, 0d0), 1d0)
+        g_rel  = gam * pv1 * bc1 * bhp
+        g_pair = gam * phh * bc1 * bhp
+
+        ! Sequential exact amplitude-damping maps (each CPTP for any tau>=0;
+        ! inter-channel splitting error is O((Gamma*tau)^2))
+        call apply_damping_channel(nba, rho_ad, ih,  ihp, g_rel,  tau)
+        call apply_damping_channel(nba, rho_ad, iv1, ic1, g_pair, tau)
     end do
-end subroutine houston_dephase
+end subroutine apply_impact_ionization
+
+
+! Exact finite-time map of a single Lindblad jump channel L = sqrt(Gamma)|f><i|
+! (amplitude damping i -> f) in the basis where i, f are basis states; O(N):
+!   rho_ii -> e^{-G tau} rho_ii
+!   rho_ff -> rho_ff + (1 - e^{-G tau}) rho_ii
+!   rho_ib -> e^{-G tau/2} rho_ib  (and rho_bi), for all b /= i
+! Trace-preserving and completely positive for any Gamma, tau >= 0. The jump
+! L rho L^dagger = Gamma rho_ii |f><f| feeds only the f-diagonal: no new
+! coherences are created, while the populations and coherences of the source
+! branch are damped -- ionization is itself a decoherence channel.
+subroutine apply_damping_channel(nba, rho, i_src, i_dst, gamma_ch, tau)
+    implicit none
+    integer,    intent(in)    :: nba
+    complex(8), intent(inout) :: rho(nba, nba)
+    integer,    intent(in)    :: i_src, i_dst
+    real(8),    intent(in)    :: gamma_ch, tau
+
+    real(8) :: g, gh, transfer
+    integer :: b
+
+    if (gamma_ch * tau < 1d-14) return
+    g  = exp(-gamma_ch * tau)
+    gh = sqrt(g)
+    transfer = (1d0 - g) * real(rho(i_src, i_src))
+
+    do b = 1, nba
+        if (b == i_src) cycle
+        rho(i_src, b) = gh * rho(i_src, b)
+        rho(b, i_src) = gh * rho(b, i_src)
+    end do
+    rho(i_src, i_src) = g * rho(i_src, i_src)
+    rho(i_dst, i_dst) = rho(i_dst, i_dst) + transfer
+end subroutine apply_damping_channel
 
 
 ! Population of band `ib_target` resolved per k-point, in the stationary
