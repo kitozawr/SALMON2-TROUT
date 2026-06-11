@@ -34,6 +34,8 @@ correction v_SO = -i[r, H_SO] = grad_k H_SO(k); it is written to block 2
 yn_vnl_correction = 'y' (and yn_sbe_spinor = 'y') for a spinor dataset.
 """
 
+import sys
+
 import numpy as np
 from scipy.linalg import eigh, eigvalsh
 
@@ -66,6 +68,40 @@ SO_MU_GUESS         = 1.0e-4        # initial guess for mu [Ha * Bohr^4]
 SO_DELTA0_TARGET_EV = 0.341         # target Gamma8-Gamma7 splitting (GaAs)
 
 SYSNAME = 'GaAs_cubic_so' if INCLUDE_SPIN_ORBIT else 'GaAs_cubic'
+
+# -----------------------------------------------------------------------------
+# Unfolded (primitive-cell) band path mode:  python3 epm_gaas_reference.py bandpath
+#
+# The cubic 8-atom cell is a supercell of 4 primitive FCC cells, so its bands
+# are the primitive bands FOLDED 4-fold: every cubic k carries the states of
+# 4 primitive BZ points, and along any path the conduction manifold shows 4
+# overlaid copies of CB1/CB2/CB3 -- dense crossings that are an artifact of
+# the supercell representation, not of the physics (cf. band unfolding,
+# Quan-Rybin-Scheffler-Carbogno, PRB 113, 085112 (2026); Popescu-Zunger).
+#
+# Because the folding is EXACT here (the parity selection rule makes H block-
+# diagonal over the 4 FCC reciprocal sublattices to machine precision), the
+# primitive bands can be recovered exactly: for a primitive k = k_sc + G0 we
+# extract the sublattice block {G : G - G0 in the FCC reciprocal set} of the
+# cubic Hamiltonian at k_sc and diagonalize it. This mode writes
+# SYSNAME_bandpath.data with the clean primitive bands along the path below
+# (plotted by plot_sbe_results.py, including a Dresselhaus spin-splitting
+# panel in the spinor case). It does NOT touch the MP-grid SBE dataset.
+# -----------------------------------------------------------------------------
+BANDPATH_LABELS = ['L', 'Gamma', 'X', 'W', 'K', 'Gamma']
+BANDPATH_NDIV   = 40      # k-points per path segment
+BANDPATH_NB     = 24      # states written per primitive k (12 in scalar mode)
+
+# High-symmetry points in REDUCED coordinates of the FCC primitive reciprocal
+# basis b1=(2pi/a)(-1,1,1), b2=(2pi/a)(1,-1,1), b3=(2pi/a)(1,1,-1).
+HS_POINTS_FCC_PRIM = {
+    'Gamma': (0.000, 0.000, 0.000),
+    'X':     (0.000, 0.500, 0.500),
+    'L':     (0.500, 0.500, 0.500),
+    'W':     (0.250, 0.500, 0.750),
+    'K':     (0.375, 0.375, 0.750),
+    'U':     (0.250, 0.625, 0.625),
+}
 
 HARTREE_EV = 27.211386245988
 
@@ -297,6 +333,98 @@ def calibrate_so_mu(Gcart, a_lattice):
     return mu
 
 # =============================================================================
+# Unfolded primitive-cell band path (exact sublattice-block extraction)
+# =============================================================================
+def fcc_reciprocal_rows(a_lattice):
+    """FCC primitive reciprocal vectors as rows [Cartesian, a.u.]."""
+    c = 2.0 * np.pi / a_lattice
+    return c * np.array([[-1.0, 1.0, 1.0],
+                         [ 1.0, -1.0, 1.0],
+                         [ 1.0, 1.0, -1.0]])
+
+def sublattice_mask(G_indices, g0_idx):
+    """Plane waves G with G - G0 in the FCC reciprocal set (all components of
+    (h,k,l) of equal parity) -- the exact primitive block at k_sc + G0."""
+    d = G_indices - g0_idx[None, :]
+    return ((d[:, 0] - d[:, 1]) % 2 == 0) & ((d[:, 1] - d[:, 2]) % 2 == 0)
+
+def generate_bandpath(mu, Gcart, a_lattice):
+    """Compute the UNFOLDED primitive-cell bands along BANDPATH_LABELS by
+    diagonalizing the exact FCC-sublattice blocks of the cubic Hamiltonian.
+    Also asserts the block-diagonality (folding correctness) at every point."""
+    twopi_over_a = 2.0 * np.pi / a_lattice
+    G_indices = np.round(Gcart / twopi_over_a).astype(int)
+    B = fcc_reciprocal_rows(a_lattice)
+    npw = Gcart.shape[0]
+
+    nb_out = BANDPATH_NB if INCLUDE_SPIN_ORBIT else BANDPATH_NB // 2
+    ne_prim = NELEC // 4                      # electrons per primitive 2-atom cell
+    nv = ne_prim if INCLUDE_SPIN_ORBIT else ne_prim // 2
+
+    # Build the sampled path (primitive reduced -> Cartesian)
+    qpts, dists, node_d = [], [], [0.0]
+    cum = 0.0
+    for iseg in range(len(BANDPATH_LABELS) - 1):
+        qa = np.array(HS_POINTS_FCC_PRIM[BANDPATH_LABELS[iseg]])
+        qb = np.array(HS_POINTS_FCC_PRIM[BANDPATH_LABELS[iseg + 1]])
+        ka, kb = qa @ B, qb @ B
+        seg_len = np.linalg.norm(kb - ka) / twopi_over_a
+        last = (iseg == len(BANDPATH_LABELS) - 2)
+        for s in range(BANDPATH_NDIV + (1 if last else 0)):
+            t = s / BANDPATH_NDIV
+            qpts.append(qa + t * (qb - qa))
+            dists.append(cum + t * seg_len)
+        cum += seg_len
+        node_d.append(cum)
+
+    max_offblock = 0.0
+    rows_e = []
+    for q in qpts:
+        kcart = q @ B
+        # Fold into the cubic BZ: k_sc = kcart - G0, G0 a simple-cubic G vector
+        g0_idx = np.round(kcart / twopi_over_a).astype(int)
+        ksc = kcart - twopi_over_a * g0_idx
+        msk = sublattice_mask(G_indices, g0_idx)
+        if INCLUDE_SPIN_ORBIT:
+            H = build_hamiltonian_spinor(MATERIAL, ksc, Gcart, a_lattice, mu)
+            rows = np.concatenate([np.where(msk)[0], np.where(msk)[0] + npw])
+        else:
+            H = build_hamiltonian_sc(MATERIAL, ksc, Gcart, a_lattice)
+            rows = np.where(msk)[0]
+        others = np.setdiff1d(np.arange(H.shape[0]), rows)
+        max_offblock = max(max_offblock, np.abs(H[np.ix_(rows, others)]).max())
+        evals = eigvalsh(H[np.ix_(rows, rows)])
+        rows_e.append(evals[:nb_out])
+
+    print(f'#   folding self-check: max off-sublattice |H| = {max_offblock:.3e} '
+          f'(must be ~0: folding is exact)')
+    assert max_offblock < 1e-12, 'parity selection rule violated -- folding broken'
+
+    fname = f'{OUTPUT_DIR}{SYSNAME}_bandpath.data'
+    with open(fname, 'w') as f:
+        f.write('# unfolded primitive-cell band path -- EPM cubic reference\n')
+        f.write(f'# spinor = {1 if INCLUDE_SPIN_ORBIT else 0}\n')
+        f.write(f'# nv = {nv}\n')
+        f.write(f'# nb = {nb_out}\n')
+        f.write('# nodes: ' + '  '.join(
+            f'{l} {d:.7f}' for l, d in zip(BANDPATH_LABELS, node_d)) + '\n')
+        f.write('# ik, dist [2pi/a], q1, q2, q3 (fcc-primitive reduced), E_1..E_nb [Ha]\n')
+        for ik, (q, d, e) in enumerate(zip(qpts, dists, rows_e)):
+            f.write('{:6d}{:14.7f}{:10.5f}{:10.5f}{:10.5f}'.format(
+                ik + 1, d, q[0], q[1], q[2]))
+            f.write(''.join(f'{x:18.10E}' for x in e) + '\n')
+    print(f'# EPM bandpath: wrote {fname} '
+          f'({len(qpts)} k-points, {nb_out} bands, nv = {nv})')
+
+def main_bandpath():
+    """Fast standalone mode: only the unfolded band path, no MP-grid dataset."""
+    Gcart, G2 = build_plane_wave_basis_sc(A_LATTICE_AU, PW_CUTOFF_RY)
+    print(f'# EPM unfolded band path (primitive cell via exact sublattice blocks)')
+    print(f'#   spin-orbit = {INCLUDE_SPIN_ORBIT}, path = {"-".join(BANDPATH_LABELS)}')
+    mu = calibrate_so_mu(Gcart, A_LATTICE_AU) if INCLUDE_SPIN_ORBIT else 0.0
+    generate_bandpath(mu, Gcart, A_LATTICE_AU)
+
+# =============================================================================
 # Main Execution
 # =============================================================================
 def main():
@@ -419,4 +547,7 @@ def write_epm_files(sysname, outdir, material, kpoint, kweight, eigen, occup,
     print(f'# EPM (Cubic): wrote ground-state data files for sysname = {sysname}')
 
 if __name__ == '__main__':
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] == 'bandpath':
+        main_bandpath()   # fast: unfolded primitive bands only, no MP dataset
+    else:
+        main()

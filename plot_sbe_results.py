@@ -78,16 +78,32 @@ CMAP_LOG_SCALE = False
 # Override at runtime with the --snapshots CLI flag.
 SNAP_ENABLED = False
 
-# FCC high-symmetry points in reduced coordinates of the conventional cubic BZ.
-# BZ spans [-0.5, 0.5].  Labels correspond to folded FCC points.
+# FCC high-symmetry points in REDUCED coordinates of the FCC PRIMITIVE
+# reciprocal basis b1=(2pi/a)(-1,1,1), b2=(2pi/a)(1,-1,1), b3=(2pi/a)(1,1,-1).
+# For the folded cubic-cell data they are converted to Cartesian (in 2pi/a
+# units = simple-cubic reduced coordinates) via _fcc_prim_to_sc_reduced() and
+# wrapped into the cubic BZ before snapping to the MP grid. NOTE: under the
+# 4-fold folding several FCC points land on the same cubic star (e.g.
+# X = (2pi/a)(1,0,0) wraps onto Gamma), so the folded plot overlays the
+# states of up to 4 primitive BZ points at every tick -- use the unfolded
+# *_bandpath.data plot for a clean primitive-cell picture.
 HS_POINTS = {
     'Gamma': [ 0.000,  0.000,  0.000],
-    'L':     [ 0.500,  0.500,  0.500],
     'X':     [ 0.000,  0.500,  0.500],
-    'W':     [ 0.500,  0.250, -0.250],   # [0.5,0.25,0.75] wrapped to BZ
-    'K':     [ 0.375,  0.375, -0.250],   # [0.375,0.375,0.75] wrapped
-    'U':     [-0.375,  0.250, -0.375],   # [0.625,0.25,0.625] wrapped
+    'L':     [ 0.500,  0.500,  0.500],
+    'W':     [ 0.250,  0.500,  0.750],
+    'K':     [ 0.375,  0.375,  0.750],
+    'U':     [ 0.250,  0.625,  0.625],
 }
+# Rows of the FCC primitive reciprocal basis in 2pi/a (= sc-reduced) units.
+_B_FCC_RED = np.array([[-1.0, 1.0, 1.0],
+                       [ 1.0, -1.0, 1.0],
+                       [ 1.0, 1.0, -1.0]])
+
+def _fcc_prim_to_sc_reduced(q):
+    """FCC-primitive reduced coordinates -> simple-cubic reduced (k/(2pi/a))."""
+    return np.asarray(q, dtype=float) @ _B_FCC_RED
+
 DEFAULT_BAND_PATH = ['L', 'Gamma', 'X', 'W', 'K']
 
 
@@ -559,8 +575,11 @@ def plot_band_structure(kfile, eigenfile, output_dir,
 
     for seg in range(len(path_labels) - 1):
         la, lb  = path_labels[seg], path_labels[seg + 1]
-        pa = np.asarray(hs_points[la], dtype=float)
-        pb = np.asarray(hs_points[lb], dtype=float)
+        # Convert FCC-primitive reduced labels to simple-cubic reduced
+        # coordinates (the basis of *_k.data); the ideal path points are then
+        # wrapped into the cubic BZ by _sym_equivalents() before snapping.
+        pa = _fcc_prim_to_sc_reduced(hs_points[la])
+        pb = _fcc_prim_to_sc_reduced(hs_points[lb])
         seg_len = np.linalg.norm(pb - pa)
         print(f"  {la} → {lb}  (|Δk| = {seg_len:.4f} r.l.u.)")
 
@@ -803,6 +822,123 @@ def plot_band_dat(bandfile, output_dir, energy_range_ev=(-6, 12), dpi=150,
 
 
 # ===========================================================================
+# Unfolded primitive-cell band path  (*_bandpath.data from epm py 'bandpath')
+# ===========================================================================
+
+def _load_bandpath(bpfile):
+    """
+    Parse SYSNAME_bandpath.data written by `epm_gaas_reference.py bandpath`:
+      # spinor = 0/1
+      # nv = <valence states per primitive k>
+      # nb = <states per line>
+      # nodes: LBL dist  LBL dist ...
+      data: ik dist q1 q2 q3 E_1..E_nb [Ha]
+    Returns (dist[N], eigen_ha[N, nb], nv, spinor, nodes=[(label, dist), ...]).
+    """
+    spinor, nv, nb, nodes = False, None, None, []
+    dist, eig = [], []
+    with open(bpfile, 'r') as f:
+        for line in f:
+            s = line.strip()
+            if not s:
+                continue
+            if s.startswith('#'):
+                m = re.match(r'#\s*spinor\s*=\s*(\d+)', s)
+                if m:
+                    spinor = bool(int(m.group(1)))
+                m = re.match(r'#\s*nv\s*=\s*(\d+)', s)
+                if m:
+                    nv = int(m.group(1))
+                m = re.match(r'#\s*nb\s*=\s*(\d+)', s)
+                if m:
+                    nb = int(m.group(1))
+                m = re.match(r'#\s*nodes:\s*(.*)', s)
+                if m:
+                    toks = m.group(1).split()
+                    nodes = [(toks[i], float(toks[i + 1]))
+                             for i in range(0, len(toks) - 1, 2)]
+                continue
+            parts = s.split()
+            if nb is None or len(parts) < 5 + nb:
+                continue
+            try:
+                dist.append(float(parts[1]))
+                eig.append([float(x) for x in parts[5:5 + nb]])
+            except ValueError:
+                continue
+    if not eig:
+        raise ValueError(f"No band data parsed from {bpfile}")
+    return np.array(dist), np.array(eig), nv, spinor, nodes
+
+
+def plot_bandpath(bpfile, output_dir, energy_range_ev=(-6, 12), dpi=150):
+    """
+    Plot the UNFOLDED primitive-cell band structure (and, for spinor data,
+    the Dresselhaus spin splitting of the levels around the gap, in meV).
+    Unlike the folded MP-grid plot, conduction bands here are NOT overlaid
+    4-fold -- CB1/CB2/CB3 are individually resolved.
+    """
+    print(f"Processing unfolded band path: {bpfile.name}")
+    dist, eig_ha, nv, spinor, nodes = _load_bandpath(bpfile)
+    nk, nb = eig_ha.shape
+    print(f"  {nk} path k-points, {nb} bands, nv = {nv}, spinor = {spinor}")
+
+    vbm_ha = np.nanmax(eig_ha[:, nv - 1]) if nv else np.nanmax(eig_ha)
+    eig_ev = (eig_ha - vbm_ha) * HA_TO_EV
+
+    def _decorate(ax):
+        for lbl, d in nodes:
+            ax.axvline(d, color='#888888', linestyle='--', lw=0.7)
+        ax.set_xticks([d for _, d in nodes])
+        ax.set_xticklabels([r'$\Gamma$' if l == 'Gamma' else f'${l}$'
+                            for l, _ in nodes], fontsize=12)
+        ax.set_xlim(dist[0], dist[-1])
+
+    # --- band structure ---------------------------------------------------
+    fig, ax = plt.subplots(figsize=(7, 6))
+    for b in range(nb):
+        ax.plot(dist, eig_ev[:, b], 'k-', lw=0.9, alpha=0.7)
+    ax.axhline(0.0, color='tab:red', linestyle='-', lw=0.8, alpha=0.7,
+               label='VBM = 0')
+    _decorate(ax)
+    ax.set_ylabel('Energy (eV)', fontsize=11)
+    ax.set_ylim(*energy_range_ev)
+    ax.set_title(f'Unfolded primitive-cell bands — {bpfile.stem}', fontsize=11)
+    ax.legend(fontsize=9, loc='upper right')
+    fig.tight_layout()
+    out = output_dir / f'bandpath_{bpfile.stem}.png'
+    fig.savefig(out, dpi=dpi, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  saved {out.name}")
+
+    # --- Dresselhaus spin splitting of levels around the gap (spinor) ------
+    if not spinor or nv is None or nv % 2 != 0:
+        return
+    n_lvl_v = min(3, nv // 2)
+    n_lvl_c = min(3, (nb - nv) // 2)
+    fig, axes = plt.subplots(2, 1, figsize=(7, 6), sharex=True)
+    for j in range(n_lvl_c):       # CB1, CB2, ...
+        lvl = nv // 2 + 1 + j      # 1-based level index
+        d_mev = (eig_ha[:, 2 * lvl - 1] - eig_ha[:, 2 * lvl - 2]) * HA_TO_EV * 1e3
+        axes[0].plot(dist, d_mev, lw=1.1, label=f'CB{j + 1}')
+    for j in range(n_lvl_v):       # VB1 = topmost valence level, ...
+        lvl = nv // 2 - j
+        d_mev = (eig_ha[:, 2 * lvl - 1] - eig_ha[:, 2 * lvl - 2]) * HA_TO_EV * 1e3
+        axes[1].plot(dist, d_mev, lw=1.1, label=f'VB{j + 1}')
+    axes[0].set_title(f'Spin splitting of bands — {bpfile.stem}', fontsize=11)
+    for ax, tag in zip(axes, ('CB', 'VB')):
+        _decorate(ax)
+        ax.set_ylabel(rf'$\Delta_j(k)$ {tag} (meV)', fontsize=10)
+        ax.legend(fontsize=9, loc='upper right')
+        ax.set_ylim(bottom=0)
+    fig.tight_layout()
+    out = output_dir / f'bandpath_spin_splitting_{bpfile.stem}.png'
+    fig.savefig(out, dpi=dpi, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  saved {out.name}")
+
+
+# ===========================================================================
 # Entry point
 # ===========================================================================
 
@@ -913,6 +1049,17 @@ def main():
                     dpi=args.dpi, vbm_index=args.band_vbm)
             except Exception as exc:
                 print(f"  ERROR in dft_band plot for {bf.name}: {exc}")
+
+        # Unfolded primitive-cell band path (epm_gaas_reference.py bandpath)
+        for bf in sorted(input_dir.glob('*_bandpath.data')):
+            found_any = True
+            try:
+                plot_bandpath(
+                    bf, output_dir,
+                    energy_range_ev=tuple(args.energy_range),
+                    dpi=args.dpi)
+            except Exception as exc:
+                print(f"  ERROR in bandpath plot for {bf.name}: {exc}")
 
     if not found_any:
         print(f"No data files found in {input_dir.resolve()}")

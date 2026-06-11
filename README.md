@@ -129,6 +129,15 @@ python3 plot_sbe_results.py                 # auto-detects spinor input, sums sp
 python3 plot_sbe_results.py --spin-sum off  # raw 2*Nb spin-resolved bands
 ```
 
+**Folded vs unfolded bands.** The cubic 8-atom cell is a supercell of 4 primitive FCC cells, so the MP-grid band plot shows the primitive bands **folded 4-fold**: every cubic k-point carries the states of 4 primitive BZ points, and the conduction manifold appears as 4 overlaid copies of CB1/CB2/CB3 — dense crossings that are an artifact of the supercell representation, not of the physics (cf. band unfolding, Quan-Rybin-Scheffler-Carbogno, *PRB* 113, 085112 (2026)). The folding is **exact** here (the parity selection rule makes the Hamiltonian block-diagonal over the 4 FCC reciprocal sublattices to machine precision — asserted at runtime), so the clean primitive picture can be recovered exactly:
+
+```sh
+python3 epm_gaas_reference.py bandpath   # fast: writes SYSNAME_bandpath.data (no MP dataset)
+python3 plot_sbe_results.py --only-bands # -> bandpath_*.png + bandpath_spin_splitting_*.png
+```
+
+The `bandpath` mode diagonalizes the FCC-sublattice blocks of the cubic Hamiltonian along the primitive path `L-Γ-X-W-K-Γ` (configurable constants at the top of the script) and the plotter renders the **unfolded** primitive-cell bands (CB1/CB2/CB3 individually resolved) plus, for spinor data, the **Dresselhaus spin splitting** $\Delta_j(k)$ of the levels around the gap in meV (zero along the [100]/[111] axes by symmetry, ~10–140 meV peaks near W/K for GaAs — directly comparable with published spin-splitting panels). High-symmetry labels for the folded MP plot are specified in FCC-primitive reduced coordinates and converted/wrapped into the cubic BZ internally.
+
 ### EPM ground-state solver (`&epm`)
 
 The `&epm` namelist configures the local-EPM ground-state solver (`theory='epm'`):
