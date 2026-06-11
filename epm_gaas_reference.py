@@ -425,6 +425,88 @@ def main_bandpath():
     generate_bandpath(mu, Gcart, A_LATTICE_AU)
 
 # =============================================================================
+# Unfold map: cubic supercell band -> (FCC sublattice, primitive band index)
+# =============================================================================
+SUBLATTICE_OFFSETS = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]])
+
+def main_unfoldmap():
+    """
+    Standalone mode:  python3 epm_gaas_reference.py unfoldmap
+
+    Re-diagonalizes the MP-grid Hamiltonians (deterministic -- identical
+    eigenvalues to the SBE dataset) and writes SYSNAME_unfold.data mapping
+    every cubic band (ik, ib) to its FCC sublattice isub (1..4, i.e. the
+    primitive BZ point k_prim = k_sc + G0(isub)) and its primitive band index
+    ibprim (energy rank within that sublattice). Because the folding is exact,
+    each eigenvector lives wholly in one sublattice (weight ~1) except at
+    accidental cross-sublattice degeneracies, where the dominant weight is
+    taken. Much cheaper than the full dataset generation: no momentum/tm
+    matrices and no large file output.
+
+    The SBE reads this map (if present next to the GS files) to output the
+    population of PHYSICAL primitive bands (spins summed) at the unfolded
+    primitive k-points instead of energy-ordered supercell branches.
+    """
+    a1, a2, a3 = lattice_vectors_sc(A_LATTICE_AU)
+    b1, b2, b3, _ = reciprocal_lattice_sc(A_LATTICE_AU)
+    b_matrix = np.array([b1, b2, b3])
+    Gcart, G2 = build_plane_wave_basis_sc(A_LATTICE_AU, PW_CUTOFF_RY)
+    twopi_over_a = 2.0 * np.pi / A_LATTICE_AU
+    G_indices = np.round(Gcart / twopi_over_a).astype(int)
+    npw = Gcart.shape[0]
+
+    kpoint, kweight = monkhorst_pack_grid(b_matrix, NUM_KGRID)
+    nk = kpoint.shape[0]
+    nb = 2 * NSTATE if INCLUDE_SPIN_ORBIT else NSTATE
+    ne_prim = NELEC // 4
+    nv_prim = ne_prim if INCLUDE_SPIN_ORBIT else ne_prim // 2
+
+    print(f'# EPM unfold map: {nk} k-points, {nb} bands -> 4 sublattices, nv_prim = {nv_prim}')
+    mu = calibrate_so_mu(Gcart, A_LATTICE_AU) if INCLUDE_SPIN_ORBIT else 0.0
+
+    masks = [sublattice_mask(G_indices, off) for off in SUBLATTICE_OFFSETS]
+
+    n_ambig = 0
+    fname = f'{OUTPUT_DIR}{SYSNAME}_unfold.data'
+    with open(fname, 'w') as f:
+        f.write('# unfold map (cubic band -> FCC sublattice & primitive band index)\n')
+        f.write('# nk, nb, nv_prim\n')
+        f.write(f'{nk:8d}{nb:8d}{nv_prim:8d}\n')
+        f.write('# isub, offset G0 (sc reduced)\n')
+        for isub, off in enumerate(SUBLATTICE_OFFSETS):
+            f.write(f'{isub + 1:4d}{off[0]:4d}{off[1]:4d}{off[2]:4d}\n')
+        f.write('# ik, ib, isub, ibprim, weight\n')
+        for ik in range(nk):
+            if INCLUDE_SPIN_ORBIT:
+                H = build_hamiltonian_spinor(MATERIAL, kpoint[ik], Gcart,
+                                             A_LATTICE_AU, mu)
+            else:
+                H = build_hamiltonian_sc(MATERIAL, kpoint[ik], Gcart, A_LATTICE_AU)
+            evals, evecs = eigh(H)
+            w2 = np.abs(evecs[:, :nb])**2
+            wsub = np.zeros((4, nb))
+            for s, msk in enumerate(masks):
+                if INCLUDE_SPIN_ORBIT:
+                    wsub[s] = w2[np.concatenate([np.where(msk)[0],
+                                                 np.where(msk)[0] + npw])].sum(axis=0)
+                else:
+                    wsub[s] = w2[msk].sum(axis=0)
+            isub_b = np.argmax(wsub, axis=0)
+            wmax_b = wsub[isub_b, np.arange(nb)]
+            n_ambig += int((wmax_b < 0.99).sum())
+            counters = [0, 0, 0, 0]
+            for ib in range(nb):
+                s = isub_b[ib]
+                counters[s] += 1
+                f.write('{:6d}{:6d}{:4d}{:6d}{:12.6f}\n'.format(
+                    ik + 1, ib + 1, s + 1, counters[s], wmax_b[ib]))
+            if (ik + 1) % max(1, nk // 10) == 0 or ik == nk - 1:
+                print(f'#   ... mapped k-point {ik + 1}/{nk}')
+    print(f'# EPM unfold map: wrote {fname}'
+          + (f' ({n_ambig} bands with cross-sublattice degeneracy, dominant weight taken)'
+             if n_ambig else ' (all weights > 0.99)'))
+
+# =============================================================================
 # Main Execution
 # =============================================================================
 def main():
@@ -549,5 +631,7 @@ def write_epm_files(sysname, outdir, material, kpoint, kweight, eigen, occup,
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'bandpath':
         main_bandpath()   # fast: unfolded primitive bands only, no MP dataset
+    elif len(sys.argv) > 1 and sys.argv[1] == 'unfoldmap':
+        main_unfoldmap()  # band -> sublattice map for the existing MP dataset
     else:
         main()

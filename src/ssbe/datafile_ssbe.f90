@@ -151,6 +151,45 @@ end subroutine write_sbe_nex_k_block
 
 
 
+subroutine write_sbe_nex_k_unfold_header(fh, nk)
+    use inputoutput, only: t_unit_time
+    implicit none
+    integer, intent(in) :: fh, nk
+    write(fh,'(a)') "# Crystal-gauge population of the PHYSICAL lowest conduction band (CB1,"
+    write(fh,'(a)') "# spins summed) of every folded primitive BZ point k_prim = k_sc + G0(isub)"
+    write(fh,'(a)') "# (cubic-supercell EPM input; band assignment from SYSNAME_unfold.data)"
+    write(fh,'(a,i0)') "# nk = ", nk
+    write(fh, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+        & 1, "ik", "none", &
+        & 2, "isub", "none", &
+        & 3, "kx_prim", "reduced", &
+        & 4, "ky_prim", "reduced", &
+        & 5, "kz_prim", "reduced", &
+        & 6, "population_cb1", "none"
+    return
+end subroutine write_sbe_nex_k_unfold_header
+
+
+
+subroutine write_sbe_nex_k_unfold_block(fh, t, nk, kpoint, offset, pop4)
+    use inputoutput, only: t_unit_time
+    implicit none
+    integer, intent(in) :: fh, nk
+    real(8), intent(in) :: t, kpoint(1:3, 1:nk), offset(1:3, 1:4), pop4(1:4, 1:nk)
+    integer :: ik, isub
+    write(fh, '(a,f16.8,a,a)') "# t = ", t * t_unit_time%conv, " ", trim(t_unit_time%name)
+    do ik = 1, nk
+        do isub = 1, 4
+            write(fh, '(I6, I4, 4E18.10)') ik, isub, &
+                & kpoint(1:3, ik) + offset(1:3, isub), pop4(isub, ik)
+        end do
+    end do
+    write(fh, '(a)') ""
+    return
+end subroutine write_sbe_nex_k_unfold_block
+
+
+
 subroutine write_sbe_wave_header(fh)
     use inputoutput, only: t_unit_ac, t_unit_elec, t_unit_current, t_unit_time, t_unit_length, t_unit_energy
     implicit none

@@ -23,9 +23,11 @@ subroutine main_realtime_ssbe(icomm)
     real(8) :: energy, tr_all, tr_vb
     integer :: nproc, irank, ierr
     integer :: fh_sbe_rt, fh_sbe_rt_energy, fh_sbe_nex, fh_sbe_nex_k
+    integer :: fh_sbe_nex_k_unfold
     integer :: nk
     integer :: ib_lcb, nb_vb
     real(8), allocatable :: pop_k(:)
+    real(8), allocatable :: pop4_k(:, :)
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
@@ -62,6 +64,7 @@ subroutine main_realtime_ssbe(icomm)
     ! Lowest conduction band index (Houston-basis population output)
     ib_lcb = nb_vb + 1
     allocate(pop_k(1:nk))
+    if (gs%have_unfold) allocate(pop4_k(1:4, 1:nk))
 
     if (irank == 0) then
         ! SYSNAME_sbe_rt.data
@@ -80,6 +83,14 @@ subroutine main_realtime_ssbe(icomm)
         fh_sbe_nex_k = get_filehandle()
         open(unit=fh_sbe_nex_k, file=trim(base_directory)//trim(sysname)//"_sbe_nex_k.data", action="write")
         call write_sbe_nex_k_header(fh_sbe_nex_k, nk)
+        ! SYSNAME_sbe_nex_k_unfold.data: populations of PHYSICAL primitive
+        ! bands at the unfolded primitive k-points (only with an unfold map)
+        if (gs%have_unfold) then
+            fh_sbe_nex_k_unfold = get_filehandle()
+            open(unit=fh_sbe_nex_k_unfold, &
+                & file=trim(base_directory)//trim(sysname)//"_sbe_nex_k_unfold.data", action="write")
+            call write_sbe_nex_k_unfold_header(fh_sbe_nex_k_unfold, nk)
+        end if
         ! Stdout logs:
         write(*, "(a)") " time-step time[fs] Current(xyz)[a.u.]                     electrons   Total energy[au]"
         write(*, "(a)") "---------------------------------------------------------------------------------------"
@@ -91,6 +102,12 @@ subroutine main_realtime_ssbe(icomm)
         pop_k = 0.0d0
         call write_sbe_nex_k_block(fh_sbe_nex_k, 0.0d0, nk, gs%kpoint, pop_k)
         flush(fh_sbe_nex_k)
+        if (gs%have_unfold) then
+            pop4_k = 0.0d0
+            call write_sbe_nex_k_unfold_block(fh_sbe_nex_k_unfold, 0.0d0, nk, &
+                & gs%kpoint, gs%unfold_offset, pop4_k)
+            flush(fh_sbe_nex_k_unfold)
+        end if
     end if
 
     call comm_sync_all(icomm)
@@ -152,6 +169,14 @@ subroutine main_realtime_ssbe(icomm)
             if (irank == 0) then
                 call write_sbe_nex_k_block(fh_sbe_nex_k, t, nk, gs%kpoint, pop_k)
             end if
+            ! Physical (unfolded) CB1 populations per primitive BZ point
+            if (gs%have_unfold) then
+                call calc_unfolded_population_k(sbe, gs, Ac_ext_t(:, it), pop4_k, icomm)
+                if (irank == 0) then
+                    call write_sbe_nex_k_unfold_block(fh_sbe_nex_k_unfold, t, nk, &
+                        & gs%kpoint, gs%unfold_offset, pop4_k)
+                end if
+            end if
         end if
 
         if (mod(it, 500) == 0) then
@@ -160,6 +185,7 @@ subroutine main_realtime_ssbe(icomm)
                 flush(fh_sbe_rt_energy)
                 flush(fh_sbe_nex)
                 flush(fh_sbe_nex_k)
+                if (gs%have_unfold) flush(fh_sbe_nex_k_unfold)
             end if
         end if
     end do
@@ -171,9 +197,11 @@ subroutine main_realtime_ssbe(icomm)
         close(fh_sbe_rt_energy)
         close(fh_sbe_nex)
         close(fh_sbe_nex_k)
+        if (gs%have_unfold) close(fh_sbe_nex_k_unfold)
     end if
 
     deallocate(pop_k)
+    if (allocated(pop4_k)) deallocate(pop4_k)
 
     return
 end subroutine main_realtime_ssbe
