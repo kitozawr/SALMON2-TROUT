@@ -446,6 +446,12 @@ character(256),allocatable :: atom_name(:)
   ! 'y': ground-state input files come from a spinor (spin-orbit split) system:
   !      2*Nb spinor bands, occupation 1 per band, nelec valence bands (not nelec/2)
   character(1)   :: yn_sbe_spinor
+  ! k-local impact-ionization Lindblad channel (Stobbe-Redmer-Schattke fit, GaAs):
+  ! gamma(e_kin) = P * (e_kin - E_th)^4 * Theta(e_kin - E_th), e_kin from the CBM
+  character(1)   :: yn_sbe_impact_ionization
+  real(8)        :: sbe_ii_prefactor      ! P [s^-1 eV^-4]
+  real(8)        :: sbe_ii_threshold_ev   ! E_th [eV]
+  real(8)        :: sbe_ii_ramp_ev        ! linear Theta-smoothing width delta_E [eV]
 
   !! &epm (local empirical pseudopotential method, Cohen-Bergstresser)
   character(32)  :: epm_material
