@@ -151,6 +151,14 @@ python3 plot_sbe_results.py --only-bands # -> bandpath_*.png + bandpath_spin_spl
 
 The `bandpath` mode diagonalizes the FCC-sublattice blocks of the cubic Hamiltonian along the primitive path `L-Γ-X-W-K-Γ` (configurable constants at the top of the script) and the plotter renders the **unfolded** primitive-cell bands (CB1/CB2/CB3 individually resolved) plus, for spinor data, the **Dresselhaus spin splitting** $\Delta_j(k)$ of the levels around the gap in meV (zero along the [100]/[111] axes by symmetry, ~10–140 meV peaks near W/K for GaAs — directly comparable with published spin-splitting panels). High-symmetry labels for the folded MP plot are specified in FCC-primitive reduced coordinates and converted/wrapped into the cubic BZ internally.
 
+**Unfolded k-resolved band populations.** The same applies to the real-time population output: the supercell branch index `nelec+1` mixes *different physical primitive bands* from k to k, so the SBE can instead report the population of the **physical CB1** of every folded primitive BZ point. Generate the band → (sublattice, primitive band) map once (re-diagonalization only — much cheaper than the full dataset, no tm matrices):
+
+```sh
+python3 epm_gaas_reference.py unfoldmap   # -> SYSNAME_unfold.data (next to the GS files)
+```
+
+When `SYSNAME_unfold.data` is present, the SBE automatically writes `SYSNAME_sbe_nex_k_unfold.data` alongside `_sbe_nex_k.data`: per saved time, the crystal-gauge population of the physical lowest conduction level (CB1, **spins summed**) of each primitive point $k_{\rm prim} = k_{\rm sc} + G_0(s)$, $s=1..4$ — i.e. 4·nk unfolded points covering the primitive FCC BZ. The plotter picks the file up automatically and renders time–k maps over the primitive BZ (`nex_k_unfold_*.png`), wrapping the points into the first FCC BZ. *Caveat:* at high-symmetry MP points different sublattices can be exactly degenerate; the map then assigns the dominant weight, which splits the (symmetric) population arbitrarily between equivalent points — sums over symmetry stars remain exact.
+
 ### EPM ground-state solver (`&epm`)
 
 The `&epm` namelist configures the local-EPM ground-state solver (`theory='epm'`):

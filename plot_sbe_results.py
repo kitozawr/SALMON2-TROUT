@@ -193,9 +193,13 @@ def plot_rt_file(filepath, output_dir, downsample=1, dpi=150):
 # Streaming nex_k  (*_sbe_nex_k.data)
 # ===========================================================================
 
-def _iter_nex_k_blocks(filepath):
-    """Yield (t_val, t_unit, kpoints[nk,3], pop[nk]) one block at a time."""
+def _iter_nex_k_blocks(filepath, unfold=False):
+    """Yield (t_val, t_unit, kpoints[nk,3], pop[nk]) one block at a time.
+    unfold=True parses the *_sbe_nex_k_unfold.data layout
+    (ik, isub, kx, ky, kz, pop) instead of (ik, kx, ky, kz, pop)."""
     time_re = re.compile(r'#\s*t\s*=\s*([-+\d.eEdD]+)\s*(\S*)')
+    icol = 2 if unfold else 1
+    ncol = 6 if unfold else 5
     t_value, t_unit = None, ''
     kx, ky, kz, pop = [], [], [], []
 
@@ -217,11 +221,11 @@ def _iter_nex_k_blocks(filepath):
             if s.startswith('#'):
                 continue
             parts = s.split()
-            if len(parts) < 5:
+            if len(parts) < ncol:
                 continue
             try:
-                kx.append(float(parts[1])); ky.append(float(parts[2]))
-                kz.append(float(parts[3])); pop.append(float(parts[4]))
+                kx.append(float(parts[icol])); ky.append(float(parts[icol + 1]))
+                kz.append(float(parts[icol + 2])); pop.append(float(parts[icol + 3]))
             except ValueError:
                 continue
 
@@ -229,6 +233,18 @@ def _iter_nex_k_blocks(filepath):
         yield (t_value, t_unit,
                np.column_stack([kx, ky, kz]),
                np.asarray(pop, dtype=float))
+
+
+def _wrap_to_fcc_bz(kpoints):
+    """Wrap k-points (sc-reduced units, i.e. Cartesian/(2pi/a)) into the
+    first FCC primitive BZ: subtract the FCC reciprocal vector (all-equal-
+    parity integer triplet) closest to each point."""
+    cands = np.array([g for g in itertools.product((-2, -1, 0, 1, 2), repeat=3)
+                      if (g[0] - g[1]) % 2 == 0 and (g[1] - g[2]) % 2 == 0],
+                     dtype=float)
+    d = kpoints[:, None, :] - cands[None, :, :]
+    best = np.argmin((d**2).sum(axis=2), axis=1)
+    return kpoints - cands[best]
 
 
 def _build_grid_info(kpoints):
@@ -288,7 +304,7 @@ def _heatmap_ax(ax, k_a, k_b, grid2d, label_a, label_b, title,
 
 
 def _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi,
-                   log_scale=False):
+                   log_scale=False, tag='nex_k'):
     vmin = np.nanmin(pop3d)
     vmax = max(np.nanmax(pop3d), vmin + 1e-30)
 
@@ -306,7 +322,7 @@ def _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi,
     fig.suptitle(f'Houston-basis LCB population,  t = {t_val:.6f} {t_unit}')
     fig.tight_layout(rect=[0, 0, 1, 0.94])
     safe_t  = f'{t_val:.6f}'.replace('-', 'm').replace('+', 'p')
-    out = output_dir / f'nex_k_snap_t{safe_t}{t_unit}.png'
+    out = output_dir / f'{tag}_snap_t{safe_t}{t_unit}.png'
     fig.savefig(out, dpi=dpi, bbox_inches='tight')
     plt.close(fig)
     print(f"  saved {out.name}")
@@ -322,7 +338,7 @@ def _bin_edges(centers):
 
 
 def _save_kt_map(times, t_unit, k_vals, label_k, marginals, output_dir, dpi,
-                 log_scale=False):
+                 log_scale=False, tag='nex_k'):
     if not marginals:
         return
     mat = np.array(marginals).T           # (nk_1d, nt)
@@ -336,25 +352,30 @@ def _save_kt_map(times, t_unit, k_vals, label_k, marginals, output_dir, dpi,
     ax.set_ylabel(f'{label_k} [reduced]')
     ax.set_title(f'LCB population vs time and {label_k}')
     fig.tight_layout()
-    out = output_dir / f'nex_k_ktmap_{label_k}.png'
+    out = output_dir / f'{tag}_ktmap_{label_k}.png'
     fig.savefig(out, dpi=dpi, bbox_inches='tight')
     plt.close(fig)
     print(f"  saved {out.name}")
 
 
-def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False):
+def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
+               unfold=False):
     print(f"Processing {filepath.name}  "
           f"(cmap={'log' if log_scale else 'linear'}, "
-          f"snapshots={'on' if snapshots else 'off'}) ...")
+          f"snapshots={'on' if snapshots else 'off'}"
+          f"{', unfolded primitive BZ' if unfold else ''}) ...")
+    tag = 'nex_k_unfold' if unfold else 'nex_k'
     kx_u = ky_u = kz_u = ix = iy = iz = None
     pop3d = None
     times, marg_kx, marg_ky, marg_kz = [], [], [], []
     t_unit_last = ''
     n_blocks = 0
 
-    for t_val, t_unit, kpoints, pop in _iter_nex_k_blocks(filepath):
+    for t_val, t_unit, kpoints, pop in _iter_nex_k_blocks(filepath, unfold=unfold):
         t_unit_last = t_unit
         n_blocks   += 1
+        if unfold:
+            kpoints = _wrap_to_fcc_bz(kpoints)
         if kx_u is None:
             kx_u, ky_u, kz_u, ix, iy, iz = _build_grid_info(kpoints)
             pop3d = np.empty((len(kx_u), len(ky_u), len(kz_u)))
@@ -362,7 +383,7 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False):
         pop3d[ix, iy, iz] = pop
         if snapshots:
             _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi,
-                           log_scale=log_scale)
+                           log_scale=log_scale, tag=tag)
         times.append(t_val)
         marg_kx.append(np.nanmean(pop3d, axis=(1, 2)))
         marg_ky.append(np.nanmean(pop3d, axis=(0, 2)))
@@ -374,11 +395,11 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False):
 
     print(f"  writing time-k maps ({n_blocks} time steps) ...")
     _save_kt_map(times, t_unit_last, kx_u, 'kx', marg_kx, output_dir, dpi,
-                 log_scale=log_scale)
+                 log_scale=log_scale, tag=tag)
     _save_kt_map(times, t_unit_last, ky_u, 'ky', marg_ky, output_dir, dpi,
-                 log_scale=log_scale)
+                 log_scale=log_scale, tag=tag)
     _save_kt_map(times, t_unit_last, kz_u, 'kz', marg_kz, output_dir, dpi,
-                 log_scale=log_scale)
+                 log_scale=log_scale, tag=tag)
 
 
 # ===========================================================================
@@ -1020,6 +1041,13 @@ def main():
             found_any = True
             plot_nex_k(f, output_dir, dpi=args.dpi,
                        log_scale=args.log_cmap, snapshots=args.snapshots)
+
+        # Physical (unfolded) CB1 populations on the primitive BZ
+        for f in sorted(input_dir.glob('*_sbe_nex_k_unfold.data')):
+            found_any = True
+            plot_nex_k(f, output_dir, dpi=args.dpi,
+                       log_scale=args.log_cmap, snapshots=args.snapshots,
+                       unfold=True)
 
     # --- Band structure -------------------------------------------------
     if not args.no_bands:

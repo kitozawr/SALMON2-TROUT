@@ -30,6 +30,17 @@ module gs_info_ssbe
 
         ! Minimum band gap in atomic units (for gauge-covariant decoherence)
         real(8) :: eg_au
+
+        ! Optional unfold map (SYSNAME_unfold.data from the cubic-supercell
+        ! EPM): assigns every supercell band to its FCC sublattice (= folded
+        ! primitive BZ point k_prim = k_sc + G0) and primitive band index.
+        ! Used to output populations of PHYSICAL primitive bands instead of
+        ! energy-ordered supercell branches.
+        logical :: have_unfold = .false.
+        integer :: nv_prim = 0
+        integer, allocatable :: unfold_sub(:, :)     ! (nb, nk) sublattice 1..4
+        integer, allocatable :: unfold_prim(:, :)    ! (nb, nk) primitive band rank
+        real(8) :: unfold_offset(1:3, 1:4)           ! G0 in sc reduced coords
     end type
 
 
@@ -71,6 +82,10 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     allocate(gs%d_matrix(1:nb, 1:nb, 1:3, 1:nk))
     allocate(gs%p_tm_matrix(1:nb, 1:nb, 1:3, 1:nk))
     allocate(gs%rvnl_tm_matrix(1:nb, 1:nb, 1:3, 1:nk))
+    allocate(gs%unfold_sub(1:nb, 1:nk), gs%unfold_prim(1:nb, 1:nk))
+    gs%unfold_sub = 0
+    gs%unfold_prim = 0
+    gs%unfold_offset = 0d0
 
     if (irank == 0) then
         if (read_bin) then
@@ -87,6 +102,8 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
             !Retrieve transition matrix from 'SYSNAME_tm.data':
             write(*, '(a)') "# read_tm_data"
             call read_tm_data()
+            !Optional: band -> sublattice unfold map 'SYSNAME_unfold.data'
+            call read_unfold_data()
             !Export all data from binray
             write(*, '(a)') "# save_sbe_gs_bin"
             call save_sbe_gs_bin()
@@ -99,6 +116,13 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     call comm_bcast(gs%occup, icomm, 0)
     call comm_bcast(gs%p_tm_matrix, icomm, 0)
     call comm_bcast(gs%rvnl_tm_matrix, icomm, 0)
+    call comm_bcast(gs%have_unfold, icomm, 0)
+    if (gs%have_unfold) then
+        call comm_bcast(gs%nv_prim, icomm, 0)
+        call comm_bcast(gs%unfold_sub, icomm, 0)
+        call comm_bcast(gs%unfold_prim, icomm, 0)
+        call comm_bcast(gs%unfold_offset, icomm, 0)
+    end if
 
     !Calculate omega and d_matrix (neglecting diagonal part):
     if (irank == 0) write(*,"(a)") "# prepare_matrix"
@@ -243,6 +267,49 @@ contains
 
         close(fh)
     end subroutine read_tm_data
+
+
+    ! Optional: read the band -> (FCC sublattice, primitive band) unfold map
+    ! written by `epm_gaas_reference.py unfoldmap`. Absence is not an error:
+    ! the unfolded population output is simply disabled.
+    subroutine read_unfold_data()
+        implicit none
+        character(256) :: dummy
+        logical :: exists
+        integer :: fh, ik, ib, iik, iib, isub, ibprim, i, nnk, nnb, ioff(3)
+        real(8) :: w
+
+        inquire(file=trim(gs_directory) // trim(sysname) // '_unfold.data', exist=exists)
+        gs%have_unfold = .false.
+        if (.not. exists) return
+
+        write(*, '(a)') "# read_unfold_data"
+        fh = open_filehandle(trim(gs_directory) // trim(sysname) // '_unfold.data', 'old')
+        read(fh, "(a)") dummy
+        read(fh, "(a)") dummy
+        read(fh, *) nnk, nnb, gs%nv_prim
+        if (nnk .ne. nk) stop "unfold map: nk mismatch"
+        if (nnb .ne. nb) stop "unfold map: nb mismatch"
+        read(fh, "(a)") dummy
+        do i = 1, 4
+            read(fh, *) isub, ioff(1:3)
+            if (isub .ne. i) stop "unfold map: offset index mismatch"
+            gs%unfold_offset(1:3, i) = dble(ioff(1:3))
+        end do
+        read(fh, "(a)") dummy
+        do ik = 1, nk
+            do ib = 1, nb
+                read(fh, *) iik, iib, isub, ibprim, w
+                if (ik .ne. iik) stop "unfold map: ik mismatch"
+                if (ib .ne. iib) stop "unfold map: ib mismatch"
+                gs%unfold_sub(ib, ik) = isub
+                gs%unfold_prim(ib, ik) = ibprim
+            end do
+        end do
+        close(fh)
+        gs%have_unfold = .true.
+        write(*, '(a,i4)') "# unfold map loaded: nv_prim =", gs%nv_prim
+    end subroutine read_unfold_data
 
 
     subroutine read_sbe_gs_bin()

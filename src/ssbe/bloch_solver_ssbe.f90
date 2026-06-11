@@ -8,7 +8,8 @@ module bloch_solver_ssbe
 
     private
     public :: s_sbe_bloch_solver, init_sbe_bloch_solver, calc_current_bloch, &
-              dt_evolve_bloch_cf4, calc_trace, calc_energy, calc_bloch_population_k
+              dt_evolve_bloch_cf4, calc_trace, calc_energy, calc_bloch_population_k, &
+              calc_unfolded_population_k
 
     type s_sbe_bloch_solver
         !k-points for real-time SBE calculation
@@ -953,6 +954,121 @@ subroutine calc_bloch_population_k(sbe, gs, Ac, ib_target, pop_k, icomm)
     deallocate(pop_local, evals, H, W, W_sorted, t1, t2, rho_a, p_k_full, eigen_a)
     deallocate(zone_map, row_used, col_used)
 end subroutine calc_bloch_population_k
+
+
+! Population of the PHYSICAL lowest conduction band (CB1) of each folded
+! primitive BZ point, resolved per cubic k-point.
+!
+! In the cubic-supercell EPM dataset every band at k_sc belongs to exactly
+! one FCC sublattice s (= primitive point k_prim = k_sc + G0(s); the folding
+! is exact, see the unfold map written by `epm_gaas_reference.py unfoldmap`).
+! Energy-ordered supercell branch indices therefore mix DIFFERENT physical
+! primitive bands from k to k. This routine projects rho into the crystal
+! gauge exactly like calc_bloch_population_k and then accumulates, for each
+! sublattice s, the population of its physical CB1 level:
+!   spinor input: primitive ranks nv_prim+1 and nv_prim+2 (Kramers pair,
+!                 spins summed); scalar input: rank nv_prim+1.
+! pop4(s, ik) is the CB1 population of the primitive point k_sc(ik) + G0(s).
+subroutine calc_unfolded_population_k(sbe, gs, Ac, pop4, icomm)
+    use eigen_lapack, only: eigen_zheev
+    use salmon_global, only: yn_sbe_spinor
+    implicit none
+    type(s_sbe_bloch_solver), intent(in)  :: sbe
+    type(s_sbe_gs_info),      intent(in)  :: gs
+    real(8),                  intent(in)  :: Ac(3)
+    real(8),                  intent(out) :: pop4(1:4, 1:sbe%nk)
+    integer,                  intent(in)  :: icomm
+
+    integer :: nba, ik, i, j, in, im, n_done, best_i, best_j
+    integer :: isub, irank_prim, n_cb1
+    real(8)  :: curr_max
+    integer,  allocatable :: zone_map(:)
+    logical,  allocatable :: row_used(:), col_used(:)
+    real(8),    allocatable :: pop_local(:, :), evals(:), p_k_full(:,:,:), eigen_a(:)
+    complex(8), allocatable :: H(:,:), W(:,:), W_sorted(:,:), t1(:,:), t2(:,:), rho_a(:,:)
+
+    nba = sbe%n_active_bands
+    pop4 = 0d0
+    if (.not. gs%have_unfold .or. nba == 0) return
+
+    ! Spin states per physical level in the primitive rank ordering
+    n_cb1 = merge(2, 1, yn_sbe_spinor == 'y')
+
+    allocate(pop_local(1:4, 1:sbe%nk))
+    allocate(evals(nba), H(nba,nba), W(nba,nba), W_sorted(nba,nba), t1(nba,nba), t2(nba,nba))
+    allocate(rho_a(nba,nba), p_k_full(sbe%nb, sbe%nb, 3), eigen_a(nba))
+    allocate(zone_map(nba), row_used(nba), col_used(nba))
+    pop_local = 0d0
+
+    do ik = sbe%ik_min, sbe%ik_max
+        ! Crystal-gauge projection: identical to calc_bloch_population_k
+        p_k_full(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
+        if (sbe%flag_vnl_correction) &
+            p_k_full(:, :, :) = p_k_full(:, :, :) + gs%rvnl_tm_matrix(:, :, :, ik)
+
+        do i = 1, nba
+            eigen_a(i) = gs%eigen(sbe%active_idx(i), ik)
+        end do
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                H(i, j) = -Ac(1)*p_k_full(in,im,1) &
+                          - Ac(2)*p_k_full(in,im,2) &
+                          - Ac(3)*p_k_full(in,im,3)
+                rho_a(i, j) = sbe%rho(in, im, ik)
+            end do
+        end do
+        do i = 1, nba
+            H(i, i) = H(i, i) + eigen_a(i)
+        end do
+
+        call eigen_zheev(H, evals, W)
+
+        row_used = .false.
+        col_used = .false.
+        zone_map  = 0
+        do n_done = 1, nba
+            curr_max = -1d0
+            best_i = 1; best_j = 1
+            do j = 1, nba
+                if (col_used(j)) cycle
+                do i = 1, nba
+                    if (row_used(i)) cycle
+                    if (abs(W(i, j)) > curr_max) then
+                        curr_max = abs(W(i, j))
+                        best_i   = i
+                        best_j   = j
+                    end if
+                end do
+            end do
+            zone_map(best_j) = best_i
+            row_used(best_i) = .true.
+            col_used(best_j) = .true.
+        end do
+        do j = 1, nba
+            W_sorted(:, zone_map(j)) = W(:, j)
+        end do
+
+        call ZGEMM('C', 'N', nba, nba, nba, dcmplx(1d0,0d0), W_sorted, nba, rho_a,    nba, dcmplx(0d0,0d0), t1, nba)
+        call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0,0d0), t1,       nba, W_sorted, nba, dcmplx(0d0,0d0), t2, nba)
+
+        ! Accumulate the physical CB1 population of every sublattice
+        do i = 1, nba
+            in = sbe%active_idx(i)
+            isub = gs%unfold_sub(in, ik)
+            if (isub < 1 .or. isub > 4) cycle
+            irank_prim = gs%unfold_prim(in, ik)
+            if (irank_prim > gs%nv_prim .and. irank_prim <= gs%nv_prim + n_cb1) then
+                pop_local(isub, ik) = pop_local(isub, ik) + real(t2(i, i))
+            end if
+        end do
+    end do
+
+    call comm_summation(pop_local, pop4, 4 * sbe%nk, icomm)
+    deallocate(pop_local, evals, H, W, W_sorted, t1, t2, rho_a, p_k_full, eigen_a)
+    deallocate(zone_map, row_used, col_used)
+end subroutine calc_unfolded_population_k
 
 
 end module
