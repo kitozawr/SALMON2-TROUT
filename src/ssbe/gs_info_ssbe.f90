@@ -275,21 +275,40 @@ contains
     subroutine read_unfold_data()
         implicit none
         character(256) :: dummy
+        character(512) :: fpath
         logical :: exists
         integer :: fh, ik, ib, iik, iib, isub, ibprim, i, nnk, nnb, ioff(3)
         real(8) :: w
 
-        inquire(file=trim(gs_directory) // trim(sysname) // '_unfold.data', exist=exists)
+        fpath = trim(gs_directory) // trim(sysname) // '_unfold.data'
+        inquire(file=trim(fpath), exist=exists)
         gs%have_unfold = .false.
-        if (.not. exists) return
+        if (.not. exists) then
+            ! Absence is not an error: the physical (unfolded) population output
+            ! is simply disabled. Logged so the user can tell whether the file
+            ! was looked for in the directory they expect (gs_directory).
+            write(*, '(a)') "# read_unfold_data: no unfold map found, " // &
+                & "physical-band population output disabled"
+            write(*, '(a)') "#   (searched: " // trim(fpath) // ")"
+            return
+        end if
 
-        write(*, '(a)') "# read_unfold_data"
-        fh = open_filehandle(trim(gs_directory) // trim(sysname) // '_unfold.data', 'old')
+        write(*, '(a)') "# read_unfold_data: " // trim(fpath)
+        fh = open_filehandle(trim(fpath), 'old')
         read(fh, "(a)") dummy
         read(fh, "(a)") dummy
         read(fh, *) nnk, nnb, gs%nv_prim
-        if (nnk .ne. nk) stop "unfold map: nk mismatch"
-        if (nnb .ne. nb) stop "unfold map: nb mismatch"
+        if (nnk .ne. nk) then
+            write(*, '(a,i0,a,i0)') "# read_unfold_data: nk mismatch -- file has ", &
+                & nnk, ", SBE run expects ", nk
+            stop "unfold map: nk mismatch"
+        end if
+        if (nnb .ne. nb) then
+            write(*, '(a,i0,a,i0,a)') "# read_unfold_data: nb mismatch -- file has ", &
+                & nnb, ", SBE run expects ", nb, &
+                & " (check nstate and yn_sbe_spinor vs. the EPM dataset)"
+            stop "unfold map: nb mismatch"
+        end if
         read(fh, "(a)") dummy
         do i = 1, 4
             read(fh, *) isub, ioff(1:3)
@@ -308,7 +327,7 @@ contains
         end do
         close(fh)
         gs%have_unfold = .true.
-        write(*, '(a,i4)') "# unfold map loaded: nv_prim =", gs%nv_prim
+        write(*, '(a,i0)') "# unfold map loaded: nv_prim = ", gs%nv_prim
     end subroutine read_unfold_data
 
 
