@@ -151,7 +151,12 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     end if
     lumo_idx = homo_idx + 1
 
-    fermi_energy_ev = ((gs%eigen(homo_idx, 1) + gs%eigen(lumo_idx, 1)) * 0.5d0) 
+    ! gs%eigen is stored in atomic units (Hartree). Convert to eV here so the
+    ! frozen-core window thresholds (frozen_core/free_threshold_ev, genuine eV
+    ! inputs) are compared in eV as named, and the diagnostic labels are honest.
+    ! This only affects which bands are flagged active and the printout; the
+    ! dynamics always use gs%eigen in a.u. directly.
+    fermi_energy_ev = ((gs%eigen(homo_idx, 1) + gs%eigen(lumo_idx, 1)) * 0.5d0) * au_ev
 
     ! 2. Initialize active bands array
     allocate(sbe%is_active(1:sbe%nb))
@@ -161,7 +166,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     ! 3. Determine active bands on root rank
     if (irank == 0) then
         do ib = 1, sbe%nb
-            eigen_ev = gs%eigen(ib, 1)
+            eigen_ev = gs%eigen(ib, 1) * au_ev
             ! Note: Ensure frozen_core_threshold_ev is negative if it represents a window below E_F
             if (eigen_ev > fermi_energy_ev + frozen_core_threshold_ev .and. &
                 eigen_ev < fermi_energy_ev + frozen_free_threshold_ev) then
@@ -252,7 +257,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
         write(*, '(a)') '  Band energies relative to Fermi level:'
         
         do ib = 1, min(sbe%nb, 100)  ! Print first 100 bands
-            eigen_ev = gs%eigen(ib, 1) 
+            eigen_ev = gs%eigen(ib, 1) * au_ev
             write(*, '(a, i3, a, f10.4, a, f8.2, a, l1)') &
                 '    Band ', ib, ': E = ', eigen_ev, ' eV, E-E_F = ', &
                 (eigen_ev - fermi_energy_ev), ' eV, active = ', sbe%is_active(ib)
