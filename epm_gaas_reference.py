@@ -465,6 +465,16 @@ def main_unfoldmap():
     mu = calibrate_so_mu(Gcart, A_LATTICE_AU) if INCLUDE_SPIN_ORBIT else 0.0
 
     masks = [sublattice_mask(G_indices, off) for off in SUBLATTICE_OFFSETS]
+    # Row/column index sets of the 4 FCC-sublattice blocks (spinor: plane wave
+    # G and its spin partner G+npw). H is exactly block-diagonal over these, so
+    # diagonalizing a block yields the primitive bands at k_sc + G0(s) and a
+    # symmetric per-sublattice energy ranking (used instead of an argmax counter).
+    block_idx = []
+    for msk in masks:
+        idx = np.where(msk)[0]
+        if INCLUDE_SPIN_ORBIT:
+            idx = np.concatenate([idx, idx + npw])
+        block_idx.append(np.sort(idx))
 
     n_ambig = 0
     fname = f'{OUTPUT_DIR}{SYSNAME}_unfold.data'
@@ -501,12 +511,17 @@ def main_unfoldmap():
             isub_b = np.argmax(wsub, axis=0)
             wmax_b = wsub[isub_b, np.arange(nb)]
             n_ambig += int((wmax_b < 0.99).sum())
-            counters = [0, 0, 0, 0]
+            # Per-sublattice block spectra for a SYMMETRIC energy ranking: the
+            # primitive-band rank of cubic band ib is its position in the energy
+            # spectrum of its dominant sublattice block. Unlike an argmax counter
+            # this is identical for symmetry-equivalent (degenerate) states, so
+            # the physical level (VB-1/VB/CB1/CB2) is assigned consistently.
+            block_evals = [np.sort(eigvalsh(H[np.ix_(bi, bi)])) for bi in block_idx]
             for ib in range(nb):
                 s = isub_b[ib]
-                counters[s] += 1
+                ibprim = 1 + int(np.searchsorted(block_evals[s], evals[ib] - 1e-9))
                 f.write('{:6d}{:6d}{:4d}{:6d}{:12.6f}{:12.6f}{:12.6f}{:12.6f}\n'.format(
-                    ik + 1, ib + 1, s + 1, counters[s],
+                    ik + 1, ib + 1, s + 1, ibprim,
                     wsub[0, ib], wsub[1, ib], wsub[2, ib], wsub[3, ib]))
             if (ik + 1) % max(1, nk // 10) == 0 or ik == nk - 1:
                 print(f'#   ... mapped k-point {ik + 1}/{nk}')
