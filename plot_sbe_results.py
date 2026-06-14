@@ -489,14 +489,29 @@ def _bandpath_level_energies(eig_ha, nv, spinor):
     return out
 
 
-def _map_path_population(qred, grid_kpts, grid_pop, max_dist=0.12):
-    """For each band-path point (FCC-reduced qred) return the population taken
-    from the nearest unfolded grid point (sc-reduced, wrapped). Points farther
-    than max_dist from any grid point get NaN (off the sampled grid)."""
+def _grid_spacing(grid_kpts, sample=400):
+    """Median nearest-neighbour distance of the (wrapped) unfolded k-grid, used
+    to size the path<->grid matching tolerance for any grid density."""
+    n = grid_kpts.shape[0]
+    idx = np.arange(n) if n <= sample else \
+        np.random.default_rng(0).choice(n, sample, replace=False)
+    sub = grid_kpts[idx]
+    d2 = ((sub[:, None, :] - grid_kpts[None, :, :]) ** 2).sum(axis=2)
+    d2[d2 < 1e-12] = np.inf            # drop self-distance
+    return float(np.median(np.sqrt(d2.min(axis=1))))
+
+
+def _map_path_population(qred, grid_kpts, grid_pop, max_dist=None):
+    """For each band-path point (FCC-reduced qred) return the population of the
+    nearest unfolded grid point (sc-reduced, wrapped). Points farther than
+    max_dist (default ~1 grid spacing) from any grid point get NaN. On a coarse
+    grid the tolerance grows automatically so the path is still coloured."""
+    if max_dist is None:
+        max_dist = 1.1 * _grid_spacing(grid_kpts)
     q_sc = _wrap_to_fcc_bz(_fcc_prim_to_sc_reduced(qred))
     d2 = ((q_sc[:, None, :] - grid_kpts[None, :, :]) ** 2).sum(axis=2)
     j = np.argmin(d2, axis=1)
-    pop = grid_pop[j]
+    pop = grid_pop[j].astype(float)
     pop[np.sqrt(d2[np.arange(len(j)), j]) > max_dist] = np.nan
     return pop
 
