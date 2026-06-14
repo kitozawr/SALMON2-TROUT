@@ -38,8 +38,9 @@ module gs_info_ssbe
         ! energy-ordered supercell branches.
         logical :: have_unfold = .false.
         integer :: nv_prim = 0
-        integer, allocatable :: unfold_sub(:, :)     ! (nb, nk) sublattice 1..4
+        integer, allocatable :: unfold_sub(:, :)     ! (nb, nk) dominant sublattice 1..4
         integer, allocatable :: unfold_prim(:, :)    ! (nb, nk) primitive band rank
+        real(8), allocatable :: unfold_w(:, :, :)    ! (4, nb, nk) spectral weights, sum_s = 1
         real(8) :: unfold_offset(1:3, 1:4)           ! G0 in sc reduced coords
     end type
 
@@ -83,8 +84,10 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     allocate(gs%p_tm_matrix(1:nb, 1:nb, 1:3, 1:nk))
     allocate(gs%rvnl_tm_matrix(1:nb, 1:nb, 1:3, 1:nk))
     allocate(gs%unfold_sub(1:nb, 1:nk), gs%unfold_prim(1:nb, 1:nk))
+    allocate(gs%unfold_w(1:4, 1:nb, 1:nk))
     gs%unfold_sub = 0
     gs%unfold_prim = 0
+    gs%unfold_w = 0d0
     gs%unfold_offset = 0d0
 
     if (irank == 0) then
@@ -121,6 +124,7 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
         call comm_bcast(gs%nv_prim, icomm, 0)
         call comm_bcast(gs%unfold_sub, icomm, 0)
         call comm_bcast(gs%unfold_prim, icomm, 0)
+        call comm_bcast(gs%unfold_w, icomm, 0)
         call comm_bcast(gs%unfold_offset, icomm, 0)
     end if
 
@@ -278,7 +282,7 @@ contains
         character(512) :: fpath
         logical :: exists
         integer :: fh, ik, ib, iik, iib, isub, ibprim, i, nnk, nnb, ioff(3)
-        real(8) :: w
+        real(8) :: w(4)
 
         fpath = trim(gs_directory) // trim(sysname) // '_unfold.data'
         inquire(file=trim(fpath), exist=exists)
@@ -318,11 +322,12 @@ contains
         read(fh, "(a)") dummy
         do ik = 1, nk
             do ib = 1, nb
-                read(fh, *) iik, iib, isub, ibprim, w
+                read(fh, *) iik, iib, isub, ibprim, w(1:4)
                 if (ik .ne. iik) stop "unfold map: ik mismatch"
                 if (ib .ne. iib) stop "unfold map: ib mismatch"
                 gs%unfold_sub(ib, ik) = isub
                 gs%unfold_prim(ib, ik) = ibprim
+                gs%unfold_w(1:4, ib, ik) = w(1:4)
             end do
         end do
         close(fh)

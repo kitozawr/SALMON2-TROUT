@@ -469,13 +469,18 @@ def main_unfoldmap():
     n_ambig = 0
     fname = f'{OUTPUT_DIR}{SYSNAME}_unfold.data'
     with open(fname, 'w') as f:
-        f.write('# unfold map (cubic band -> FCC sublattice & primitive band index)\n')
+        f.write('# unfold map (cubic band -> FCC sublattice spectral weights)\n')
         f.write('# nk, nb, nv_prim\n')
         f.write(f'{nk:8d}{nb:8d}{nv_prim:8d}\n')
         f.write('# isub, offset G0 (sc reduced)\n')
         for isub, off in enumerate(SUBLATTICE_OFFSETS):
             f.write(f'{isub + 1:4d}{off[0]:4d}{off[1]:4d}{off[2]:4d}\n')
-        f.write('# ik, ib, isub, ibprim, weight\n')
+        # isub/ibprim fix the physical-band slot (valence rank); w1..w4 are the
+        # spectral weights |<psi|P_s|psi>|^2 of the cubic band on each of the 4
+        # FCC sublattices (sum = 1). The SBE distributes the band population over
+        # the sublattices by these weights -- exact at symmetry degeneracies,
+        # where a hard argmax would dump it all on one equivalent primitive point.
+        f.write('# ik, ib, isub, ibprim, w1, w2, w3, w4\n')
         for ik in range(nk):
             if INCLUDE_SPIN_ORBIT:
                 H = build_hamiltonian_spinor(MATERIAL, kpoint[ik], Gcart,
@@ -491,6 +496,8 @@ def main_unfoldmap():
                                                  np.where(msk)[0] + npw])].sum(axis=0)
                 else:
                     wsub[s] = w2[msk].sum(axis=0)
+            # Normalise columns to exactly 1 (guard against basis incompleteness).
+            wsub /= np.maximum(wsub.sum(axis=0), 1e-300)
             isub_b = np.argmax(wsub, axis=0)
             wmax_b = wsub[isub_b, np.arange(nb)]
             n_ambig += int((wmax_b < 0.99).sum())
@@ -498,12 +505,14 @@ def main_unfoldmap():
             for ib in range(nb):
                 s = isub_b[ib]
                 counters[s] += 1
-                f.write('{:6d}{:6d}{:4d}{:6d}{:12.6f}\n'.format(
-                    ik + 1, ib + 1, s + 1, counters[s], wmax_b[ib]))
+                f.write('{:6d}{:6d}{:4d}{:6d}{:12.6f}{:12.6f}{:12.6f}{:12.6f}\n'.format(
+                    ik + 1, ib + 1, s + 1, counters[s],
+                    wsub[0, ib], wsub[1, ib], wsub[2, ib], wsub[3, ib]))
             if (ik + 1) % max(1, nk // 10) == 0 or ik == nk - 1:
                 print(f'#   ... mapped k-point {ik + 1}/{nk}')
     print(f'# EPM unfold map: wrote {fname}'
-          + (f' ({n_ambig} bands with cross-sublattice degeneracy, dominant weight taken)'
+          + (f' ({n_ambig} bands with cross-sublattice degeneracy, '
+             f'distributed by spectral weight)'
              if n_ambig else ' (all weights > 0.99)'))
 
 # =============================================================================

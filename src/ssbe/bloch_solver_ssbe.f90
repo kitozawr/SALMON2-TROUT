@@ -991,8 +991,8 @@ subroutine calc_unfolded_population_k(sbe, gs, Ac, pop_lev, icomm)
     integer,                  intent(in)  :: icomm
 
     integer :: nba, ik, i, j, in, im, n_done, best_i, best_j
-    integer :: isub, irank_prim, n_spin, nv_phys, pphys, off, islot
-    real(8)  :: curr_max
+    integer :: isub, irank_prim, n_spin, nv_phys, pphys, off, islot, s
+    real(8)  :: curr_max, popi
     integer,  allocatable :: zone_map(:)
     logical,  allocatable :: row_used(:), col_used(:)
     real(8),    allocatable :: pop_local(:, :, :), evals(:), p_k_full(:,:,:), eigen_a(:)
@@ -1068,9 +1068,11 @@ subroutine calc_unfolded_population_k(sbe, gs, Ac, pop_lev, icomm)
 
         ! Accumulate the spin-summed population of the top two valence and the
         ! bottom two conduction physical primitive bands of every sublattice.
-        ! Map each cubic band's primitive rank (from the unfold map) to a
-        ! physical band index, sum over its n_spin Kramers components, and bin
-        ! into one of the four output slots {VB-1, VB, CB1, CB2}.
+        ! The cubic band's primitive rank (from the unfold map) fixes the physical
+        ! slot {VB-1, VB, CB1, CB2}; its population is then DISTRIBUTED over the 4
+        ! sublattices by the spectral weights gs%unfold_w (sum_s = 1). At a
+        ! symmetry degeneracy this splits the population equally among the
+        ! equivalent primitive points, instead of an argmax dumping it on one.
         do i = 1, nba
             in = sbe%active_idx(i)
             isub = gs%unfold_sub(in, ik)
@@ -1100,7 +1102,11 @@ subroutine calc_unfolded_population_k(sbe, gs, Ac, pop_lev, icomm)
                     cycle
                 end if
             end if
-            pop_local(islot, isub, ik) = pop_local(islot, isub, ik) + real(t2(i, i))
+            popi = real(t2(i, i))
+            do s = 1, 4
+                pop_local(islot, s, ik) = pop_local(islot, s, ik) &
+                    & + gs%unfold_w(s, in, ik) * popi
+            end do
         end do
     end do
 
