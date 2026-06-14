@@ -973,33 +973,41 @@ end subroutine calc_bloch_population_k
 ! sublattice s, the population of its physical CB1 level:
 !   spinor input: primitive ranks nv_prim+1 and nv_prim+2 (Kramers pair,
 !                 spins summed); scalar input: rank nv_prim+1.
-! pop4(s, ik) is the CB1 population of the primitive point k_sc(ik) + G0(s).
-subroutine calc_unfolded_population_k(sbe, gs, Ac, pop4, icomm)
+! pop_lev(L, s, ik) is the crystal-gauge population of the L-th physical primitive
+! level (spins summed) at the folded primitive point k_prim = k_sc(ik) + G0(s):
+!   L = 1 -> VB-1 (second valence from top), 2 -> VB (top valence),
+!   L = 3 -> CB1 (lowest conduction),         4 -> CB2 (second conduction).
+! Band assignment comes entirely from the EPM `unfoldmap` (gs%unfold_sub/prim).
+! Energies for the spectral plot are taken from *_bandpath.data, so none are
+! emitted here.
+subroutine calc_unfolded_population_k(sbe, gs, Ac, pop_lev, icomm)
     use eigen_lapack, only: eigen_zheev
     use salmon_global, only: yn_sbe_spinor
     implicit none
     type(s_sbe_bloch_solver), intent(in)  :: sbe
     type(s_sbe_gs_info),      intent(in)  :: gs
     real(8),                  intent(in)  :: Ac(3)
-    real(8),                  intent(out) :: pop4(1:4, 1:sbe%nk)
+    real(8),                  intent(out) :: pop_lev(1:4, 1:4, 1:sbe%nk)
     integer,                  intent(in)  :: icomm
 
     integer :: nba, ik, i, j, in, im, n_done, best_i, best_j
-    integer :: isub, irank_prim, n_cb1
+    integer :: isub, irank_prim, n_spin, nv_phys, pphys, off, islot
     real(8)  :: curr_max
     integer,  allocatable :: zone_map(:)
     logical,  allocatable :: row_used(:), col_used(:)
-    real(8),    allocatable :: pop_local(:, :), evals(:), p_k_full(:,:,:), eigen_a(:)
+    real(8),    allocatable :: pop_local(:, :, :), evals(:), p_k_full(:,:,:), eigen_a(:)
     complex(8), allocatable :: H(:,:), W(:,:), W_sorted(:,:), t1(:,:), t2(:,:), rho_a(:,:)
 
     nba = sbe%n_active_bands
-    pop4 = 0d0
+    pop_lev = 0d0
     if (.not. gs%have_unfold .or. nba == 0) return
 
-    ! Spin states per physical level in the primitive rank ordering
-    n_cb1 = merge(2, 1, yn_sbe_spinor == 'y')
+    ! Spin states per physical level in the primitive rank ordering, and the
+    ! number of physical valence bands (Kramers doublets for spinor input).
+    n_spin  = merge(2, 1, yn_sbe_spinor == 'y')
+    nv_phys = gs%nv_prim / n_spin
 
-    allocate(pop_local(1:4, 1:sbe%nk))
+    allocate(pop_local(1:4, 1:4, 1:sbe%nk))
     allocate(evals(nba), H(nba,nba), W(nba,nba), W_sorted(nba,nba), t1(nba,nba), t2(nba,nba))
     allocate(rho_a(nba,nba), p_k_full(sbe%nb, sbe%nb, 3), eigen_a(nba))
     allocate(zone_map(nba), row_used(nba), col_used(nba))
@@ -1058,19 +1066,45 @@ subroutine calc_unfolded_population_k(sbe, gs, Ac, pop4, icomm)
         call ZGEMM('C', 'N', nba, nba, nba, dcmplx(1d0,0d0), W_sorted, nba, rho_a,    nba, dcmplx(0d0,0d0), t1, nba)
         call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0,0d0), t1,       nba, W_sorted, nba, dcmplx(0d0,0d0), t2, nba)
 
-        ! Accumulate the physical CB1 population of every sublattice
+        ! Accumulate the spin-summed population of the top two valence and the
+        ! bottom two conduction physical primitive bands of every sublattice.
+        ! Map each cubic band's primitive rank (from the unfold map) to a
+        ! physical band index, sum over its n_spin Kramers components, and bin
+        ! into one of the four output slots {VB-1, VB, CB1, CB2}.
         do i = 1, nba
             in = sbe%active_idx(i)
             isub = gs%unfold_sub(in, ik)
             if (isub < 1 .or. isub > 4) cycle
             irank_prim = gs%unfold_prim(in, ik)
-            if (irank_prim > gs%nv_prim .and. irank_prim <= gs%nv_prim + n_cb1) then
-                pop_local(isub, ik) = pop_local(isub, ik) + real(t2(i, i))
+            if (irank_prim < 1) cycle
+            if (irank_prim <= gs%nv_prim) then
+                ! Valence: physical index counted from the band bottom; offset
+                ! from the top valence band (off = 0 top, -1 next).
+                pphys = (irank_prim + n_spin - 1) / n_spin
+                off   = pphys - nv_phys
+                if (off == 0) then
+                    islot = 2          ! VB (top valence)
+                else if (off == -1) then
+                    islot = 1          ! VB-1
+                else
+                    cycle
+                end if
+            else
+                ! Conduction: physical index counted from the band bottom.
+                pphys = (irank_prim - gs%nv_prim + n_spin - 1) / n_spin
+                if (pphys == 1) then
+                    islot = 3          ! CB1
+                else if (pphys == 2) then
+                    islot = 4          ! CB2
+                else
+                    cycle
+                end if
             end if
+            pop_local(islot, isub, ik) = pop_local(islot, isub, ik) + real(t2(i, i))
         end do
     end do
 
-    call comm_summation(pop_local, pop4, 4 * sbe%nk, icomm)
+    call comm_summation(pop_local, pop_lev, 16 * sbe%nk, icomm)
     deallocate(pop_local, evals, H, W, W_sorted, t1, t2, rho_a, p_k_full, eigen_a)
     deallocate(zone_map, row_used, col_used)
 end subroutine calc_unfolded_population_k

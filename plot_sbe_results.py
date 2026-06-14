@@ -193,15 +193,34 @@ def plot_rt_file(filepath, output_dir, downsample=1, dpi=150):
 # Streaming nex_k  (*_sbe_nex_k.data)
 # ===========================================================================
 
+# Physical-level columns of the unfolded population file, in file order.
+UNFOLD_LEVELS = ('vbm1', 'vb', 'cb1', 'cb2')
+_UNFOLD_PRIMARY = 'cb1'   # level used for the dynamics k-maps / baseline
+
+
 def _iter_nex_k_blocks(filepath, unfold=False):
-    """Yield (t_val, t_unit, kpoints[nk,3], pop[nk]) one block at a time.
-    unfold=True parses the *_sbe_nex_k_unfold.data layout
-    (ik, isub, kx, ky, kz, pop) instead of (ik, kx, ky, kz, pop)."""
+    """Yield (t_val, t_unit, kpoints[nk,3], pop[nk], levels) one block at a time.
+
+    folded  (*_sbe_nex_k.data):        columns ik, kx, ky, kz, pop
+        -> pop is the LCB population, levels is None.
+    unfold  (*_sbe_nex_k_unfold.data): columns ik, isub, kx, ky, kz,
+        pop_vbm1, pop_vb, pop_cb1, pop_cb2
+        -> pop is the CB1 population (for the existing k-maps), levels is a
+           dict {name: ndarray[nk]} with all four physical-band populations."""
     time_re = re.compile(r'#\s*t\s*=\s*([-+\d.eEdD]+)\s*(\S*)')
     icol = 2 if unfold else 1
-    ncol = 6 if unfold else 5
+    ncol = 9 if unfold else 5
     t_value, t_unit = None, ''
-    kx, ky, kz, pop = [], [], [], []
+    kx, ky, kz = [], [], []
+    lev = {name: [] for name in UNFOLD_LEVELS} if unfold else None
+    pop = []      # folded: the single population column
+
+    def _emit():
+        kp = np.column_stack([kx, ky, kz])
+        if unfold:
+            levels = {name: np.asarray(lev[name], dtype=float) for name in UNFOLD_LEVELS}
+            return (t_value, t_unit, kp, levels[_UNFOLD_PRIMARY], levels)
+        return (t_value, t_unit, kp, np.asarray(pop, dtype=float), None)
 
     with open(filepath, 'r') as f:
         for line in f:
@@ -211,12 +230,13 @@ def _iter_nex_k_blocks(filepath, unfold=False):
             m = time_re.match(s)
             if m:
                 if t_value is not None and kx:
-                    yield (t_value, t_unit,
-                           np.column_stack([kx, ky, kz]),
-                           np.asarray(pop, dtype=float))
+                    yield _emit()
                 t_value = float(m.group(1))
                 t_unit  = m.group(2)
-                kx, ky, kz, pop = [], [], [], []
+                kx, ky, kz = [], [], []
+                pop = []
+                if unfold:
+                    lev = {name: [] for name in UNFOLD_LEVELS}
                 continue
             if s.startswith('#'):
                 continue
@@ -225,14 +245,17 @@ def _iter_nex_k_blocks(filepath, unfold=False):
                 continue
             try:
                 kx.append(float(parts[icol])); ky.append(float(parts[icol + 1]))
-                kz.append(float(parts[icol + 2])); pop.append(float(parts[icol + 3]))
-            except ValueError:
+                kz.append(float(parts[icol + 2]))
+                if unfold:
+                    for j, name in enumerate(UNFOLD_LEVELS):
+                        lev[name].append(float(parts[icol + 3 + j]))
+                else:
+                    pop.append(float(parts[icol + 3]))
+            except (ValueError, IndexError):
                 continue
 
     if t_value is not None and kx:
-        yield (t_value, t_unit,
-               np.column_stack([kx, ky, kz]),
-               np.asarray(pop, dtype=float))
+        yield _emit()
 
 
 def _wrap_to_fcc_bz(kpoints):
@@ -359,23 +382,37 @@ def _save_kt_map(times, t_unit, k_vals, label_k, marginals, output_dir, dpi,
 
 
 def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
-               unfold=False):
+               unfold=False, subtract_baseline=False):
     print(f"Processing {filepath.name}  "
           f"(cmap={'log' if log_scale else 'linear'}, "
           f"snapshots={'on' if snapshots else 'off'}"
-          f"{', unfolded primitive BZ' if unfold else ''}) ...")
+          f"{', unfolded primitive BZ' if unfold else ''}"
+          f"{', baseline-subtracted' if subtract_baseline else ''}) ...")
     tag = 'nex_k_unfold' if unfold else 'nex_k'
+    if subtract_baseline:
+        tag += '_db'
     kx_u = ky_u = kz_u = ix = iy = iz = None
     pop3d = None
+    pop_baseline = None       # per-k population of the first non-zero frame
     times, marg_kx, marg_ky, marg_kz = [], [], [], []
     t_unit_last = ''
     n_blocks = 0
 
-    for t_val, t_unit, kpoints, pop in _iter_nex_k_blocks(filepath, unfold=unfold):
+    for t_val, t_unit, kpoints, pop, _levels in _iter_nex_k_blocks(filepath, unfold=unfold):
         t_unit_last = t_unit
         n_blocks   += 1
         if unfold:
             kpoints = _wrap_to_fcc_bz(kpoints)
+        # Optional baseline removal: subtract the first frame that carries any
+        # population. This is the gauge/Houston-projection O(A^2) offset the
+        # crystal-gauge projection leaves at finite vector potential; removing
+        # it isolates the genuine field-driven excitation. Population can't be
+        # negative, so the difference is clipped at zero.
+        if subtract_baseline:
+            if pop_baseline is None and np.nanmax(pop) > 1e-30:
+                pop_baseline = pop.copy()
+            if pop_baseline is not None:
+                pop = np.clip(pop - pop_baseline, 0.0, None)
         if kx_u is None:
             kx_u, ky_u, kz_u, ix, iy, iz = _build_grid_info(kpoints)
             pop3d = np.empty((len(kx_u), len(ky_u), len(kz_u)))
@@ -400,6 +437,166 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
                  log_scale=log_scale, tag=tag)
     _save_kt_map(times, t_unit_last, kz_u, 'kz', marg_kz, output_dir, dpi,
                  log_scale=log_scale, tag=tag)
+
+
+def _unfold_peak_levels(filepath):
+    """Stream the unfold file once and return the frame of peak excitation
+    (largest total CB population), as (t_val, t_unit, kpoints[nk,3] wrapped to
+    the FCC BZ in sc-reduced units, levels={name: pop[nk]})."""
+    best = None
+    best_sum = -1.0
+    for t_val, t_unit, kpoints, _pop, levels in _iter_nex_k_blocks(filepath, unfold=True):
+        if levels is None:
+            return None
+        s = float(np.nansum(levels['cb1']) + np.nansum(levels['cb2']))
+        if s > best_sum:
+            best_sum = s
+            best = (t_val, t_unit, _wrap_to_fcc_bz(kpoints),
+                    {k: v.copy() for k, v in levels.items()})
+    return best
+
+
+def _bandpath_level_energies(eig_ha, nv, spinor):
+    """Return {name: (E_central_ev[N], kinetic_ev[N])} for VB-1, VB, CB1, CB2,
+    referenced to the valence-band maximum. The central energy is the mean of
+    the spin doublet (spinor). kinetic_ev is the carrier kinetic energy used as
+    the line broadening: E - E_CBM for the conduction bands (electron kinetic
+    energy, the variable of the Stobbe impact-ionization rate) and E_VBM - E for
+    the valence bands (hole kinetic energy)."""
+    n_spin = 2 if spinor else 1
+    nv_phys = nv // n_spin
+    slot_phys = {'vbm1': nv_phys - 1, 'vb': nv_phys,
+                 'cb1': nv_phys + 1, 'cb2': nv_phys + 2}
+
+    def _level(lvl):                       # 1-based physical level -> mean energy in Ha
+        if spinor:
+            return 0.5 * (eig_ha[:, 2 * lvl - 2] + eig_ha[:, 2 * lvl - 1])
+        return eig_ha[:, lvl - 1]
+
+    vbm_ha = np.nanmax(_level(nv_phys))
+    cbm_ha = np.nanmin(_level(nv_phys + 1))
+    out = {}
+    for name, lvl in slot_phys.items():
+        if lvl < 1 or (spinor and 2 * lvl > eig_ha.shape[1]) or \
+           (not spinor and lvl > eig_ha.shape[1]):
+            continue
+        e_ev = (_level(lvl) - vbm_ha) * HA_TO_EV
+        if name in ('cb1', 'cb2'):
+            kinetic = np.clip((_level(lvl) - cbm_ha) * HA_TO_EV, 0.0, None)
+        else:
+            kinetic = np.clip((vbm_ha - _level(lvl)) * HA_TO_EV, 0.0, None)
+        out[name] = (e_ev, kinetic)
+    return out
+
+
+def _map_path_population(qred, grid_kpts, grid_pop, max_dist=0.12):
+    """For each band-path point (FCC-reduced qred) return the population taken
+    from the nearest unfolded grid point (sc-reduced, wrapped). Points farther
+    than max_dist from any grid point get NaN (off the sampled grid)."""
+    q_sc = _wrap_to_fcc_bz(_fcc_prim_to_sc_reduced(qred))
+    d2 = ((q_sc[:, None, :] - grid_kpts[None, :, :]) ** 2).sum(axis=2)
+    j = np.argmin(d2, axis=1)
+    pop = grid_pop[j]
+    pop[np.sqrt(d2[np.arange(len(j)), j]) > max_dist] = np.nan
+    return pop
+
+
+def plot_unfold_spectral(filepath, bpfile, output_dir, dpi=150):
+    """A(k,E)-style spectral plots of the unfolded population.
+
+    Skeleton: the clean primitive-cell dispersion from *_bandpath.data (VB-1,
+    VB, CB1, CB2; spins summed). Decoration: at the frame of peak excitation,
+    each band is coloured by its physical population (mapped from the nearest
+    unfolded MP-grid point) and broadened by the per-k spin splitting (energy
+    spread). Two views are written: along the high-symmetry path and projected
+    onto kx. Energies come entirely from the band path (per the chosen design),
+    so no energies are needed in the SBE output."""
+    from matplotlib.collections import LineCollection
+    print(f"Processing {filepath.name}  (spectral A(k,E), skeleton {bpfile.name}) ...")
+
+    peak = _unfold_peak_levels(filepath)
+    if peak is None:
+        print("  (skip) unfold file has no per-level population columns")
+        return
+    t_val, t_unit, grid_kpts, grid_lev = peak
+
+    dist, eig_ha, nv, spinor, nodes, qred = _load_bandpath(bpfile)
+    if not nv:
+        print("  (skip) band path has no nv header — cannot identify levels")
+        return
+    levels = _bandpath_level_energies(eig_ha, nv, spinor)
+    kx_path = _fcc_prim_to_sc_reduced(qred)[:, 0]
+
+    # Colour scale: emphasise the conduction excitation (valence stays ~filled
+    # and saturates), so the field-driven CB population is the visible gradient.
+    cb_peak = max((np.nanmax(grid_lev[n]) for n in ('cb1', 'cb2') if n in grid_lev),
+                  default=0.0)
+    vmax = max(cb_peak, 1e-12)
+    norm = mcolors.Normalize(vmin=0.0, vmax=vmax)
+
+    # Normalise the kinetic-energy line width across all four levels.
+    ke_max = max((np.nanmax(levels[n][1]) for n in levels), default=1.0)
+    ke_max = max(ke_max, 1e-9)
+
+    def _draw(ax, xvals, scatter):
+        last_im = None
+        for name in UNFOLD_LEVELS:
+            if name not in levels or name not in grid_lev:
+                continue
+            e_ev, kinetic = levels[name]
+            pop = _map_path_population(qred, grid_kpts, grid_lev[name])
+            lw = 1.0 + 6.0 * np.nan_to_num(kinetic) / ke_max
+            if scatter:
+                good = np.isfinite(pop)
+                last_im = ax.scatter(xvals[good], e_ev[good], c=pop[good],
+                                     s=8 + 60 * lw[good], cmap=CMAP_POP, norm=norm,
+                                     edgecolors='none', alpha=0.85)
+            else:
+                pts = np.column_stack([xvals, e_ev])
+                segs = np.stack([pts[:-1], pts[1:]], axis=1)
+                seg_pop = 0.5 * (np.nan_to_num(pop[:-1]) + np.nan_to_num(pop[1:]))
+                seg_lw  = 0.5 * (lw[:-1] + lw[1:])
+                ax.plot(xvals, e_ev, color='0.75', lw=0.6, zorder=1)
+                lc = LineCollection(segs, cmap=CMAP_POP, norm=norm, zorder=2)
+                lc.set_array(seg_pop)
+                lc.set_linewidths(seg_lw)
+                ax.add_collection(lc)
+                last_im = lc
+        return last_im
+
+    # --- view 1: along the high-symmetry path -----------------------------
+    fig, ax = plt.subplots(figsize=(8, 6))
+    im = _draw(ax, dist, scatter=False)
+    for _lbl, d in nodes:
+        ax.axvline(d, color='#888888', linestyle='--', lw=0.7)
+    ax.set_xticks([d for _, d in nodes])
+    ax.set_xticklabels([r'$\Gamma$' if l == 'Gamma' else f'${l}$' for l, _ in nodes])
+    ax.set_xlim(dist[0], dist[-1])
+    ax.axhline(0.0, color='tab:red', lw=0.8, alpha=0.7)
+    ax.set_ylabel('Energy [eV]  (VBM = 0)')
+    ax.set_title(f'Unfolded A(k,E): VB-1/VB/CB1/CB2,  t = {t_val:.3f} {t_unit}\n'
+                 f'colour = population, width = carrier kinetic energy')
+    if im is not None:
+        plt.colorbar(im, ax=ax, label='physical-band population')
+    fig.tight_layout()
+    out = output_dir / 'nex_k_unfold_spectral_path.png'
+    fig.savefig(out, dpi=dpi, bbox_inches='tight'); plt.close(fig)
+    print(f"  saved {out.name}")
+
+    # --- view 2: projected onto kx ----------------------------------------
+    fig, ax = plt.subplots(figsize=(8, 6))
+    im = _draw(ax, kx_path, scatter=True)
+    ax.axhline(0.0, color='tab:red', lw=0.8, alpha=0.7)
+    ax.set_xlabel('kx [reduced, FCC BZ]')
+    ax.set_ylabel('Energy [eV]  (VBM = 0)')
+    ax.set_title(f'Unfolded population vs (kx, E),  t = {t_val:.3f} {t_unit}\n'
+                 f'(band-path points; colour = population, size = kinetic energy)')
+    if im is not None:
+        plt.colorbar(im, ax=ax, label='physical-band population')
+    fig.tight_layout()
+    out = output_dir / 'nex_k_unfold_spectral_kx.png'
+    fig.savefig(out, dpi=dpi, bbox_inches='tight'); plt.close(fig)
+    print(f"  saved {out.name}")
 
 
 # ===========================================================================
@@ -854,10 +1051,11 @@ def _load_bandpath(bpfile):
       # nb = <states per line>
       # nodes: LBL dist  LBL dist ...
       data: ik dist q1 q2 q3 E_1..E_nb [Ha]
-    Returns (dist[N], eigen_ha[N, nb], nv, spinor, nodes=[(label, dist), ...]).
+    Returns (dist[N], eigen_ha[N, nb], nv, spinor, nodes=[(label, dist), ...],
+             q[N, 3] in FCC-primitive reduced coords).
     """
     spinor, nv, nb, nodes = False, None, None, []
-    dist, eig = [], []
+    dist, eig, qred = [], [], []
     with open(bpfile, 'r') as f:
         for line in f:
             s = line.strip()
@@ -884,12 +1082,13 @@ def _load_bandpath(bpfile):
                 continue
             try:
                 dist.append(float(parts[1]))
+                qred.append([float(parts[2]), float(parts[3]), float(parts[4])])
                 eig.append([float(x) for x in parts[5:5 + nb]])
             except ValueError:
                 continue
     if not eig:
         raise ValueError(f"No band data parsed from {bpfile}")
-    return np.array(dist), np.array(eig), nv, spinor, nodes
+    return (np.array(dist), np.array(eig), nv, spinor, nodes, np.array(qred))
 
 
 def plot_bandpath(bpfile, output_dir, energy_range_ev=(-6, 12), dpi=150):
@@ -900,7 +1099,7 @@ def plot_bandpath(bpfile, output_dir, energy_range_ev=(-6, 12), dpi=150):
     4-fold -- CB1/CB2/CB3 are individually resolved.
     """
     print(f"Processing unfolded band path: {bpfile.name}")
-    dist, eig_ha, nv, spinor, nodes = _load_bandpath(bpfile)
+    dist, eig_ha, nv, spinor, nodes, _q = _load_bandpath(bpfile)
     nk, nb = eig_ha.shape
     print(f"  {nk} path k-points, {nb} bands, nv = {nv}, spinor = {spinor}")
 
@@ -1016,6 +1215,15 @@ def main():
                              'nex_k (3 projected planes). Time-k maps are always '
                              'written regardless of this flag. '
                              f'Hardcoded default: SNAP_ENABLED = {SNAP_ENABLED}')
+    parser.add_argument('--subtract-baseline', action='store_true',
+                        help='For nex_k population plots, subtract the first '
+                             'non-zero frame (the finite-A gauge/projection '
+                             'offset) from every frame to isolate the genuine '
+                             'field-driven excitation. Writes *_db_* files.')
+    parser.add_argument('--spectral', action='store_true',
+                        help='Also write an A(kx,E)-style spectral map of the '
+                             'unfolded CB1 population (needs the 7-column '
+                             '*_sbe_nex_k_unfold.data with the e_cb1 column).')
     args = parser.parse_args()
 
     # Resolve mode shortcuts
@@ -1041,6 +1249,10 @@ def main():
             found_any = True
             plot_nex_k(f, output_dir, dpi=args.dpi,
                        log_scale=args.log_cmap, snapshots=args.snapshots)
+            if args.subtract_baseline:
+                plot_nex_k(f, output_dir, dpi=args.dpi,
+                           log_scale=args.log_cmap, snapshots=args.snapshots,
+                           subtract_baseline=True)
 
         # Physical (unfolded) CB1 populations on the primitive BZ
         for f in sorted(input_dir.glob('*_sbe_nex_k_unfold.data')):
@@ -1048,6 +1260,18 @@ def main():
             plot_nex_k(f, output_dir, dpi=args.dpi,
                        log_scale=args.log_cmap, snapshots=args.snapshots,
                        unfold=True)
+            if args.subtract_baseline:
+                plot_nex_k(f, output_dir, dpi=args.dpi,
+                           log_scale=args.log_cmap, snapshots=args.snapshots,
+                           unfold=True, subtract_baseline=True)
+            if args.spectral:
+                stem = f.name[:-len('_sbe_nex_k_unfold.data')]
+                bpfile = f.parent / f'{stem}_bandpath.data'
+                if bpfile.exists():
+                    plot_unfold_spectral(f, bpfile, output_dir, dpi=args.dpi)
+                else:
+                    print(f"  (skip spectral) {bpfile.name} not found "
+                          f"(generate it with: epm_gaas_reference.py bandpath)")
 
     # --- Band structure -------------------------------------------------
     if not args.no_bands:

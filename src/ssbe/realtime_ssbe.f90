@@ -27,7 +27,7 @@ subroutine main_realtime_ssbe(icomm)
     integer :: nk
     integer :: ib_lcb, nb_vb
     real(8), allocatable :: pop_k(:)
-    real(8), allocatable :: pop4_k(:, :)
+    real(8), allocatable :: pop_lev_k(:, :, :)
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
@@ -64,7 +64,7 @@ subroutine main_realtime_ssbe(icomm)
     ! Lowest conduction band index (Houston-basis population output)
     ib_lcb = nb_vb + 1
     allocate(pop_k(1:nk))
-    if (gs%have_unfold) allocate(pop4_k(1:4, 1:nk))
+    if (gs%have_unfold) allocate(pop_lev_k(1:4, 1:4, 1:nk))
 
     if (irank == 0) then
         ! SYSNAME_sbe_rt.data
@@ -103,9 +103,9 @@ subroutine main_realtime_ssbe(icomm)
         call write_sbe_nex_k_block(fh_sbe_nex_k, 0.0d0, nk, gs%kpoint, pop_k)
         flush(fh_sbe_nex_k)
         if (gs%have_unfold) then
-            pop4_k = 0.0d0
+            pop_lev_k = 0.0d0
             call write_sbe_nex_k_unfold_block(fh_sbe_nex_k_unfold, 0.0d0, nk, &
-                & gs%kpoint, gs%unfold_offset, pop4_k)
+                & gs%kpoint, gs%unfold_offset, pop_lev_k)
             flush(fh_sbe_nex_k_unfold)
         end if
     end if
@@ -171,10 +171,10 @@ subroutine main_realtime_ssbe(icomm)
             end if
             ! Physical (unfolded) CB1 populations per primitive BZ point
             if (gs%have_unfold) then
-                call calc_unfolded_population_k(sbe, gs, Ac_ext_t(:, it), pop4_k, icomm)
+                call calc_unfolded_population_k(sbe, gs, Ac_ext_t(:, it), pop_lev_k, icomm)
                 if (irank == 0) then
                     call write_sbe_nex_k_unfold_block(fh_sbe_nex_k_unfold, t, nk, &
-                        & gs%kpoint, gs%unfold_offset, pop4_k)
+                        & gs%kpoint, gs%unfold_offset, pop_lev_k)
                 end if
             end if
         end if
@@ -201,7 +201,7 @@ subroutine main_realtime_ssbe(icomm)
     end if
 
     deallocate(pop_k)
-    if (allocated(pop4_k)) deallocate(pop4_k)
+    if (allocated(pop_lev_k)) deallocate(pop_lev_k)
 
     return
 end subroutine main_realtime_ssbe
