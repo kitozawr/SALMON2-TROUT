@@ -52,12 +52,18 @@ k-vector units
 
 import re
 import itertools
+import warnings
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 import argparse
 from scipy.interpolate import RegularGridInterpolator
 import matplotlib.colors as mcolors
+
+# The wrapped FCC primitive-zone grid is irregular, so some 1-D marginal slices
+# are all-NaN and nanmean legitimately returns NaN (rendered blank). Silence the
+# accompanying numpy warning -- it is expected, not an error.
+warnings.filterwarnings('ignore', message='Mean of empty slice')
 
 plt.switch_backend('Agg')
 
@@ -212,15 +218,17 @@ def _iter_nex_k_blocks(filepath, unfold=False):
     ncol = 9 if unfold else 5
     t_value, t_unit = None, ''
     kx, ky, kz = [], [], []
+    sub = []      # unfold: the sublattice index (column 2), enables the folded view
     lev = {name: [] for name in UNFOLD_LEVELS} if unfold else None
     pop = []      # folded: the single population column
 
     def _emit():
         kp = np.column_stack([kx, ky, kz])
+        sub_arr = np.asarray(sub, dtype=int) if unfold else None
         if unfold:
             levels = {name: np.asarray(lev[name], dtype=float) for name in UNFOLD_LEVELS}
-            return (t_value, t_unit, kp, levels[_UNFOLD_PRIMARY], levels)
-        return (t_value, t_unit, kp, np.asarray(pop, dtype=float), None)
+            return (t_value, t_unit, kp, levels[_UNFOLD_PRIMARY], levels, sub_arr)
+        return (t_value, t_unit, kp, np.asarray(pop, dtype=float), None, None)
 
     with open(filepath, 'r') as f:
         for line in f:
@@ -235,6 +243,7 @@ def _iter_nex_k_blocks(filepath, unfold=False):
                 t_unit  = m.group(2)
                 kx, ky, kz = [], [], []
                 pop = []
+                sub = []
                 if unfold:
                     lev = {name: [] for name in UNFOLD_LEVELS}
                 continue
@@ -247,6 +256,7 @@ def _iter_nex_k_blocks(filepath, unfold=False):
                 kx.append(float(parts[icol])); ky.append(float(parts[icol + 1]))
                 kz.append(float(parts[icol + 2]))
                 if unfold:
+                    sub.append(int(float(parts[1])))
                     for j, name in enumerate(UNFOLD_LEVELS):
                         lev[name].append(float(parts[icol + 3 + j]))
                 else:
@@ -268,6 +278,42 @@ def _wrap_to_fcc_bz(kpoints):
     d = kpoints[:, None, :] - cands[None, :, :]
     best = np.argmin((d**2).sum(axis=2), axis=1)
     return kpoints - cands[best]
+
+
+def _read_unfold_offsets(filepath):
+    """Parse the '# isub, offset G0 (sc reduced)' table from an unfold file.
+    Returns {isub: ndarray[3]}; falls back to the canonical FCC sublattice
+    offsets if the table is absent."""
+    offs = {}
+    with open(filepath, 'r') as f:
+        in_block = False
+        for line in f:
+            s = line.strip()
+            if s.startswith('# isub'):
+                in_block = True
+                continue
+            if in_block:
+                if s.startswith('#') or not s:
+                    break
+                p = s.split()
+                if len(p) == 4:
+                    offs[int(p[0])] = np.array([float(p[1]), float(p[2]), float(p[3])])
+                else:
+                    break
+    if len(offs) != 4:
+        offs = {1: np.zeros(3), 2: np.array([1., 0., 0.]),
+                3: np.array([0., 1., 0.]), 4: np.array([0., 0., 1.])}
+    return offs
+
+
+def _fold_to_cubic(kpoints_prim, sub, offsets):
+    """Recover the cubic supercell k (k_sc = k_prim - G0(isub)) and wrap it
+    into [-0.5, 0.5). Summing populations over the four sublattices at a fixed
+    k_sc collapses the FCC valleys (Gamma + the three X points) back onto the
+    regular cubic grid -- the clean single-zone view."""
+    g0 = np.array([offsets[int(s)] for s in sub])
+    ksc = kpoints_prim - g0
+    return ksc - np.round(ksc)
 
 
 def _build_grid_info(kpoints):
@@ -391,16 +437,29 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
     tag = 'nex_k_unfold' if unfold else 'nex_k'
     if subtract_baseline:
         tag += '_db'
+    # The unfolded primitive-zone map legitimately shows the CB1 population of
+    # every FCC valley (Gamma for sublattice 1, the X points for 2/3/4), so it
+    # carries satellite peaks at the zone boundary. The FOLDED view sums the
+    # four sublattices back onto the regular cubic grid (k_sc = k_prim - G0),
+    # collapsing the valleys into a single clean zone -- the per-cubic-k total
+    # of the lowest conduction band.
+    offsets = _read_unfold_offsets(filepath) if unfold else None
+    ftag = 'nex_k_fold' + ('_db' if subtract_baseline else '')
+
     kx_u = ky_u = kz_u = ix = iy = iz = None
     pop3d = None
+    fkx_u = fky_u = fkz_u = fix = fiy = fiz = None
+    fpop3d = None
     pop_baseline = None       # per-k population of the first non-zero frame
     times, marg_kx, marg_ky, marg_kz = [], [], [], []
+    fmarg_kx, fmarg_ky, fmarg_kz = [], [], []
     t_unit_last = ''
     n_blocks = 0
 
-    for t_val, t_unit, kpoints, pop, _levels in _iter_nex_k_blocks(filepath, unfold=unfold):
+    for t_val, t_unit, kpoints, pop, _levels, sub in _iter_nex_k_blocks(filepath, unfold=unfold):
         t_unit_last = t_unit
         n_blocks   += 1
+        kpoints_prim = kpoints
         if unfold:
             kpoints = _wrap_to_fcc_bz(kpoints)
         # Optional baseline removal: subtract the first frame that carries any
@@ -426,6 +485,22 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
         marg_ky.append(np.nanmean(pop3d, axis=(0, 2)))
         marg_kz.append(np.nanmean(pop3d, axis=(0, 1)))
 
+        # Folded cubic-zone view: sum the four sublattices at each k_sc.
+        if unfold and sub is not None:
+            ksc = _fold_to_cubic(kpoints_prim, sub, offsets)
+            fpop = pop  # baseline (if any) already applied to `pop` above
+            if fkx_u is None:
+                fkx_u, fky_u, fkz_u, fix, fiy, fiz = _build_grid_info(ksc)
+                fpop3d = np.zeros((len(fkx_u), len(fky_u), len(fkz_u)))
+            fpop3d.fill(0.0)
+            np.add.at(fpop3d, (fix, fiy, fiz), fpop)
+            if snapshots:
+                _save_snapshot(fpop3d, fkx_u, fky_u, fkz_u, t_val, t_unit, output_dir,
+                               dpi, log_scale=log_scale, tag=ftag)
+            fmarg_kx.append(np.nanmean(fpop3d, axis=(1, 2)))
+            fmarg_ky.append(np.nanmean(fpop3d, axis=(0, 2)))
+            fmarg_kz.append(np.nanmean(fpop3d, axis=(0, 1)))
+
     if n_blocks == 0:
         print("  (skip) no data blocks found")
         return
@@ -438,6 +513,15 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
     _save_kt_map(times, t_unit_last, kz_u, 'kz', marg_kz, output_dir, dpi,
                  log_scale=log_scale, tag=tag)
 
+    if unfold and fmarg_kx:
+        print(f"  writing folded cubic-zone time-k maps ...")
+        _save_kt_map(times, t_unit_last, fkx_u, 'kx', fmarg_kx, output_dir, dpi,
+                     log_scale=log_scale, tag=ftag)
+        _save_kt_map(times, t_unit_last, fky_u, 'ky', fmarg_ky, output_dir, dpi,
+                     log_scale=log_scale, tag=ftag)
+        _save_kt_map(times, t_unit_last, fkz_u, 'kz', fmarg_kz, output_dir, dpi,
+                     log_scale=log_scale, tag=ftag)
+
 
 def _unfold_peak_levels(filepath):
     """Stream the unfold file once and return the frame of peak excitation
@@ -445,7 +529,7 @@ def _unfold_peak_levels(filepath):
     the FCC BZ in sc-reduced units, levels={name: pop[nk]})."""
     best = None
     best_sum = -1.0
-    for t_val, t_unit, kpoints, _pop, levels in _iter_nex_k_blocks(filepath, unfold=True):
+    for t_val, t_unit, kpoints, _pop, levels, _sub in _iter_nex_k_blocks(filepath, unfold=True):
         if levels is None:
             return None
         s = float(np.nansum(levels['cb1']) + np.nansum(levels['cb2']))
