@@ -49,6 +49,17 @@ module bloch_solver_ssbe
         real(8) :: ii_eg_au     = 0d0   ! band gap E_g [Ha] (primary loses E_g)
         integer :: nv_act       = 0     ! valence branches inside the active subspace
         real(8) :: occ_max      = 2d0   ! 2 (scalar bands) / 1 (spinor bands)
+
+        ! Sublattice (band-unfolding) awareness of the impact-ionization
+        ! channel. When the unfolding weights gs%unfold_w are available
+        ! (non-zero), the k-local two-particle event is resolved per FCC
+        ! sublattice so that the secondary pair is created in the SAME
+        ! primitive-cell sector (same primitive crystal momentum) as the
+        ! primary -- restoring primitive momentum conservation that the
+        ! cubic folding hides, and removing the spurious cross-sublattice
+        ! ("false generation") events. Reduces identically to the folded
+        ! channel when the weights are absent.
+        logical :: flag_unfold_ii = .false.
     end type
 
     !=========================================================================
@@ -234,12 +245,25 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
         do ib = 1, sbe%n_active_bands
             if (sbe%active_idx(ib) <= homo_idx) sbe%nv_act = sbe%nv_act + 1
         end do
+        ! Sublattice resolution is enabled iff the unfolding weights were
+        ! loaded (gs%unfold_w not all zero). When absent, the channel falls
+        ! back to the original folded (single-pool) treatment.
+        sbe%flag_unfold_ii = .false.
+        if (allocated(gs%unfold_w)) then
+            if (maxval(abs(gs%unfold_w)) > 1d-12) sbe%flag_unfold_ii = .true.
+        end if
         if (irank == 0) then
             write(*, '(a)') '# impact ionization (k-local Lindblad, Stobbe fit) enabled:'
             write(*, '(a,ES12.5,a)') '#   P     = ', sbe%ii_pref_au, ' 1/(Ha^4 a.u.t)'
             write(*, '(a,ES12.5,a,ES12.5,a)') '#   E_th  = ', sbe%ii_eth_au, ' Ha, ramp = ', sbe%ii_ramp_au, ' Ha'
             write(*, '(a,ES12.5,a,ES12.5,a)') '#   E_CBM = ', sbe%ii_ecbm_au, ' Ha, E_g  = ', sbe%ii_eg_au, ' Ha'
             write(*, '(a,i4,a,i4)') '#   active valence branches = ', sbe%nv_act, ' / ', sbe%n_active_bands
+            if (sbe%flag_unfold_ii) then
+                write(*, '(a)') '#   sublattice-resolved (unfolding weights loaded): primitive'
+                write(*, '(a)') '#   momentum conservation enforced over 4 FCC sublattices'
+            else
+                write(*, '(a)') '#   folded (single-pool) treatment: no unfolding weights found'
+            end if
             if (sbe%nv_act < 1 .or. sbe%nv_act >= sbe%n_active_bands) &
                 write(*, '(a)') '#   WARNING: no valence or no conduction branches active -- channel is inert'
         end if
@@ -413,8 +437,10 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     complex(8), allocatable :: H1(:, :), H2(:, :), HVG(:, :)
     real(8),    allocatable :: eigen_active(:)
     real(8),    allocatable :: V_begin(:), V_end(:), X_a(:)
+    real(8),    allocatable :: w_act_sub(:, :)   ! (4, nba) field-free sublattice weights of active bands
     complex(8), allocatable :: p_k_full(:, :, :)
     complex(8), allocatable :: rho_n_full(:, :)
+    integer :: s
 
     nb  = sbe%nb
     nba = sbe%n_active_bands
@@ -453,14 +479,15 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     end do
 
     !$omp parallel default(shared) &
-    !$omp    private(ik, i, j, idir, in, im, isub) &
-    !$omp    private(p_active, rho_a, H1, H2, HVG, eigen_active, V_begin, V_end, X_a) &
+    !$omp    private(ik, i, j, idir, in, im, isub, s) &
+    !$omp    private(p_active, rho_a, H1, H2, HVG, eigen_active, V_begin, V_end, X_a, w_act_sub) &
     !$omp    private(p_k_full, rho_n_full)
 
     if (nba > 0) then
         allocate(p_active(nba, nba, 3), rho_a(nba, nba))
         allocate(H1(nba, nba), H2(nba, nba), HVG(nba, nba))
         allocate(eigen_active(nba), V_begin(nba), V_end(nba), X_a(nba))
+        allocate(w_act_sub(4, nba))
     end if
     allocate(p_k_full(nb, nb, 1:3), rho_n_full(nb, nb))
 
@@ -493,6 +520,20 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
                 X_a(i) = sbe%X_branch(sbe%active_idx(i), ik)
             end do
 
+            ! Field-free sublattice weights of the active bands at this k
+            ! (projected onto the instantaneous Houston branches inside
+            ! houston_dissipate). Only consumed by the unfolding-aware
+            ! impact-ionization channel.
+            if (sbe%flag_impact .and. sbe%flag_unfold_ii) then
+                do i = 1, nba
+                    do s = 1, 4
+                        w_act_sub(s, i) = gs%unfold_w(s, sbe%active_idx(i), ik)
+                    end do
+                end do
+            else if (sbe%flag_impact) then
+                w_act_sub = 0d0
+            end if
+
             !-----------------------------------------------------------------
             ! Step 1: D(h/2) -- Strang dissipative half-step: Hadamard
             ! Kuhn-Zurek dephasing and/or impact-ionization channels, both in
@@ -501,7 +542,7 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
             if (sbe%flag_decoh .or. sbe%flag_impact) then
                 call build_HVG(nba, eigen_active, p_active, Ac_begin, HVG)
                 call houston_dissipate(sbe, nba, rho_a, HVG, p_active, Ac_begin, X_a, &
-                                       0.5d0 * dt, V_begin)
+                                       0.5d0 * dt, V_begin, w_act_sub)
             else
                 V_begin = 0d0
             end if
@@ -525,7 +566,7 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
             if (sbe%flag_decoh .or. sbe%flag_impact) then
                 call build_HVG(nba, eigen_active, p_active, Ac_end, HVG)
                 call houston_dissipate(sbe, nba, rho_a, HVG, p_active, Ac_end, X_a, &
-                                       0.5d0 * dt, V_end)
+                                       0.5d0 * dt, V_end, w_act_sub)
             else
                 V_end = 0d0
             end if
@@ -571,7 +612,7 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     !$omp end do
 
     if (nba > 0) then
-        deallocate(p_active, rho_a, H1, H2, HVG, eigen_active, V_begin, V_end, X_a)
+        deallocate(p_active, rho_a, H1, H2, HVG, eigen_active, V_begin, V_end, X_a, w_act_sub)
     end if
     deallocate(p_k_full, rho_n_full)
     !$omp end parallel
@@ -664,7 +705,7 @@ end subroutine apply_unitary_rotation
 ! Also returns the instantaneous branch (group) velocities in the field
 ! polarization direction, V_a = [(U^dagger pi U)_aa . e_hat] + (A . e_hat)
 ! (computed only when the Kuhn-Zurek dephasing needs the branch positions).
-subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V)
+subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_sub)
     use eigen_lapack, only: eigen_zheev
     implicit none
     type(s_sbe_bloch_solver), intent(in) :: sbe
@@ -676,10 +717,12 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V)
     real(8),    intent(in)    :: X(nba)
     real(8),    intent(in)    :: tau
     real(8),    intent(out)   :: V(nba)
+    real(8),    intent(in)    :: w_act_sub(4, nba)  ! field-free sublattice weights of the active bands
 
     real(8)    :: evals(nba), ehat(3), Ac_norm
     complex(8) :: W(nba, nba), t1(nba, nba), t2(nba, nba)
-    integer :: i, j, idir
+    real(8)    :: wsub_branch(4, nba), wcoef
+    integer :: i, j, idir, a, s
 
     call eigen_zheev(H, evals, W)
 
@@ -698,7 +741,25 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V)
 
     ! k-local impact-ionization channels (threshold-gated, frozen rates)
     if (sbe%flag_impact) then
-        call apply_impact_ionization(sbe, nba, t2, evals, Ac, tau)
+        ! Project the field-free sublattice weights of the active Bloch bands
+        ! onto the instantaneous Houston branches a:
+        !   w_s(a) = sum_i |U_ia|^2 w_s(band_i),   sum_s w_s(a) = 1.
+        ! This makes the sublattice character field-aware (correct under the
+        ! Houston rotation U) and degenerates to the bare band weights at A=0.
+        if (sbe%flag_unfold_ii) then
+            wsub_branch = 0d0
+            do a = 1, nba
+                do i = 1, nba
+                    wcoef = real(W(i, a))**2 + aimag(W(i, a))**2
+                    do s = 1, 4
+                        wsub_branch(s, a) = wsub_branch(s, a) + wcoef * w_act_sub(s, i)
+                    end do
+                end do
+            end do
+        else
+            wsub_branch = 0d0
+        end if
+        call apply_impact_ionization(sbe, nba, t2, evals, Ac, tau, wsub_branch, sbe%flag_unfold_ii)
     end if
 
     ! rho = U rho~ U^dagger
@@ -748,8 +809,35 @@ end subroutine houston_dissipate
 ! this equals E_h(k+A) - E_CBM -- the scale on which the Stobbe fit is
 ! defined). For most k-points and times the gate is empty and the channel
 ! costs O(N_C) comparisons -- the "rare impact events" mechanism.
+!
+! SUBLATTICE (BAND-UNFOLDING) RESOLUTION (use_unfold = .true.)
+! ------------------------------------------------------------
+! Under cubic folding, one grid k hides 4 distinct primitive crystal
+! momenta -- the 4 FCC sublattices. Genuine impact ionization conserves
+! the PRIMITIVE crystal momentum, so the strict k-local event must close
+! WITHIN a single sublattice: the primary (h -> h') and the secondary pair
+! (v1 -> c1) must all sit in the same primitive-cell sector. The folded
+! treatment above ignores this and lets a primary on sublattice s create
+! its secondary pair at the GLOBAL band edges v1/c1 (which may belong to a
+! different sublattice) -- a momentum-non-conserving "false generation"
+! event that inflates the carrier multiplication rate.
+!
+! With the spectral weights w_s(a) (sum_s w_s(a) = 1, projected onto the
+! Houston branches) we resolve the event per sublattice s = 1..4:
+!   * the secondary pair is created at the s-RESOLVED band edges
+!     v1(s), c1(s) (the valence/conduction branches whose weight is
+!     dominant on s, taken at the gap edge),
+!   * the primary's receiving branch h'(s) is the conduction branch with
+!     weight on s closest to eps_h - E_g,
+!   * both channel rates are scaled by w_s(h) -- the primary's fraction on
+!     s -- so that summing over s reproduces the primary's total
+!     relaxation rate. In the no-folding limit (one sublattice, w = 1)
+!     v1(s)=v1, c1(s)=c1, h'(s)=h' and the scheme reduces EXACTLY to the
+!     folded channel above.
+! Every sub-channel is still an exact CPTP amplitude-damping map (rates
+! >= 0 by construction), so the composition remains CPTP.
 !=============================================================================
-subroutine apply_impact_ionization(sbe, nba, rho_ad, evals, Ac, tau)
+subroutine apply_impact_ionization(sbe, nba, rho_ad, evals, Ac, tau, wsub, use_unfold)
     implicit none
     type(s_sbe_bloch_solver), intent(in) :: sbe
     integer,    intent(in)    :: nba
@@ -757,17 +845,78 @@ subroutine apply_impact_ionization(sbe, nba, rho_ad, evals, Ac, tau)
     real(8),    intent(in)    :: evals(nba)         ! Houston branch energies
     real(8),    intent(in)    :: Ac(3)
     real(8),    intent(in)    :: tau
+    real(8),    intent(in)    :: wsub(4, nba)       ! per-branch sublattice weights (sum_s = 1)
+    logical,    intent(in)    :: use_unfold
 
-    integer :: iv1, ic1, ih, ihp, a
-    real(8) :: a2half, ekin, d, gam, etgt, f
+    integer :: iv1, ic1, ih, ihp, a, s
+    integer :: iv1_sub(4), ic1_sub(4), ihp_s
+    real(8) :: a2half, ekin, d, gam, etgt, f, ws, wbest
     real(8) :: pv1, phh, bc1, bhp, g_rel, g_pair
     real(8), parameter :: occ_eps = 1d-12
+    real(8), parameter :: w_min   = 0.05d0   ! ignore sublattices the primary barely touches
+    real(8), parameter :: w_tie   = 1d-12
 
     if (sbe%nv_act < 1 .or. sbe%nv_act >= nba) return
     iv1 = sbe%nv_act        ! topmost valence branch (energy-ordered)
     ic1 = sbe%nv_act + 1    ! lowest conduction branch
     f = sbe%occ_max
     a2half = 0.5d0 * dot_product(Ac, Ac)
+
+    !-------------------------------------------------------------------------
+    ! Folded (single-pool) treatment: no unfolding weights available
+    !-------------------------------------------------------------------------
+    if (.not. use_unfold) then
+        do ih = ic1, nba
+            ekin = evals(ih) + a2half - sbe%ii_ecbm_au
+            d = ekin - sbe%ii_eth_au
+            if (d <= 0d0) cycle
+            if (real(rho_ad(ih, ih)) < occ_eps) cycle
+            gam = sbe%ii_pref_au * d**4
+            if (sbe%ii_ramp_au > 0d0 .and. d < sbe%ii_ramp_au) gam = gam * d / sbe%ii_ramp_au
+            etgt = evals(ih) - sbe%ii_eg_au
+            ihp = ic1
+            do a = ic1, nba
+                if (abs(evals(a) - etgt) < abs(evals(ihp) - etgt)) ihp = a
+            end do
+            if (ihp == ih) cycle
+            pv1 = min(max(real(rho_ad(iv1, iv1)) / f, 0d0), 1d0)
+            phh = min(max(real(rho_ad(ih,  ih )) / f, 0d0), 1d0)
+            bc1 = min(max(1d0 - real(rho_ad(ic1, ic1)) / f, 0d0), 1d0)
+            bhp = min(max(1d0 - real(rho_ad(ihp, ihp)) / f, 0d0), 1d0)
+            g_rel  = gam * pv1 * bc1 * bhp
+            g_pair = gam * phh * bc1 * bhp
+            call apply_damping_channel(nba, rho_ad, ih,  ihp, g_rel,  tau)
+            call apply_damping_channel(nba, rho_ad, iv1, ic1, g_pair, tau)
+        end do
+        return
+    end if
+
+    !-------------------------------------------------------------------------
+    ! Sublattice-resolved (primitive-momentum-conserving) treatment.
+    ! Precompute the s-resolved band edges once per k:
+    !   v1(s) = valence branch dominant on s, taken at the TOP of the valence
+    !   c1(s) = conduction branch dominant on s, taken at the BOTTOM of the
+    !           conduction. The energy tie-break recovers the global edges
+    !           (nv_act, nv_act+1) when all weights are equal (no folding).
+    !-------------------------------------------------------------------------
+    do s = 1, 4
+        iv1_sub(s) = iv1
+        wbest = -1d0
+        do a = 1, sbe%nv_act
+            if (wsub(s, a) > wbest + w_tie .or. &
+                (abs(wsub(s, a) - wbest) <= w_tie .and. evals(a) > evals(iv1_sub(s)))) then
+                wbest = wsub(s, a); iv1_sub(s) = a
+            end if
+        end do
+        ic1_sub(s) = ic1
+        wbest = -1d0
+        do a = ic1, nba
+            if (wsub(s, a) > wbest + w_tie .or. &
+                (abs(wsub(s, a) - wbest) <= w_tie .and. evals(a) < evals(ic1_sub(s)))) then
+                wbest = wsub(s, a); ic1_sub(s) = a
+            end if
+        end do
+    end do
 
     do ih = ic1, nba
         ! Threshold gate on the kinetic energy from the field-free CBM
@@ -780,27 +929,36 @@ subroutine apply_impact_ionization(sbe, nba, rho_ad, evals, Ac, tau)
         gam = sbe%ii_pref_au * d**4
         if (sbe%ii_ramp_au > 0d0 .and. d < sbe%ii_ramp_au) gam = gam * d / sbe%ii_ramp_au
 
-        ! Receiving branch of the primary electron: closest to eps_h - E_g
         etgt = evals(ih) - sbe%ii_eg_au
-        ihp = ic1
-        do a = ic1, nba
-            if (abs(evals(a) - etgt) < abs(evals(ihp) - etgt)) ihp = a
+
+        ! Distribute the event across the sublattices the primary occupies
+        do s = 1, 4
+            ws = wsub(s, ih)
+            if (ws < w_min) cycle
+
+            ! Receiving branch of the primary on sublattice s: conduction
+            ! branch with weight on s closest to eps_h - E_g
+            ihp_s = ic1_sub(s)
+            do a = ic1, nba
+                if (wsub(s, a) < w_min) cycle
+                if (abs(evals(a) - etgt) < abs(evals(ihp_s) - etgt)) ihp_s = a
+            end do
+            if (ihp_s == ih) cycle   ! no receiving state below: event suppressed
+
+            ! Frozen scalar factors at the s-resolved branches, clamped to
+            ! [0,1]; the leading w_s(h) splits the primary across sublattices
+            ! (sum_s w_s(h) = 1 => total primary relaxation preserved)
+            pv1 = min(max(real(rho_ad(iv1_sub(s), iv1_sub(s))) / f, 0d0), 1d0)
+            phh = min(max(real(rho_ad(ih,         ih        )) / f, 0d0), 1d0)
+            bc1 = min(max(1d0 - real(rho_ad(ic1_sub(s), ic1_sub(s))) / f, 0d0), 1d0)
+            bhp = min(max(1d0 - real(rho_ad(ihp_s,      ihp_s     )) / f, 0d0), 1d0)
+            g_rel  = gam * ws * pv1 * bc1 * bhp
+            g_pair = gam * ws * phh * bc1 * bhp
+
+            ! Sequential exact amplitude-damping maps (each CPTP for tau>=0)
+            call apply_damping_channel(nba, rho_ad, ih,         ihp_s,      g_rel,  tau)
+            call apply_damping_channel(nba, rho_ad, iv1_sub(s), ic1_sub(s), g_pair, tau)
         end do
-        if (ihp == ih) cycle   ! no receiving state below: event suppressed
-
-        ! Frozen scalar factors (partner population + Pauli blockers),
-        ! clamped to [0,1] so that Gamma >= 0 (each map strictly CPTP)
-        pv1 = min(max(real(rho_ad(iv1, iv1)) / f, 0d0), 1d0)
-        phh = min(max(real(rho_ad(ih,  ih )) / f, 0d0), 1d0)
-        bc1 = min(max(1d0 - real(rho_ad(ic1, ic1)) / f, 0d0), 1d0)
-        bhp = min(max(1d0 - real(rho_ad(ihp, ihp)) / f, 0d0), 1d0)
-        g_rel  = gam * pv1 * bc1 * bhp
-        g_pair = gam * phh * bc1 * bhp
-
-        ! Sequential exact amplitude-damping maps (each CPTP for any tau>=0;
-        ! inter-channel splitting error is O((Gamma*tau)^2))
-        call apply_damping_channel(nba, rho_ad, ih,  ihp, g_rel,  tau)
-        call apply_damping_channel(nba, rho_ad, iv1, ic1, g_pair, tau)
     end do
 end subroutine apply_impact_ionization
 
