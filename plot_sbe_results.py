@@ -600,24 +600,20 @@ def _map_path_population(qred, grid_kpts, grid_pop, max_dist=None):
     return pop
 
 
-def plot_unfold_spectral(filepath, bpfile, output_dir, dpi=150):
-    """A(k,E)-style spectral plots of the unfolded population.
+def plot_unfold_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=150):
+    """A(k,E)-style spectral plots of the unfolded population, ONE PER TIME FRAME.
 
     Skeleton: the clean primitive-cell dispersion from *_bandpath.data (VB-1,
-    VB, CB1, CB2; spins summed). Decoration: at the frame of peak excitation,
-    each band is coloured by its physical population (mapped from the nearest
-    unfolded MP-grid point) and broadened by the per-k spin splitting (energy
-    spread). Two views are written: along the high-symmetry path and projected
-    onto kx. Energies come entirely from the band path (per the chosen design),
-    so no energies are needed in the SBE output."""
+    VB, CB1, CB2; spins summed). Decoration: at EVERY output time, each band is
+    coloured by its physical population (mapped from the nearest unfolded
+    MP-grid point) and broadened by the per-k carrier kinetic energy. For each
+    frame two views are written into a `spectral_frames/` subfolder -- along the
+    high-symmetry path and projected onto kx -- so the band dynamics can be
+    watched frame by frame (assemble into a movie with e.g. ffmpeg/imagemagick).
+    The colour scale is fixed across all frames (global CB peak) so frames are
+    directly comparable. Energies come entirely from the band path."""
     from matplotlib.collections import LineCollection
-    print(f"Processing {filepath.name}  (spectral A(k,E), skeleton {bpfile.name}) ...")
-
-    peak = _unfold_peak_levels(filepath)
-    if peak is None:
-        print("  (skip) unfold file has no per-level population columns")
-        return
-    t_val, t_unit, grid_kpts, grid_lev = peak
+    print(f"Processing {filepath.name}  (spectral A(k,E) per frame, skeleton {bpfile.name}) ...")
 
     dist, eig_ha, nv, spinor, nodes, qred = _load_bandpath(bpfile)
     if not nv:
@@ -625,19 +621,28 @@ def plot_unfold_spectral(filepath, bpfile, output_dir, dpi=150):
         return
     levels = _bandpath_level_energies(eig_ha, nv, spinor)
     kx_path = _fcc_prim_to_sc_reduced(qred)[:, 0]
-
-    # Colour scale: emphasise the conduction excitation (valence stays ~filled
-    # and saturates), so the field-driven CB population is the visible gradient.
-    cb_peak = max((np.nanmax(grid_lev[n]) for n in ('cb1', 'cb2') if n in grid_lev),
-                  default=0.0)
-    vmax = max(cb_peak, 1e-12)
-    norm = mcolors.Normalize(vmin=0.0, vmax=vmax)
-
-    # Normalise the kinetic-energy line width across all four levels.
     ke_max = max((np.nanmax(levels[n][1]) for n in levels), default=1.0)
     ke_max = max(ke_max, 1e-9)
 
-    def _draw(ax, xvals, scatter):
+    # Pass 1: global colour scale (peak CB population over all frames) + count.
+    cb_peak, n_frames = 0.0, 0
+    for _t, _tu, _kp, _pop, grid_lev, _sub in _iter_nex_k_blocks(filepath, unfold=True):
+        if grid_lev is None:
+            print("  (skip) unfold file has no per-level population columns")
+            return
+        n_frames += 1
+        cb_peak = max(cb_peak, max((np.nanmax(grid_lev[n])
+                                    for n in ('cb1', 'cb2') if n in grid_lev), default=0.0))
+    if n_frames == 0:
+        print("  (skip) no data blocks found")
+        return
+    norm = mcolors.Normalize(vmin=0.0, vmax=max(cb_peak, 1e-12))
+    stride = max(1, n_frames // max_frames)   # cap the number of rendered frames
+
+    frame_dir = output_dir / 'spectral_frames'
+    frame_dir.mkdir(parents=True, exist_ok=True)
+
+    def _draw(ax, xvals, grid_kpts, grid_lev, scatter):
         last_im = None
         for name in UNFOLD_LEVELS:
             if name not in levels or name not in grid_lev:
@@ -657,45 +662,54 @@ def plot_unfold_spectral(filepath, bpfile, output_dir, dpi=150):
                 seg_lw  = 0.5 * (lw[:-1] + lw[1:])
                 ax.plot(xvals, e_ev, color='0.75', lw=0.6, zorder=1)
                 lc = LineCollection(segs, cmap=CMAP_POP, norm=norm, zorder=2)
-                lc.set_array(seg_pop)
-                lc.set_linewidths(seg_lw)
+                lc.set_array(seg_pop); lc.set_linewidths(seg_lw)
                 ax.add_collection(lc)
                 last_im = lc
         return last_im
 
-    # --- view 1: along the high-symmetry path -----------------------------
-    fig, ax = plt.subplots(figsize=(8, 6))
-    im = _draw(ax, dist, scatter=False)
-    for _lbl, d in nodes:
-        ax.axvline(d, color='#888888', linestyle='--', lw=0.7)
-    ax.set_xticks([d for _, d in nodes])
-    ax.set_xticklabels([r'$\Gamma$' if l == 'Gamma' else f'${l}$' for l, _ in nodes])
-    ax.set_xlim(dist[0], dist[-1])
-    ax.axhline(0.0, color='tab:red', lw=0.8, alpha=0.7)
-    ax.set_ylabel('Energy [eV]  (VBM = 0)')
-    ax.set_title(f'Unfolded A(k,E): VB-1/VB/CB1/CB2,  t = {t_val:.3f} {t_unit}\n'
-                 f'colour = population, width = carrier kinetic energy')
-    if im is not None:
-        plt.colorbar(im, ax=ax, label='physical-band population')
-    fig.tight_layout()
-    out = output_dir / 'nex_k_unfold_spectral_path.png'
-    fig.savefig(out, dpi=dpi, bbox_inches='tight'); plt.close(fig)
-    print(f"  saved {out.name}")
+    # Pass 2: render every (strided) frame.
+    n_written = 0
+    for iframe, (t_val, t_unit, kpoints, _pop, grid_lev, _sub) in enumerate(
+            _iter_nex_k_blocks(filepath, unfold=True)):
+        if iframe % stride != 0:
+            continue
+        grid_kpts = _wrap_to_fcc_bz(kpoints)
+        safe_t = f'{t_val:.4f}'.replace('-', 'm').replace('+', 'p')
+        tag = f'f{iframe:04d}_t{safe_t}{t_unit}'
 
-    # --- view 2: projected onto kx ----------------------------------------
-    fig, ax = plt.subplots(figsize=(8, 6))
-    im = _draw(ax, kx_path, scatter=True)
-    ax.axhline(0.0, color='tab:red', lw=0.8, alpha=0.7)
-    ax.set_xlabel('kx [reduced, FCC BZ]')
-    ax.set_ylabel('Energy [eV]  (VBM = 0)')
-    ax.set_title(f'Unfolded population vs (kx, E),  t = {t_val:.3f} {t_unit}\n'
-                 f'(band-path points; colour = population, size = kinetic energy)')
-    if im is not None:
-        plt.colorbar(im, ax=ax, label='physical-band population')
-    fig.tight_layout()
-    out = output_dir / 'nex_k_unfold_spectral_kx.png'
-    fig.savefig(out, dpi=dpi, bbox_inches='tight'); plt.close(fig)
-    print(f"  saved {out.name}")
+        # view 1: along the high-symmetry path
+        fig, ax = plt.subplots(figsize=(8, 6))
+        im = _draw(ax, dist, grid_kpts, grid_lev, scatter=False)
+        for _lbl, d in nodes:
+            ax.axvline(d, color='#888888', linestyle='--', lw=0.7)
+        ax.set_xticks([d for _, d in nodes])
+        ax.set_xticklabels([r'$\Gamma$' if l == 'Gamma' else f'${l}$' for l, _ in nodes])
+        ax.set_xlim(dist[0], dist[-1]); ax.axhline(0.0, color='tab:red', lw=0.8, alpha=0.7)
+        ax.set_ylabel('Energy [eV]  (VBM = 0)')
+        ax.set_title(f'Unfolded A(k,E): VB-1/VB/CB1/CB2,  t = {t_val:.3f} {t_unit}\n'
+                     f'colour = population, width = carrier kinetic energy')
+        if im is not None:
+            plt.colorbar(im, ax=ax, label='physical-band population')
+        fig.tight_layout()
+        fig.savefig(frame_dir / f'nex_k_unfold_spectral_path_{tag}.png',
+                    dpi=dpi, bbox_inches='tight'); plt.close(fig)
+
+        # view 2: projected onto kx
+        fig, ax = plt.subplots(figsize=(8, 6))
+        im = _draw(ax, kx_path, grid_kpts, grid_lev, scatter=True)
+        ax.axhline(0.0, color='tab:red', lw=0.8, alpha=0.7)
+        ax.set_xlabel('kx [reduced, FCC BZ]'); ax.set_ylabel('Energy [eV]  (VBM = 0)')
+        ax.set_title(f'Unfolded population vs (kx, E),  t = {t_val:.3f} {t_unit}\n'
+                     f'(band-path points; colour = population, size = kinetic energy)')
+        if im is not None:
+            plt.colorbar(im, ax=ax, label='physical-band population')
+        fig.tight_layout()
+        fig.savefig(frame_dir / f'nex_k_unfold_spectral_kx_{tag}.png',
+                    dpi=dpi, bbox_inches='tight'); plt.close(fig)
+        n_written += 1
+
+    print(f"  saved {n_written} frame(s) x 2 views into {frame_dir.name}/ "
+          f"(of {n_frames} time steps, stride {stride})")
 
 
 # ===========================================================================

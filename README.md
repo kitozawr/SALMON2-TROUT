@@ -151,13 +151,33 @@ python3 plot_sbe_results.py --only-bands # -> bandpath_*.png + bandpath_spin_spl
 
 The `bandpath` mode diagonalizes the FCC-sublattice blocks of the cubic Hamiltonian along the primitive path `L-Γ-X-W-K-Γ` (configurable constants at the top of the script) and the plotter renders the **unfolded** primitive-cell bands (CB1/CB2/CB3 individually resolved) plus, for spinor data, the **Dresselhaus spin splitting** $\Delta_j(k)$ of the levels around the gap in meV (zero along the [100]/[111] axes by symmetry, ~10–140 meV peaks near W/K for GaAs — directly comparable with published spin-splitting panels). High-symmetry labels for the folded MP plot are specified in FCC-primitive reduced coordinates and converted/wrapped into the cubic BZ internally.
 
-**Unfolded k-resolved band populations.** The same applies to the real-time population output: the supercell branch index `nelec+1` mixes *different physical primitive bands* from k to k, so the SBE can instead report the population of the **physical CB1** of every folded primitive BZ point. Generate the band → (sublattice, primitive band) map once (re-diagonalization only — much cheaper than the full dataset, no tm matrices):
+**Unfolded k-resolved band populations.** The supercell branch index `nelec+1` mixes *different physical primitive bands* from k to k, so the SBE can instead report the population of the **physical bands closest to the gap** (VB-1, VB, CB1, CB2; spins summed) of every folded primitive BZ point. This is a three-stage pipeline — **EPM → SALMON → plotter** — that does **not** require regenerating the ground state.
+
+**1. EPM: build the unfold map (once, cheap).** Re-diagonalize the MP-grid cubic Hamiltonians and assign every cubic band to the 4 FCC sublattices. This writes the *spectral weights* $w_s=\lvert\langle\psi\lvert P_s\rvert\psi\rangle\rvert^2$ ($\sum_s w_s=1$) of each band on each sublattice, plus the energy-ranked primitive-band index:
 
 ```sh
 python3 epm_gaas_reference.py unfoldmap   # -> SYSNAME_unfold.data (next to the GS files)
 ```
 
-When `SYSNAME_unfold.data` is present, the SBE automatically writes `SYSNAME_sbe_nex_k_unfold.data` alongside `_sbe_nex_k.data`: per saved time, the crystal-gauge population of the physical lowest conduction level (CB1, **spins summed**) of each primitive point $k_{\rm prim} = k_{\rm sc} + G_0(s)$, $s=1..4$ — i.e. 4·nk unfolded points covering the primitive FCC BZ. The plotter picks the file up automatically and renders time–k maps over the primitive BZ (`nex_k_unfold_*.png`), wrapping the points into the first FCC BZ. *Caveat:* at high-symmetry MP points different sublattices can be exactly degenerate; the map then assigns the dominant weight, which splits the (symmetric) population arbitrarily between equivalent points — sums over symmetry stars remain exact.
+This must be run on the **same k-grid as the ground state** (`nk`/`nb` in the file header must match the GS dataset; the SBE stops with a clear message otherwise). The GS dataset itself (`eigen.data`, `tm.data`, `k.data`) is **not** touched — the eigenvalues are unchanged, so no full `main()` rerun is needed. For the A(k,E) spectral skeleton, also generate the clean primitive dispersion once:
+
+```sh
+python3 epm_gaas_reference.py bandpath    # -> SYSNAME_bandpath.data (L-Γ-X-W-K-Γ)
+```
+
+**2. SALMON: run the SBE dynamics.** With `SYSNAME_unfold.data` present, the SBE automatically writes `SYSNAME_sbe_nex_k_unfold.data` alongside `_sbe_nex_k.data`. Per saved time it records the crystal-gauge population of the four physical levels (VB-1, VB, CB1, CB2; spins summed) at each primitive point $k_{\rm prim} = k_{\rm sc} + G_0(s)$, $s=1..4$ — i.e. 4·nk unfolded points covering the primitive FCC BZ. The population of each cubic band is **distributed over the sublattices by the spectral weights** $w_s$ (not a hard argmax), so at a symmetry degeneracy it splits *equally* among the equivalent primitive points and the result is symmetric by construction. (The optional impact-ionization channel is likewise sublattice-resolved when the map is present — the secondary pair is created in the primitive sector of the primary.)
+
+**3. Plotter: visualise.** `plot_sbe_results.py` picks up `_sbe_nex_k_unfold.data` automatically and produces, in `./sbe_plots/`:
+
+* `nex_k_unfold_*` — time–k maps and snapshots over the **primitive FCC BZ** (points wrapped into the first BZ). These legitimately carry satellite peaks at the zone boundary: "CB1" is the lowest conduction band of *each* valley, so sublattices 2/3/4 place their X-valley population at the X points;
+* `nex_k_fold_*` — the **folded cubic-zone** view, summing the four sublattices back onto the regular cubic grid ($k_{\rm sc}=k_{\rm prim}-G_0(s)$): a single clean, hole-free zone showing the per-cubic-k total of the lowest conduction band;
+* `nex_k_unfold_spectral_*` (with `--spectral`, needs `SYSNAME_bandpath.data`) — A(k,E) band-structure views, **one pair per output time** in `spectral_frames/` (path view + $k_x$ projection), with the band coloured by population and broadened by carrier kinetic energy. The colour scale is fixed across frames, so the frame sequence is a ready-to-assemble movie of the band dynamics (`ffmpeg -pattern_type glob -i 'spectral_frames/*path*.png' bands.mp4`).
+
+```sh
+python3 plot_sbe_results.py --spectral    # unfolded + folded k-maps + per-frame A(k,E)
+```
+
+In short: rerun `unfoldmap` (and `bandpath`) only, **rebuild the Fortran**, rerun the dynamics, then plot — the ground state is reused as-is.
 
 ### EPM ground-state solver (`&epm`)
 
