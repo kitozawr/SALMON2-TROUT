@@ -2,7 +2,7 @@
 
 This repository is a fork of the original [SALMON project](http://salmon-tddft.jp/), an open-source software package for *ab-initio* quantum-mechanical calculations of light-matter interactions. 
 
-This fork extends SALMON's Semiconductor Bloch Equations (SBE) module with a **commutator-free Magnus 4 (CF4) / Suzuki-Yoshida exponential propagator**, a **strictly CPTP Kuhn-Zurek/Caldeira-Leggett decoherence model**, **frozen-core optimizations**, and a self-contained **local Empirical Pseudopotential Method (EPM)** ground-state solver (Cohen-Bergstresser, GaAs) that closes the EPM → SBE pipeline without external scripts.
+This fork extends SALMON's Semiconductor Bloch Equations (SBE) module with a **commutator-free Magnus 4 (CF4) / Suzuki-Yoshida exponential propagator**, a **strictly CPTP Kuhn-Zurek/Caldeira-Leggett decoherence model**, an optional **k-local impact-ionization Lindblad channel**, an optional **Coulomb (time-dependent Hartree–Fock) renormalization** for the extreme-THz regime (Golde–Kira–Meier–Koch), **frozen-core optimizations**, and a self-contained **local Empirical Pseudopotential Method (EPM)** ground-state solver (Cohen-Bergstresser, GaAs) that closes the EPM → SBE pipeline without external scripts.
 
 ## Contents
 
@@ -69,13 +69,31 @@ with $\varepsilon^{\rm kin}$ measured from the field-free CBM (the $\tfrac12 A^2
 
 **Declared limitations of the fit** (Stobbe): direction-averaged (their matrix elements are nearly isotropic — energy is the dominant variable); electron-initiated channel only (hole-initiated omitted); no phonon-assisted ionization, collisional broadening, or field-induced threshold softening (Quade–Schöll–Rossi: at MV/cm there is strictly no fixed threshold — near-threshold rates are underestimated, a known limitation); fit energy resolution $\delta E = 0.2$ eV (the $\Theta$ step is smoothed by a linear ramp of this width). Electron–electron scattering ($O(N_k^2)$, expensive) and Auger recombination ($\gamma_{\rm Auger}\sim10^6$ s$^{-1}$, negligible on sub-ps scales) are deliberately excluded.
 
+### 8. Coulomb (time-dependent Hartree–Fock) renormalization (optional, `yn_sbe_coulomb`)
+A fully **optional** Coulomb mean field for the extremely nonlinear THz regime, following **Golde–Kira–Meier–Koch** (*Phys. Status Solidi B* **248**, 863 (2011), Eqs. 4–5). At peak fields of a few MV/cm, carriers are driven across a large fraction of the Brillouin zone and the Coulomb interaction renormalizes both the band energies and the field coupling. In the multiband density-matrix form this is the time-dependent Hartree–Fock **exchange (Fock) self-energy**
+
+$$\Sigma^{\rm HF}_{nm}(k) = -\sum_{q\neq k} V(k-q)\,\delta\rho_{nm}(q),\qquad V(p)=\frac{\texttt{strength}\cdot 4\pi}{\varepsilon\,\Omega_{\rm cell}\,N_k\,(|p|^2+\kappa^2)},$$
+
+added to $H_{VG}$. The single commutator $-i[\,H_{VG}+\Sigma^{\rm HF},\rho\,]$ reproduces **both** of the paper's renormalizations at once: the diagonal part gives the renormalized single-particle energies $\tilde\varepsilon^\lambda_k=\varepsilon^\lambda_k-\sum_{q}V_{k-q}f^\lambda_q$, and the off-diagonal part gives the renormalized Rabi frequency $\Omega_k=\mathbf d_k\!\cdot\!\mathbf E_{\rm THz}+\sum_{q}V_{k-q}p_q$, with the $(1-f^e_k-f^h_k)$ Pauli-blocking factor emerging automatically from the commutator structure. Key design choices:
+
+* **Basis.** $\Sigma^{\rm HF}$ is built and stored in the **velocity-gauge stationary-Bloch basis** in which $\rho_{nm}(k)$ is propagated. The convolution is gauge-covariant under the uniform Peierls shift $k\to k-\mathbf A(t)$ (the $\mathbf A$ cancels in $k-q$), so it is evaluated directly on the grid-$k$ density matrix with no transformation. Because $\Sigma^{\rm HF}$ is **added to $H_{VG}$**, the **Houston basis** (eigenbasis of $H_{VG}+\Sigma^{\rm HF}$) that the dissipative channels diagonalize automatically becomes the Coulomb-renormalized adiabatic basis — consistent with the paper's $\mathbf E$-renormalized (Houston) picture.
+* **Equilibrium subtraction.** The EPM bands carry no explicit exchange, so the convolution uses the **deviation** $\delta\rho=\rho-\rho_0$ from the ground state ($\rho_0=\mathrm{diag}(\texttt{occup})$). All pieces of $\delta\rho$ vanish at $t=0$ (no excited electrons/holes, no polarization), so $\Sigma^{\rm HF}(t{=}0)=0$: the equilibrium gap stays exactly the EPM gap and **only** the carrier-induced (dynamical) renormalization is added.
+* **CPTP-safe.** $\Sigma^{\rm HF}$ is Hermitian ($\rho$ Hermitian, $V$ real), so it enters as a coherent (unitary) generator and preserves trace and positivity; it is **frozen at $\rho(t)$** over each $h$ (mean-field predictor) and re-evaluated once per step.
+* **Cost.** Unlike the k-local dephasing/ionization channels, the exchange sum is **non-k-local** — it couples all k-points, costing $O(N_k^2\,n_{\rm act}^2)$ per step (an MPI all-gather of the active-band $\rho$ followed by a screened-Coulomb convolution). It is therefore off by default and best used on modest grids; the screening $\kappa$ (`sbe_coulomb_screen_au`) regularizes the $q\to0$ tail and the $q=0$ self-term is excluded.
+
 ---
 
 ## The CF4 + Suzuki-Yoshida + CPTP Operator Splitting
 
-The propagator advances $\partial_t\rho = -i[H_{VG}(t),\rho] + \mathcal{D}[\rho]$ over a step $h$ as
+The full (optionally Coulomb-renormalized) master equation advanced by the propagator is
+
+$$\partial_t\rho(k,t) = -i\big[\,H_{VG}(k,t) + \Sigma^{\rm HF}[\rho](k,t)\,,\,\rho(k,t)\big] + \mathcal{D}_{\rm KZ}[\rho] + \mathcal{D}_{\rm II}[\rho],$$
+
+with $H_{VG}=H_0(k)+\mathbf A(t)\cdot\boldsymbol\pi$ the velocity-gauge band Hamiltonian, $\Sigma^{\rm HF}$ the optional Coulomb exchange mean field (§8), $\mathcal{D}_{\rm KZ}$ the strictly-CPTP Kuhn–Zurek dephasing (§1) and $\mathcal{D}_{\rm II}$ the optional impact-ionization Lindblad channel (§7). It is advanced over a step $h$ as
 
 $$\rho(t+h) = D(h/2)\circ\Big[S_2(p_1 h)\circ S_2(p_2 h)\circ S_2(p_1 h)\Big]\circ D(h/2)\,[\rho(t)]$$
+
+The Coulomb self-energy $\Sigma^{\rm HF}$ is **frozen at $\rho(t)$** over the step (a non-k-local mean field; re-evaluated once per $h$) and folded into the Hamiltonians $H_1,H_2,H_{VG}$ of **both** the unitary $S_2$ and the dissipative $D$ blocks, so the Houston basis the dissipators diagonalize is the Coulomb-renormalized one.
 
 **Unitary part $S_2(\tau)$ — CF4 on Gauss-Legendre nodes** (nodes $c_{1,2}=\tfrac12\mp\tfrac{\sqrt3}{6}$, weights $\alpha_{1,2}=\tfrac14\pm\tfrac{\sqrt3}{6}$):
 * $H_1=H_{VG}(t+c_1\tau)$, $H_2=H_{VG}(t+c_2\tau)$
@@ -106,6 +124,10 @@ The `&sbe` namelist now accepts the following parameters:
 | `sbe_ii_prefactor` | s⁻¹eV⁻⁴ | `2.0d12` | Stobbe fit prefactor $P$ in $\gamma_{\rm St}=P(\varepsilon^{\rm kin}-E_{\rm th})^4$. |
 | `sbe_ii_threshold_ev` | eV | `2.1d0` | Ionization threshold $E_{\rm th}$ above the field-free CBM. |
 | `sbe_ii_ramp_ev` | eV | `0.2d0` | Linear $\Theta$-smoothing width (the fit's energy resolution); `<= 0` gives a hard step. |
+| `yn_sbe_coulomb` | — | `'n'` | `'y'`: enable the **Coulomb (time-dependent Hartree–Fock / exchange) renormalization** (§8, Golde–Kira–Meier–Koch). Non-k-local mean field, $O(N_k^2)$ per step — off by default, best on modest grids. |
+| `sbe_coulomb_epsilon` | — | `12.9d0` | Background dielectric constant $\varepsilon$ screening the exchange kernel (GaAs default). |
+| `sbe_coulomb_strength` | — | `1.0d0` | Overall scaling of the exchange kernel (set `0` to disable while leaving the flag on; `>1` to enhance). |
+| `sbe_coulomb_screen_au` | Bohr⁻¹ | `0.0d0` | Yukawa screening $\kappa$ regularizing $V(q)\propto1/(q^2+\kappa^2)$; `0` = bare Coulomb with the $q=0$ self-term excluded. |
 
 *Note: Internal conversions to atomic units (Hartree) are handled automatically (`kB_au`, `au_fs`).*
 

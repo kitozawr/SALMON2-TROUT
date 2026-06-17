@@ -452,6 +452,13 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: sbe_ii_prefactor      ! P [s^-1 eV^-4]
   real(8)        :: sbe_ii_threshold_ev   ! E_th [eV]
   real(8)        :: sbe_ii_ramp_ev        ! linear Theta-smoothing width delta_E [eV]
+  ! Coulomb (time-dependent Hartree-Fock / exchange) renormalization
+  ! [Golde-Kira-Meier-Koch, Phys. Status Solidi B 248, 863 (2011)]:
+  ! Sigma_nm(k) = - sum_{q/=k} V(k-q) rho_nm(q), V(p)=str*4pi/(eps*Omega*Nk*(p^2+kappa^2))
+  character(1)   :: yn_sbe_coulomb
+  real(8)        :: sbe_coulomb_epsilon    ! background dielectric constant eps
+  real(8)        :: sbe_coulomb_strength   ! overall scaling of the exchange kernel
+  real(8)        :: sbe_coulomb_screen_au  ! Yukawa screening kappa [1/Bohr]
 
   !! &epm (local empirical pseudopotential method, Cohen-Bergstresser)
   character(32)  :: epm_material

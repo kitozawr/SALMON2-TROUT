@@ -600,7 +600,11 @@ contains
       & yn_sbe_impact_ionization, &
       & sbe_ii_prefactor, &
       & sbe_ii_threshold_ev, &
-      & sbe_ii_ramp_ev
+      & sbe_ii_ramp_ev, &
+      & yn_sbe_coulomb, &
+      & sbe_coulomb_epsilon, &
+      & sbe_coulomb_strength, &
+      & sbe_coulomb_screen_au
 
     namelist/epm/ &
       & epm_material, &
@@ -1042,6 +1046,10 @@ contains
     sbe_ii_prefactor        = 2.0d12     ! Stobbe fit prefactor P [s^-1 eV^-4] (GaAs, PRB 49, 4494)
     sbe_ii_threshold_ev     = 2.1d0      ! Stobbe fit threshold E_th [eV] above the CBM
     sbe_ii_ramp_ev          = 0.2d0      ! linear Theta-smoothing width [eV] (fit resolution); <=0: hard step
+    yn_sbe_coulomb          = 'n'        ! 'y': enable Coulomb HF (exchange) renormalization (non-k-local, may be slow)
+    sbe_coulomb_epsilon     = 12.9d0     ! background dielectric constant eps (GaAs)
+    sbe_coulomb_strength    = 1.0d0      ! overall scaling of the exchange kernel (tuning)
+    sbe_coulomb_screen_au   = 0.0d0      ! Yukawa screening kappa [1/Bohr]; 0 = bare (q=0 excluded)
                                             ! (occupation 1 per spinor band, nelec valence bands instead of nelec/2)
 !! == default for &epm
     epm_material            = 'GaAs'
@@ -1686,6 +1694,10 @@ contains
     call comm_bcast(sbe_ii_prefactor,        nproc_group_global)
     call comm_bcast(sbe_ii_threshold_ev,     nproc_group_global)
     call comm_bcast(sbe_ii_ramp_ev,          nproc_group_global)
+    call comm_bcast(yn_sbe_coulomb,          nproc_group_global)
+    call comm_bcast(sbe_coulomb_epsilon,     nproc_group_global)
+    call comm_bcast(sbe_coulomb_strength,    nproc_group_global)
+    call comm_bcast(sbe_coulomb_screen_au,   nproc_group_global)
 !! == bcast for epm
     call comm_bcast(epm_material,            nproc_group_global)
     call comm_bcast(epm_lattice_constant_au, nproc_group_global)
@@ -2685,6 +2697,15 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_ii_prefactor', sbe_ii_prefactor
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_ii_threshold_ev', sbe_ii_threshold_ev
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_ii_ramp_ev', sbe_ii_ramp_ev
+      if(yn_sbe_coulomb == 'y')then
+        write(fh_variables_log, '("# info: Coulomb HF (exchange) renormalization enabled: eps=",ES12.5,&
+          & ", strength=",ES12.5,", screen kappa=",ES12.5," 1/Bohr")') &
+          & sbe_coulomb_epsilon, sbe_coulomb_strength, sbe_coulomb_screen_au
+      end if
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_coulomb', yn_sbe_coulomb
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_coulomb_epsilon', sbe_coulomb_epsilon
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_coulomb_strength', sbe_coulomb_strength
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_coulomb_screen_au', sbe_coulomb_screen_au
 
       if(inml_epm >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'epm', inml_epm
@@ -2803,6 +2824,7 @@ contains
     call yn_argument_check(yn_dc_lcfo_diag)
     call yn_argument_check(yn_sbe_spinor)
     call yn_argument_check(yn_sbe_impact_ionization)
+    call yn_argument_check(yn_sbe_coulomb)
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
       stop "Nk must be 1 when yn_periodic=='n'"
