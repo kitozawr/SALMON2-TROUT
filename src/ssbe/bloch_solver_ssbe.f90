@@ -60,6 +60,22 @@ module bloch_solver_ssbe
         ! ("false generation") events. Reduces identically to the folded
         ! channel when the weights are absent.
         logical :: flag_unfold_ii = .false.
+
+        ! Coulomb (time-dependent Hartree-Fock / exchange) renormalization,
+        ! Golde-Kira-Meier-Koch SBE (Phys. Status Solidi B 248, 863 (2011),
+        ! Eqs. 4-5). The exchange (Fock) self-energy
+        !   Sigma_nm(k) = - sum_{q/=k} V(k-q) rho_nm(q)
+        ! is a NON-k-local mean field (couples all k). Added to H_VG it
+        ! reproduces both the renormalized single-particle energies
+        ! (diagonal: eps~ = eps - sum_q V_{k-q} f_q) and the renormalized
+        ! Rabi frequency (off-diagonal: Omega = d.E + sum_q V_{k-q} p_q),
+        ! with the (1-f_e-f_h) Pauli factor coming for free from the
+        ! von Neumann commutator. Frozen over a dt step (mean-field predictor).
+        logical :: flag_coulomb = .false.
+        real(8) :: coul_pref     = 0d0  ! strength * 4 pi / (eps * Omega_cell * Nk)
+        real(8) :: coul_screen2  = 0d0  ! kappa^2 [1/Bohr^2] (Yukawa regulariser)
+        integer :: icomm         = 0    ! MPI communicator (for the non-local exchange sum)
+        complex(8), allocatable :: sigma_hf(:, :, :) ! (nba, nba, ik_min:ik_max) exchange Sigma
     end type
 
     !=========================================================================
@@ -84,7 +100,10 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     use salmon_global, only: frozen_core_threshold_ev, frozen_free_threshold_ev, &
                              sbe_decoh_temperature_k, sbe_decoh_tau_m_fs, yn_sbe_spinor, &
                              yn_sbe_impact_ionization, sbe_ii_prefactor, &
-                             sbe_ii_threshold_ev, sbe_ii_ramp_ev
+                             sbe_ii_threshold_ev, sbe_ii_ramp_ev, &
+                             yn_sbe_coulomb, sbe_coulomb_epsilon, &
+                             sbe_coulomb_strength, sbe_coulomb_screen_au
+    use math_constants, only: pi
     use phys_constants, only: au_fs, kB_au, au_ev
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
@@ -266,6 +285,35 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
             end if
             if (sbe%nv_act < 1 .or. sbe%nv_act >= sbe%n_active_bands) &
                 write(*, '(a)') '#   WARNING: no valence or no conduction branches active -- channel is inert'
+        end if
+    end if
+
+    ! =========================================================================
+    ! Coulomb (time-dependent Hartree-Fock / exchange) renormalization
+    ! [Golde-Kira-Meier-Koch, Phys. Status Solidi B 248, 863 (2011)].
+    ! Exchange self-energy Sigma_nm(k) = - sum_{q/=k} V(k-q) rho_nm(q) with the
+    ! statically-screened Coulomb V(q) = strength * 4 pi / (eps Omega Nk (q^2+kappa^2)).
+    ! Stored in the velocity-gauge Bloch basis and added to H_VG; the Houston
+    ! basis (eigenbasis of H_VG + Sigma) the dissipators use becomes the
+    ! Coulomb-renormalized one. Off in the no-Coulomb limit (yn_sbe_coulomb='n').
+    ! =========================================================================
+    sbe%flag_coulomb = (yn_sbe_coulomb == 'y')
+    if (sbe%flag_coulomb) then
+        ! Discrete exchange-sum prefactor: continuum (1/(2pi)^3) int d^3q  ->
+        ! (1/(Omega_cell Nk)) sum_grid; V(q) = 4 pi / (eps q^2) in a.u.
+        sbe%coul_pref = sbe_coulomb_strength * 4d0 * pi &
+                      / (max(sbe_coulomb_epsilon, 1d-12) * gs%volume * dble(gs%nk))
+        sbe%coul_screen2 = sbe_coulomb_screen_au**2
+        sbe%icomm = icomm
+        if (sbe%n_active_bands > 0) &
+            allocate(sbe%sigma_hf(1:sbe%n_active_bands, 1:sbe%n_active_bands, &
+                                  sbe%ik_min:sbe%ik_max))
+        if (irank == 0) then
+            write(*, '(a)') '# Coulomb HF (Golde-Kira-Meier-Koch SBE) enabled:'
+            write(*, '(a,ES12.5)') '#   exchange prefactor 4pi*str/(eps*Omega*Nk) = ', sbe%coul_pref
+            write(*, '(a,f8.3,a,ES12.5,a)') '#   eps = ', sbe_coulomb_epsilon, &
+                ', screening kappa^2 = ', sbe%coul_screen2, ' 1/Bohr^2'
+            write(*, '(a)') '#   NOTE: non-k-local mean field, O(Nk^2) per step (frozen over dt)'
         end if
     end if
 
@@ -478,6 +526,11 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
         Ac_node(:, 2, isub) = (1d0 - s_node) * Ac_begin + s_node * Ac_end
     end do
 
+    ! Coulomb HF mean field, frozen over this dt step: form the non-k-local
+    ! exchange self-energy Sigma(k) from rho(t_start) BEFORE the (OpenMP) k-loop
+    ! (it is an MPI all-gather + convolution, must run collectively once).
+    if (sbe%flag_coulomb .and. nba > 0) call compute_coulomb_selfenergy(sbe, gs)
+
     !$omp parallel default(shared) &
     !$omp    private(ik, i, j, idir, in, im, isub, s) &
     !$omp    private(p_active, rho_a, H1, H2, HVG, eigen_active, V_begin, V_end, X_a, w_act_sub) &
@@ -541,6 +594,7 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
             !-----------------------------------------------------------------
             if (sbe%flag_decoh .or. sbe%flag_impact) then
                 call build_HVG(nba, eigen_active, p_active, Ac_begin, HVG)
+                if (sbe%flag_coulomb) HVG = HVG + sbe%sigma_hf(:, :, ik)
                 call houston_dissipate(sbe, nba, rho_a, HVG, p_active, Ac_begin, X_a, &
                                        0.5d0 * dt, V_begin, w_act_sub)
             else
@@ -557,6 +611,10 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
             do isub = 1, 3
                 call build_HVG(nba, eigen_active, p_active, Ac_node(:, 1, isub), H1)
                 call build_HVG(nba, eigen_active, p_active, Ac_node(:, 2, isub), H2)
+                if (sbe%flag_coulomb) then
+                    H1 = H1 + sbe%sigma_hf(:, :, ik)
+                    H2 = H2 + sbe%sigma_hf(:, :, ik)
+                end if
                 call cf4_unitary_step(nba, rho_a, H1, H2, tau_sub(isub))
             end do
 
@@ -565,6 +623,7 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
             !-----------------------------------------------------------------
             if (sbe%flag_decoh .or. sbe%flag_impact) then
                 call build_HVG(nba, eigen_active, p_active, Ac_end, HVG)
+                if (sbe%flag_coulomb) HVG = HVG + sbe%sigma_hf(:, :, ik)
                 call houston_dissipate(sbe, nba, rho_a, HVG, p_active, Ac_end, X_a, &
                                        0.5d0 * dt, V_end, w_act_sub)
             else
@@ -636,6 +695,93 @@ subroutine build_HVG(nba, eigen_active, p_active, Ac, H)
         H(i, i) = H(i, i) + eigen_active(i)
     end do
 end subroutine build_HVG
+
+
+!=============================================================================
+! Time-dependent Hartree-Fock (exchange/Fock) Coulomb self-energy, in the
+! velocity-gauge stationary-Bloch active basis [Golde-Kira-Meier-Koch, Phys.
+! Status Solidi B 248, 863 (2011), Eqs. 4-5]:
+!
+!   Sigma_nm(k) = - sum_{q/=k} V(k-q) rho_nm(q),
+!   V(p) = strength * 4 pi / ( eps Omega_cell Nk (|p|^2 + kappa^2) )   [a.u.]
+!
+! This is a NON-k-local mean field: it convolves the active-band density
+! matrix with the screened Coulomb kernel over the whole BZ. The convolution
+! is gauge-covariant under the uniform velocity-gauge shift k -> k - A(t)
+! (A cancels in k - q), so it is evaluated directly on the grid-k rho. Adding
+! Sigma to H_VG renormalizes the diagonal energies (eps~ = eps - sum_q V f_q)
+! and the off-diagonal Rabi term (Omega = d.E + sum_q V p_q); the (1-f_e-f_h)
+! Pauli factor then follows from the von Neumann commutator [H+Sigma, rho].
+! Sigma is Hermitian (rho Hermitian, V real), so the propagation stays unitary.
+!
+! Equilibrium subtraction: the EPM/DFT bands carry NO explicit Coulomb
+! exchange, so Sigma is built from the DEVIATION from the ground state,
+! drho = rho - rho_0 (rho_0 = diag(gs%occup)). All of drho's pieces vanish at
+! t=0 (no excited electrons/holes, no polarization), so Sigma(t=0)=0 and the
+! equilibrium gap stays the EPM gap; only the dynamical (carrier-induced)
+! renormalization is added -- exactly the f^e, f^h, p of Eqs. 4-5.
+!
+! MPI: rho is k-partitioned (ik_min:ik_max). We zero-pad the local block and
+! comm_summation to obtain the full-BZ drho on every rank (an all-gather), then
+! each rank forms Sigma for its local k. Cost O(Nk^2 nba^2) per call; evaluated
+! once per dt step (the mean field is frozen over the Strang/CF4 sub-steps).
+!=============================================================================
+subroutine compute_coulomb_selfenergy(sbe, gs)
+    use communication, only: comm_summation
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info),      intent(in)    :: gs
+    integer :: nba, ik, iq, i, j, in, im
+    real(8) :: dr(3), dkx, dky, dkz, q2, vkq
+    complex(8), allocatable :: rho_loc(:, :, :), rho_all(:, :, :)
+
+    nba = sbe%n_active_bands
+    if (nba < 1) return
+
+    allocate(rho_loc(nba, nba, sbe%nk), rho_all(nba, nba, sbe%nk))
+    rho_loc = (0d0, 0d0)
+    do ik = sbe%ik_min, sbe%ik_max
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                rho_loc(i, j, ik) = sbe%rho(in, im, ik)
+            end do
+            ! subtract the ground-state occupation (rho_0) on the diagonal
+            rho_loc(j, j, ik) = rho_loc(j, j, ik) - dcmplx(gs%occup(im, ik), 0d0)
+        end do
+    end do
+    call comm_summation(rho_loc, rho_all, nba * nba * sbe%nk, sbe%icomm)
+
+    !$omp parallel do default(shared) schedule(dynamic) &
+    !$omp    private(ik, iq, i, j, dr, dkx, dky, dkz, q2, vkq)
+    do ik = sbe%ik_min, sbe%ik_max
+        sbe%sigma_hf(:, :, ik) = (0d0, 0d0)
+        do iq = 1, sbe%nk
+            ! minimum image of (k - q) in reduced coords, then -> Cartesian
+            dr(1) = gs%kpoint(1, ik) - gs%kpoint(1, iq)
+            dr(2) = gs%kpoint(2, ik) - gs%kpoint(2, iq)
+            dr(3) = gs%kpoint(3, ik) - gs%kpoint(3, iq)
+            dr(1) = dr(1) - dnint(dr(1))
+            dr(2) = dr(2) - dnint(dr(2))
+            dr(3) = dr(3) - dnint(dr(3))
+            dkx = dr(1)*gs%b_matrix(1,1) + dr(2)*gs%b_matrix(2,1) + dr(3)*gs%b_matrix(3,1)
+            dky = dr(1)*gs%b_matrix(1,2) + dr(2)*gs%b_matrix(2,2) + dr(3)*gs%b_matrix(3,2)
+            dkz = dr(1)*gs%b_matrix(1,3) + dr(2)*gs%b_matrix(2,3) + dr(3)*gs%b_matrix(3,3)
+            q2 = dkx*dkx + dky*dky + dkz*dkz
+            if (q2 < 1d-12) cycle          ! exclude q = k (the V(0) self term)
+            vkq = sbe%coul_pref / (q2 + sbe%coul_screen2)
+            do j = 1, nba
+                do i = 1, nba
+                    sbe%sigma_hf(i, j, ik) = sbe%sigma_hf(i, j, ik) - vkq * rho_all(i, j, iq)
+                end do
+            end do
+        end do
+    end do
+    !$omp end parallel do
+
+    deallocate(rho_loc, rho_all)
+end subroutine compute_coulomb_selfenergy
 
 
 ! Single CF4 (commutator-free Magnus, 4th order) sub-step of length tau,
