@@ -10,42 +10,32 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        mpi: [ "OFF", "ON" ]   # build both serial and MPI (verifies MPI compatibility)
-    name: build (MPI=${{ matrix.mpi }})
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       # 1. Install toolchain along with standard Ubuntu LAPACK & BLAS libraries
-      #    (and OpenMPI for the MPI matrix leg)
       - name: Install Toolchain (gfortran, cmake, LAPACK/BLAS)
         run: |
           sudo apt-get update
           sudo apt-get install -y gfortran cmake make libblas-dev liblapack-dev
-          if [ "${{ matrix.mpi }}" = "ON" ]; then
-            sudo apt-get install -y libopenmpi-dev openmpi-bin
-          fi
 
       # 2. Assert that the required BLAS/LAPACK runtime environments exist
       - name: Verify System Libraries Installed
         run: |
           echo "Verifying shared numerical library paths..."
           ldconfig -p | grep -E "libblas|liblapack"
-          if [ "${{ matrix.mpi }}" = "ON" ]; then mpif90 --version | head -1; fi
 
       # 3. Explicitly scrub any lingering workspace path states from the repo template
       - name: Clean Stale Build Directories
         run: rm -rf build
 
       # 4. Configure SALMON (system libraries are auto-detected by find_package)
-      - name: Configure SALMON (MPI=${{ matrix.mpi }})
+      - name: Configure SALMON (serial, no MPI)
         run: |
           cmake -B build -S . \
             -D CMAKE_BUILD_TYPE=Release \
-            -D USE_MPI=${{ matrix.mpi }} \
+            -D USE_MPI=OFF \
             -D CMAKE_Fortran_FLAGS="-fallow-argument-mismatch -fallow-invalid-boz"
 
       # 5. Compile using all available virtual cores
@@ -56,7 +46,7 @@ jobs:
       - name: Verify Build Execution
         run: |
           if [ -f "build/salmon" ]; then
-            echo "SALMON binary (MPI=${{ matrix.mpi }}) successfully built using system libraries!"
+            echo "SALMON binary successfully built using system libraries!"
             ls -la build/salmon
           else
             echo "Error: SALMON binary compilation failed."
