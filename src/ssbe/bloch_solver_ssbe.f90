@@ -42,7 +42,8 @@ module bloch_solver_ssbe
         ! creation v1 -> c1, applied in the same Houston basis as the
         ! Kuhn-Zurek dephasing (no extra ZHEEV).
         logical :: flag_impact  = .false.
-        real(8) :: ii_pref_au   = 0d0   ! P in 1/(Ha^4 a.u.time)
+        real(8) :: ii_pref_au   = 0d0   ! P in 1/(Ha^a a.u.time)
+        real(8) :: ii_exponent  = 4d0   ! fit exponent a (4 GaAs Stobbe, 2 Si Keldysh)
         real(8) :: ii_eth_au    = 0d0   ! threshold E_th [Ha]
         real(8) :: ii_ramp_au   = 0d0   ! linear Theta-smoothing width [Ha]
         real(8) :: ii_ecbm_au   = 0d0   ! global CBM of the field-free bands [Ha]
@@ -101,6 +102,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
                              sbe_decoh_temperature_k, sbe_decoh_tau_m_fs, yn_sbe_spinor, &
                              yn_sbe_impact_ionization, sbe_ii_prefactor, &
                              sbe_ii_threshold_ev, sbe_ii_ramp_ev, &
+                             sbe_ii_form, sbe_ii_exponent, &
                              yn_sbe_coulomb, sbe_coulomb_epsilon, &
                              sbe_coulomb_strength, sbe_coulomb_screen_au
     use math_constants, only: pi
@@ -248,9 +250,15 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     sbe%occ_max = merge(1d0, 2d0, yn_sbe_spinor == 'y')
     sbe%flag_impact = (yn_sbe_impact_ionization == 'y')
     if (sbe%flag_impact) then
-        ! Stobbe prefactor P [s^-1 eV^-4] -> [1/(Ha^4 a.u.time)]:
-        ! rate_au = P * t_au[s] * (dE[Ha] * au_ev)^4
-        sbe%ii_pref_au = sbe_ii_prefactor * (au_fs * 1d-15) * au_ev**4
+        ! Fit-form exponent a: GaAs Stobbe quartic (a=4, hard threshold)
+        ! [Stobbe-Redmer-Schattke, PRB 49, 4494 (1994)]; Si Keldysh quadratic
+        ! (a=2, soft near-gap threshold) [Keldysh, JETP 21, 1135 (1965);
+        ! Cartier et al., APL 62, 3339 (1993)]; Si full-band option a=4.6
+        ! [Kamakura et al., JAP 75, 3500 (1994)].
+        sbe%ii_exponent = sbe_ii_exponent
+        ! Prefactor P [s^-1 eV^-a] -> [1/(Ha^a a.u.time)]:
+        ! rate_au = P * t_au[s] * (dE[Ha] * au_ev)^a
+        sbe%ii_pref_au = sbe_ii_prefactor * (au_fs * 1d-15) * au_ev**sbe_ii_exponent
         sbe%ii_eth_au  = sbe_ii_threshold_ev / au_ev
         sbe%ii_ramp_au = sbe_ii_ramp_ev / au_ev
         ! Global CBM of the field-free band structure (kinetic-energy zero of
@@ -1017,7 +1025,7 @@ subroutine apply_impact_ionization(sbe, nba, rho_ad, evals, Ac, tau, wsub, use_u
             d = ekin - sbe%ii_eth_au
             if (d <= 0d0) cycle
             if (real(rho_ad(ih, ih)) < occ_eps) cycle
-            gam = sbe%ii_pref_au * d**4
+            gam = sbe%ii_pref_au * d**sbe%ii_exponent
             if (sbe%ii_ramp_au > 0d0 .and. d < sbe%ii_ramp_au) gam = gam * d / sbe%ii_ramp_au
             etgt = evals(ih) - sbe%ii_eg_au
             ihp = ic1
@@ -1072,7 +1080,7 @@ subroutine apply_impact_ionization(sbe, nba, rho_ad, evals, Ac, tau, wsub, use_u
         if (real(rho_ad(ih, ih)) < occ_eps) cycle
 
         ! Stobbe rate, with optional linear ramp over the fit resolution
-        gam = sbe%ii_pref_au * d**4
+        gam = sbe%ii_pref_au * d**sbe%ii_exponent
         if (sbe%ii_ramp_au > 0d0 .and. d < sbe%ii_ramp_au) gam = gam * d / sbe%ii_ramp_au
 
         etgt = evals(ih) - sbe%ii_eg_au

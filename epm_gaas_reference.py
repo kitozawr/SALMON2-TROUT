@@ -109,17 +109,47 @@ HARTREE_EV = 27.211386245988
 # Cohen-Bergstresser (1966) form factors (Ry -> Ha)
 # =============================================================================
 RY_TO_HA = 0.5
+# GaAs (zincblende): symmetric V^S and antisymmetric V^A form factors, keyed by
+# |G|^2 in (2pi/a)^2 units. [M. L. Cohen & T. K. Bergstresser, Phys. Rev. 141,
+# 789 (1966)]
 _CB_FORM_FACTORS_RY = {
     3:  (-0.23,  0.07),
     4:  ( 0.00,  0.05),
     8:  ( 0.01,  0.00),
     11: ( 0.06,  0.01),
 }
+# Silicon (diamond): two IDENTICAL atoms per primitive cell -> the antisymmetric
+# structure factor vanishes, so V^A == 0 exactly for all shells. Default set is
+# Kunikiyo; the Cohen-Bergstresser set is provided for validation.
+#   Kunikiyo: V^S(3)=-0.2258, V^S(8)=+0.05698, V^S(11)=+0.070709 Ry
+#     [T. Kunikiyo et al., J. Appl. Phys. 75, 297 (1994), Table I]
+#   Cohen-Bergstresser (alt): V^S(3)=-0.21, V^S(8)=+0.04, V^S(11)=+0.08 Ry
+#     [Cohen & Bergstresser, Phys. Rev. 141, 789 (1966)]
+# V^A(3)=V^A(4)=V^A(11)=0 exactly (diamond). [Cohen-Bergstresser 1966]
+_SI_FORM_FACTORS_KUNIKIYO_RY = {
+    3:  (-0.2258,   0.0),
+    8:  (+0.05698,  0.0),
+    11: (+0.070709, 0.0),
+}
+_SI_FORM_FACTORS_CB_RY = {
+    3:  (-0.21, 0.0),
+    8:  (+0.04, 0.0),
+    11: (+0.08, 0.0),
+}
 
 def form_factors(material, G2):
-    if material != 'GaAs':
-        raise ValueError("Only 'GaAs' supported")
-    vs_ry, va_ry = _CB_FORM_FACTORS_RY.get(G2, (0.0, 0.0))
+    """Local-EPM symmetric/antisymmetric form factors (Hartree) for shell |G|^2.
+    GaAs (zincblende): Cohen-Bergstresser V^S, V^A. Si (diamond): V^A == 0
+    identically (two identical atoms), Kunikiyo V^S by default."""
+    if material == 'GaAs':
+        table = _CB_FORM_FACTORS_RY
+    elif material in ('Si', 'Si_kunikiyo'):
+        table = _SI_FORM_FACTORS_KUNIKIYO_RY
+    elif material == 'Si_cb':
+        table = _SI_FORM_FACTORS_CB_RY
+    else:
+        raise ValueError("material must be 'GaAs', 'Si' (Kunikiyo) or 'Si_cb'")
+    vs_ry, va_ry = table.get(G2, (0.0, 0.0))
     return vs_ry * RY_TO_HA, va_ry * RY_TO_HA
 
 # =============================================================================

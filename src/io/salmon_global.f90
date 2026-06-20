@@ -449,9 +449,13 @@ character(256),allocatable :: atom_name(:)
   ! k-local impact-ionization Lindblad channel (Stobbe-Redmer-Schattke fit, GaAs):
   ! gamma(e_kin) = P * (e_kin - E_th)^4 * Theta(e_kin - E_th), e_kin from the CBM
   character(1)   :: yn_sbe_impact_ionization
-  real(8)        :: sbe_ii_prefactor      ! P [s^-1 eV^-4]
+  real(8)        :: sbe_ii_prefactor      ! P [s^-1 eV^-a]
   real(8)        :: sbe_ii_threshold_ev   ! E_th [eV]
   real(8)        :: sbe_ii_ramp_ev        ! linear Theta-smoothing width delta_E [eV]
+  ! Impact-ionization fit-form switch: gamma = P (eps-E_th)^a Theta(eps-E_th).
+  ! GaAs: Stobbe quartic (a=4, hard). Si: Keldysh quadratic (a=2, soft).
+  character(32)  :: sbe_ii_form           ! 'stobbe_quartic' | 'keldysh_quadratic'
+  real(8)        :: sbe_ii_exponent       ! fit exponent a (operative value)
   ! Coulomb (time-dependent Hartree-Fock / exchange) renormalization
   ! [Golde-Kira-Meier-Koch, Phys. Status Solidi B 248, 863 (2011)]:
   ! Sigma_nm(k) = - sum_{q/=k} V(k-q) rho_nm(q), V(p)=str*4pi/(eps*Omega*Nk*(p^2+kappa^2))

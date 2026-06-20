@@ -601,6 +601,8 @@ contains
       & sbe_ii_prefactor, &
       & sbe_ii_threshold_ev, &
       & sbe_ii_ramp_ev, &
+      & sbe_ii_form, &
+      & sbe_ii_exponent, &
       & yn_sbe_coulomb, &
       & sbe_coulomb_epsilon, &
       & sbe_coulomb_strength, &
@@ -1046,6 +1048,8 @@ contains
     sbe_ii_prefactor        = 2.0d12     ! Stobbe fit prefactor P [s^-1 eV^-4] (GaAs, PRB 49, 4494)
     sbe_ii_threshold_ev     = 2.1d0      ! Stobbe fit threshold E_th [eV] above the CBM
     sbe_ii_ramp_ev          = 0.2d0      ! linear Theta-smoothing width [eV] (fit resolution); <=0: hard step
+    sbe_ii_form             = 'stobbe_quartic'  ! 'stobbe_quartic'(GaAs,a=4) | 'keldysh_quadratic'(Si,a=2)
+    sbe_ii_exponent         = 4.0d0      ! fit exponent a (operative; set 2 for Si soft threshold, 4.6 for Si full-band)
     yn_sbe_coulomb          = 'n'        ! 'y': enable Coulomb HF (exchange) renormalization (non-k-local, may be slow)
     sbe_coulomb_epsilon     = 12.9d0     ! background dielectric constant eps (GaAs)
     sbe_coulomb_strength    = 1.0d0      ! overall scaling of the exchange kernel (tuning)
@@ -1694,6 +1698,8 @@ contains
     call comm_bcast(sbe_ii_prefactor,        nproc_group_global)
     call comm_bcast(sbe_ii_threshold_ev,     nproc_group_global)
     call comm_bcast(sbe_ii_ramp_ev,          nproc_group_global)
+    call comm_bcast(sbe_ii_form,             nproc_group_global)
+    call comm_bcast(sbe_ii_exponent,         nproc_group_global)
     call comm_bcast(yn_sbe_coulomb,          nproc_group_global)
     call comm_bcast(sbe_coulomb_epsilon,     nproc_group_global)
     call comm_bcast(sbe_coulomb_strength,    nproc_group_global)
@@ -2697,6 +2703,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_ii_prefactor', sbe_ii_prefactor
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_ii_threshold_ev', sbe_ii_threshold_ev
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_ii_ramp_ev', sbe_ii_ramp_ev
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'sbe_ii_form', trim(sbe_ii_form)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_ii_exponent', sbe_ii_exponent
       if(yn_sbe_coulomb == 'y')then
         write(fh_variables_log, '("# info: Coulomb HF (exchange) renormalization enabled: eps=",ES12.5,&
           & ", strength=",ES12.5,", screen kappa=",ES12.5," 1/Bohr")') &
