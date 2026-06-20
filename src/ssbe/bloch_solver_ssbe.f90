@@ -73,6 +73,7 @@ module bloch_solver_ssbe
         ! with the (1-f_e-f_h) Pauli factor coming for free from the
         ! von Neumann commutator. Frozen over a dt step (mean-field predictor).
         logical :: flag_coulomb = .false.
+        logical :: flag_hf_subproj = .false. ! project Sigma^HF onto FCC sublattice blocks
         real(8) :: coul_pref     = 0d0  ! strength * 4 pi / (eps * Omega_cell * Nk)
         real(8) :: coul_screen2  = 0d0  ! kappa^2 [1/Bohr^2] (Yukawa regulariser)
         integer :: icomm         = 0    ! MPI communicator (for the non-local exchange sum)
@@ -104,7 +105,8 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
                              sbe_ii_threshold_ev, sbe_ii_ramp_ev, &
                              sbe_ii_form, sbe_ii_exponent, &
                              yn_sbe_coulomb, sbe_coulomb_epsilon, &
-                             sbe_coulomb_strength, sbe_coulomb_screen_au
+                             sbe_coulomb_strength, sbe_coulomb_screen_au, &
+                             yn_sbe_hf_sublattice_proj
     use math_constants, only: pi
     use phys_constants, only: au_fs, kB_au, au_ev
     implicit none
@@ -316,12 +318,29 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
         if (sbe%n_active_bands > 0) &
             allocate(sbe%sigma_hf(1:sbe%n_active_bands, 1:sbe%n_active_bands, &
                                   sbe%ik_min:sbe%ik_max))
+        ! Folding fix: project Sigma^HF block-diagonally onto the 4 FCC
+        ! sublattices (zero the spurious inter-sublattice exchange that the
+        ! cubic-cell folding creates). Requires the unfold weights and a
+        ! folded cubic cell; otherwise inert. [Popescu-Zunger, PRB 85, 085201]
+        sbe%flag_hf_subproj = (yn_sbe_hf_sublattice_proj == 'y')
+        if (sbe%flag_hf_subproj) then
+            if (.not. allocated(gs%unfold_w)) then
+                sbe%flag_hf_subproj = .false.
+            else if (maxval(abs(gs%unfold_w)) <= 1d-12) then
+                sbe%flag_hf_subproj = .false.
+            end if
+        end if
         if (irank == 0) then
             write(*, '(a)') '# Coulomb HF (Golde-Kira-Meier-Koch SBE) enabled:'
             write(*, '(a,ES12.5)') '#   exchange prefactor 4pi*str/(eps*Omega*Nk) = ', sbe%coul_pref
             write(*, '(a,f8.3,a,ES12.5,a)') '#   eps = ', sbe_coulomb_epsilon, &
                 ', screening kappa^2 = ', sbe%coul_screen2, ' 1/Bohr^2'
             write(*, '(a)') '#   NOTE: non-k-local mean field, O(Nk^2) per step (frozen over dt)'
+            if (sbe%flag_hf_subproj) then
+                write(*, '(a)') '#   sublattice projection ON: inter-sublattice exchange zeroed'
+            else
+                write(*, '(a)') '#   sublattice projection OFF (no unfold weights / disabled)'
+            end if
         end if
     end if
 
@@ -739,8 +758,8 @@ subroutine compute_coulomb_selfenergy(sbe, gs)
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info),      intent(in)    :: gs
-    integer :: nba, ik, iq, i, j, in, im
-    real(8) :: dr(3), dkx, dky, dkz, q2, vkq
+    integer :: nba, ik, iq, i, j, in, im, s
+    real(8) :: dr(3), dkx, dky, dkz, q2, vkq, proj
     complex(8), allocatable :: rho_loc(:, :, :), rho_all(:, :, :)
 
     nba = sbe%n_active_bands
@@ -787,6 +806,33 @@ subroutine compute_coulomb_selfenergy(sbe, gs)
         end do
     end do
     !$omp end parallel do
+
+    ! Sublattice-block projection (Part E folding fix): a translationally
+    ! invariant Coulomb operator conserves primitive crystal momentum, so the
+    ! exchange between two cubic bands folding to the same cubic k but living on
+    ! DIFFERENT FCC sublattices is exactly zero. Multiply each OFF-diagonal
+    ! Sigma_ij(k) by the same-sublattice probability  sum_s w_s(i) w_s(j)
+    ! (=1 if both bands sit on one sublattice, 0 if on disjoint ones). The
+    ! diagonal (energy renormalization) is kept at full strength; proj is real
+    ! and symmetric, so Sigma stays Hermitian. [Popescu-Zunger PRB 85, 085201]
+    if (sbe%flag_hf_subproj) then
+        !$omp parallel do default(shared) private(ik, i, j, in, im, s, proj)
+        do ik = sbe%ik_min, sbe%ik_max
+            do j = 1, nba
+                im = sbe%active_idx(j)
+                do i = 1, nba
+                    if (i == j) cycle
+                    in = sbe%active_idx(i)
+                    proj = 0d0
+                    do s = 1, 4
+                        proj = proj + gs%unfold_w(s, in, ik) * gs%unfold_w(s, im, ik)
+                    end do
+                    sbe%sigma_hf(i, j, ik) = sbe%sigma_hf(i, j, ik) * proj
+                end do
+            end do
+        end do
+        !$omp end parallel do
+    end if
 
     deallocate(rho_loc, rho_all)
 end subroutine compute_coulomb_selfenergy

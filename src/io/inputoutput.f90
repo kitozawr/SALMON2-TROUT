@@ -606,7 +606,8 @@ contains
       & yn_sbe_coulomb, &
       & sbe_coulomb_epsilon, &
       & sbe_coulomb_strength, &
-      & sbe_coulomb_screen_au
+      & sbe_coulomb_screen_au, &
+      & yn_sbe_hf_sublattice_proj
 
     namelist/epm/ &
       & epm_material, &
@@ -1054,6 +1055,7 @@ contains
     sbe_coulomb_epsilon     = 12.9d0     ! background dielectric constant eps (GaAs)
     sbe_coulomb_strength    = 1.0d0      ! overall scaling of the exchange kernel (tuning)
     sbe_coulomb_screen_au   = 0.0d0      ! Yukawa screening kappa [1/Bohr]; 0 = bare (q=0 excluded)
+    yn_sbe_hf_sublattice_proj = 'y'      ! project Sigma^HF block-diagonal over 4 FCC sublattices (folding fix)
                                             ! (occupation 1 per spinor band, nelec valence bands instead of nelec/2)
 !! == default for &epm
     epm_material            = 'GaAs'
@@ -1704,6 +1706,7 @@ contains
     call comm_bcast(sbe_coulomb_epsilon,     nproc_group_global)
     call comm_bcast(sbe_coulomb_strength,    nproc_group_global)
     call comm_bcast(sbe_coulomb_screen_au,   nproc_group_global)
+    call comm_bcast(yn_sbe_hf_sublattice_proj, nproc_group_global)
 !! == bcast for epm
     call comm_bcast(epm_material,            nproc_group_global)
     call comm_bcast(epm_lattice_constant_au, nproc_group_global)
@@ -2714,6 +2717,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_coulomb_epsilon', sbe_coulomb_epsilon
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_coulomb_strength', sbe_coulomb_strength
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_coulomb_screen_au', sbe_coulomb_screen_au
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_hf_sublattice_proj', yn_sbe_hf_sublattice_proj
 
       if(inml_epm >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'epm', inml_epm
@@ -2833,6 +2837,7 @@ contains
     call yn_argument_check(yn_sbe_spinor)
     call yn_argument_check(yn_sbe_impact_ionization)
     call yn_argument_check(yn_sbe_coulomb)
+    call yn_argument_check(yn_sbe_hf_sublattice_proj)
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
       stop "Nk must be 1 when yn_periodic=='n'"

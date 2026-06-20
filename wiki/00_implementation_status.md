@@ -21,7 +21,7 @@ Roadmap source: the Si + nonlocal-super-compute task (Parts A–F) plus future c
 | pre | EPM GaAs + 4-fold FCC folding + unfold pipeline | ✅ | merged | `epm_gaas_reference.py`, `SYSNAME_unfold.data` |
 | **A** | Silicon EPM (`epm_material='Si'`, V^A=0, Kunikiyo) | ✅ | #44 | gap 1.059 eV conv (Kunikiyo calc 1.068), CBM 0.86·2π/a |
 | **B** | II fit-form switch (`sbe_ii_form`, `sbe_ii_exponent`) | ✅ | #44 | d**a, prefactor au_ev**a; GaAs a=4 unchanged |
-| **E** | HF sublattice-block projection (`yn_sbe_hf_sublattice_proj`) | ⬜ | — | **NEXT.** Zero inter-sublattice Σ^HF; uses unfold weights |
+| **E** | HF sublattice-block projection (`yn_sbe_hf_sublattice_proj`) | ✅ | #44 | proj_ij=Σ_s w_s(i)w_s(j) off-diag, diag kept; Hermitian; default 'y' |
 | **C** | Nonlocal super-compute (`yn_sbe_superres`) | ⬜ | — | big effort; break into C2/C3/C5 units below |
 | C2 | Houston-basis adiabatic populations reuse | ⬜ | — | reuse existing ZHEEV of H_VG |
 | C3 | Energy-bin final-state search (no tetrahedra/MC) | ⬜ | — | first testable unit of C |
@@ -57,11 +57,34 @@ Roadmap source: the Si + nonlocal-super-compute task (Parts A–F) plus future c
 |---|---|---|
 | `test_si_epm_gap.py` | Part A | primitive sublattice-block Si gap ≈1.06 eV, CBM≈0.86·2π/a |
 | `test_ii_form_switch.py` | Part B | rate γ=P(ε−E_th)^a scaling for a=2 vs 4 |
+| `test_hf_sublattice_proj.py` | Part E | proj zeroes inter-sublattice, keeps diag, Hermitian; real GaAs weights |
 | _(add per increment)_ | | |
+
+End-to-end smoke (manual, not in run_all): scalar GaAs 4³, `yn_sbe_coulomb='y'`
++ `yn_sbe_hf_sublattice_proj='y'`, weak field → runs stable, finite, projection
+diagnostic confirmed. Full "zero spurious Γ→X transfer" weak-field validation
+is a longer run, deferred to a dedicated validation pass.
 
 Run all: `python3 tests/run_all.py` (each test prints PASS/FAIL and exits nonzero on failure).
 
 ---
 
 ## Next action on resume
-**Implement Part E** (HF sublattice-block projection): add `yn_sbe_hf_sublattice_proj` (default 'y' when HF on in a folded cubic cell); in `compute_coulomb_selfenergy`, after forming Σ^HF(k), zero the inter-sublattice matrix elements using the unfold weights `gs%unfold_w` (keep intra-sublattice). Validate: weak-field run shows no spurious Γ→X/Γ→L transfer attributable to exchange; unit test that inter-sublattice Σ elements vanish.
+**Start Part C** — the nonlocal super-compute mode. It is large, so do it in
+testable sub-units (commit each):
+1. **Flags scaffolding** — add `yn_sbe_superres`, `yn_sbe_eph`, `sbe_eph_*`,
+   `yn_sbe_bgr_threshold`, `sbe_bgr_*`, `sbe_search_sigma_e_ev` to
+   salmon_global + inputoutput (default OFF). No behaviour change yet. Test:
+   build + a run with all OFF is byte-for-byte identical to before.
+2. **C3 energy-bin final-state search** — a standalone, unit-testable routine:
+   given adiabatic energies {ε_a(k)} and a target ΔE, return the normalized
+   broadened-bin weights over partner states (Gaussian/rectangle width σ_E ~
+   mean level spacing). Deterministic, no MC. Test: weights are normalized,
+   peak at energy match, symmetric.
+3. **C5 e-ph rate functions** — pure functions ν(ε) (smooth saturation),
+   Bose N_B(T), golden-rule deformation-potential rates (Si table) and the
+   Fröhlich asinh factor (GaAs). Test each against the cited limits.
+Then assemble C5 into a population-relaxing Lindblad half-step (Houston basis,
+predictor-corrector C1/C6, sub-cycling C8), with the C6 Hermitian-dissipator
+population-conservation unit test as the CPTP gate. Ring MPI (D) comes after a
+working serial super-mode. Keep every sub-unit behind `yn_sbe_superres` OFF.

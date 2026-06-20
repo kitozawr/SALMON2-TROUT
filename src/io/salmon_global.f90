@@ -463,6 +463,10 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: sbe_coulomb_epsilon    ! background dielectric constant eps
   real(8)        :: sbe_coulomb_strength   ! overall scaling of the exchange kernel
   real(8)        :: sbe_coulomb_screen_au  ! Yukawa screening kappa [1/Bohr]
+  ! Hartree-Fock folding fix: project Sigma^HF block-diagonally onto the 4 FCC
+  ! sublattice sectors (zero the spurious inter-sublattice exchange coupling
+  ! that the cubic-cell band folding creates). [Popescu-Zunger PRB 85, 085201]
+  character(1)   :: yn_sbe_hf_sublattice_proj
 
   !! &epm (local empirical pseudopotential method, Cohen-Bergstresser)
   character(32)  :: epm_material
