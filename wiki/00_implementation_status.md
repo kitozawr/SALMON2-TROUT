@@ -22,11 +22,13 @@ Roadmap source: the Si + nonlocal-super-compute task (Parts A–F) plus future c
 | **A** | Silicon EPM (`epm_material='Si'`, V^A=0, Kunikiyo) | ✅ | #44 | gap 1.059 eV conv (Kunikiyo calc 1.068), CBM 0.86·2π/a |
 | **B** | II fit-form switch (`sbe_ii_form`, `sbe_ii_exponent`) | ✅ | #44 | d**a, prefactor au_ev**a; GaAs a=4 unchanged |
 | **E** | HF sublattice-block projection (`yn_sbe_hf_sublattice_proj`) | ✅ | #44 | proj_ij=Σ_s w_s(i)w_s(j) off-diag, diag kept; Hermitian; default 'y' |
-| **C** | Nonlocal super-compute (`yn_sbe_superres`) | ⬜ | — | big effort; break into C2/C3/C5 units below |
+| **C** | Nonlocal super-compute (`yn_sbe_superres`) | 🚧 | #44 | flags scaffolded (all OFF); primitives done; integration pending |
+| C0 | Flags scaffolding (10 params, default OFF) | ✅ | #44 | namelist read+bcast+log; default run byte-for-byte unchanged |
+| C-prim | Pure rate/search primitives module `sbe_superres_ssbe.f90` | ✅ | #44 | ν(ε), N_B, gaussian/rect bins, Fröhlich asinh, II rate, BGR, Si/GaAs tables |
 | C2 | Houston-basis adiabatic populations reuse | ⬜ | — | reuse existing ZHEEV of H_VG |
-| C3 | Energy-bin final-state search (no tetrahedra/MC) | ⬜ | — | first testable unit of C |
+| C3 | Energy-bin final-state SEARCH (enumeration, expanding radius) | 🚧 | — | bin primitives ✅; partner enumeration pending |
 | C4 | Nonlocal impact ionization (momentum exchange) | ⬜ | — | needs C3 + ring (D) |
-| C5 | e-ph population-relaxing Lindblad (Si phonons, GaAs Fröhlich) | ⬜ | — | drives THz bleaching |
+| C5 | e-ph population-relaxing Lindblad (Si phonons, GaAs Fröhlich) | 🚧 | — | rate primitives ✅; golden-rule assembly + Lindblad integration pending |
 | C6 | T1/T2 bookkeeping (½ only on T1) | ⬜ | — | unit test: Hermitian dissipator conserves populations |
 | C7 | BGR-gated II threshold | ⬜ | — | `yn_sbe_bgr_threshold`, gate 5e18 |
 | C8 | Dissipator sub-cycling | ⬜ | — | when ν·(h/2) ≳ 0.2 |
@@ -58,6 +60,7 @@ Roadmap source: the Si + nonlocal-super-compute task (Parts A–F) plus future c
 | `test_si_epm_gap.py` | Part A | primitive sublattice-block Si gap ≈1.06 eV, CBM≈0.86·2π/a |
 | `test_ii_form_switch.py` | Part B | rate γ=P(ε−E_th)^a scaling for a=2 vs 4 |
 | `test_hf_sublattice_proj.py` | Part E | proj zeroes inter-sublattice, keeps diag, Hermitian; real GaAs weights |
+| `test_superres_rates.f90` | Part C primitives | ν(ε) limits, N_B, energy-bin area/peak, Fröhlich asinh, II 2^a scaling, BGR −19/−41 meV, data tables (standalone gfortran) |
 | _(add per increment)_ | | |
 
 End-to-end smoke (manual, not in run_all): scalar GaAs 4³, `yn_sbe_coulomb='y'`
@@ -70,21 +73,24 @@ Run all: `python3 tests/run_all.py` (each test prints PASS/FAIL and exits nonzer
 ---
 
 ## Next action on resume
-**Start Part C** — the nonlocal super-compute mode. It is large, so do it in
-testable sub-units (commit each):
-1. **Flags scaffolding** — add `yn_sbe_superres`, `yn_sbe_eph`, `sbe_eph_*`,
-   `yn_sbe_bgr_threshold`, `sbe_bgr_*`, `sbe_search_sigma_e_ev` to
-   salmon_global + inputoutput (default OFF). No behaviour change yet. Test:
-   build + a run with all OFF is byte-for-byte identical to before.
-2. **C3 energy-bin final-state search** — a standalone, unit-testable routine:
-   given adiabatic energies {ε_a(k)} and a target ΔE, return the normalized
-   broadened-bin weights over partner states (Gaussian/rectangle width σ_E ~
-   mean level spacing). Deterministic, no MC. Test: weights are normalized,
-   peak at energy match, symmetric.
-3. **C5 e-ph rate functions** — pure functions ν(ε) (smooth saturation),
-   Bose N_B(T), golden-rule deformation-potential rates (Si table) and the
-   Fröhlich asinh factor (GaAs). Test each against the cited limits.
-Then assemble C5 into a population-relaxing Lindblad half-step (Houston basis,
-predictor-corrector C1/C6, sub-cycling C8), with the C6 Hermitian-dissipator
-population-conservation unit test as the CPTP gate. Ring MPI (D) comes after a
-working serial super-mode. Keep every sub-unit behind `yn_sbe_superres` OFF.
+Done so far in Part C: flags scaffolding (C0 ✅) and the pure rate/search
+primitives module `sbe_superres_ssbe.f90` (C-prim ✅, Fortran-unit-tested).
+
+**Next increment — C5 e-ph Lindblad, assembled but still inert by default:**
+1. Add an amplitude-damping helper that, in the Houston basis, transfers
+   adiabatic population a→b at a frozen rate ν with the −½{L†L,ρ} coherence
+   damping (mirror `apply_damping_channel`, but population-RELAXING so
+   Γ_aa ≠ 0). This is the e-ph jump L = √ν c†_b c_a.
+2. Build `apply_eph_relaxation(...)` (called only when `yn_sbe_eph='y'`):
+   for each adiabatic level, total rate ν_total(ε) from `nu_saturation` +
+   intervalley channels (energy-bin matched partner levels via `gaussian_bin`),
+   emission/absorption weighted by N_B; Pauli factors clamped [0,1];
+   predictor-corrector (C1/C6); sub-cycling (C8). Insert as a Strang half-step
+   inside `houston_dissipate` (k-local first; nonlocal/ring later).
+3. **C6 CPTP unit test (gate):** a Hermitian-only / pure-dephasing dissipator
+   must conserve populations exactly (Γ_aa=0); the population-relaxing channel
+   must keep Σρ_aa constant (trace) and all ρ_aa∈[0,1]. Add as a Fortran test.
+Keep `yn_sbe_superres`/`yn_sbe_eph` OFF by default so GaAs runs are unchanged.
+Golden-rule deformation-potential PREFACTOR (D, ρ_mass, ω → a.u.) is the one
+remaining unit to add to the primitives module (with its own conversion test)
+before wiring real rates; until then use `sbe_eph_nu_sat` as the scale.

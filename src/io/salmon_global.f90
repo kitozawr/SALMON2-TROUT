@@ -468,6 +468,21 @@ character(256),allocatable :: atom_name(:)
   ! that the cubic-cell band folding creates). [Popescu-Zunger PRB 85, 085201]
   character(1)   :: yn_sbe_hf_sublattice_proj
 
+  ! Nonlocal "super-compute" mode (Part C): genuine momentum-exchange impact
+  ! ionization + population-relaxing electron-phonon Lindblad. All OFF by
+  ! default; the k-local channels remain the fast default. [scaffolding only at
+  ! this stage -- the dynamics integration follows in later increments]
+  character(1)   :: yn_sbe_superres        ! master switch for the nonlocal mode
+  character(1)   :: yn_sbe_eph             ! population-relaxing e-ph Lindblad
+  real(8)        :: sbe_eph_temperature_k  ! phonon bath T_ph [K] (Bose factor)
+  real(8)        :: sbe_eph_nu_sat         ! collision-rate saturation nu_sat [s^-1]
+  real(8)        :: sbe_eph_eps0_ev        ! nu(eps) saturation onset eps_0 [eV]
+  real(8)        :: sbe_eph_n              ! nu(eps) shape exponent n
+  character(1)   :: yn_sbe_bgr_threshold   ! density-dependent II threshold (BGR)
+  real(8)        :: sbe_bgr_n_gate         ! apply BGR shift only above n [cm^-3]
+  real(8)        :: sbe_bgr_coeff          ! BGR coefficient K [eV cm] (cube-root law)
+  real(8)        :: sbe_search_sigma_e_ev  ! energy-bin width sigma_E [eV] (<=0: grid-matched)
+
   !! &epm (local empirical pseudopotential method, Cohen-Bergstresser)
   character(32)  :: epm_material
   real(8)        :: epm_lattice_constant_au
