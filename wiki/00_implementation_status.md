@@ -24,11 +24,11 @@ Roadmap source: the Si + nonlocal-super-compute task (Parts A–F) plus future c
 | **E** | HF sublattice-block projection (`yn_sbe_hf_sublattice_proj`) | ✅ | #44 | proj_ij=Σ_s w_s(i)w_s(j) off-diag, diag kept; Hermitian; default 'y' |
 | **C** | Nonlocal super-compute (`yn_sbe_superres`) | 🚧 | #44 | flags scaffolded (all OFF); primitives done; integration pending |
 | C0 | Flags scaffolding (10 params, default OFF) | ✅ | #44 | namelist read+bcast+log; default run byte-for-byte unchanged |
-| C-prim | Pure rate/search primitives module `sbe_superres_ssbe.f90` | ✅ | #44 | ν(ε), N_B, gaussian/rect bins, Fröhlich asinh, II rate, BGR, Si/GaAs tables |
+| C-prim | Pure rate/search primitives module `sbe_superres_ssbe.f90` | ✅ | #44 | ν(ε), N_B, bins, Fröhlich asinh, II rate, BGR, amp-damp map, golden-rule prefactor + unit conv, thermal split, Si/GaAs tables |
 | C2 | Houston-basis adiabatic populations reuse | ✅ | #44 | e-ph runs in the existing houston_dissipate ZHEEV basis (t2 = U†ρU) |
 | C3 | Energy-bin final-state SEARCH (enumeration, expanding radius) | 🚧 | #44 | bin primitives ✅; nearest ±ħω partner used in C5; full expanding-radius enum pending (nonlocal C4) |
 | C4 | Nonlocal impact ionization (momentum exchange) | ⬜ | — | needs C3 expanding search + ring (D) |
-| C5 | e-ph population-relaxing Lindblad (k-local skeleton) | ✅ | #44 | single eff. phonon, ν(ε) sat, N_B emis/abs, Pauli-clamped, CPTP; trace=32 conserved end-to-end. Full phonon-table sum + nonlocal + golden-rule prefactor pending |
+| C5 | e-ph population-relaxing Lindblad (k-local, full phonon table) | ✅ | #44 | Si 6 intervalley / GaAs LO+5; golden-rule weights D²/ħω (norm.), detailed-balance emis/abs, ν(ε) cap, Pauli-clamped, CPTP; trace=32 conserved. Nonlocal version pending (C4/D) |
 | C6 | CPTP gate (amplitude-damping map test) | ✅ | #44 | trace, qubit positivity det≥0, transfer formulas, Hermiticity, γ=0 identity |
 | C7 | BGR-gated II threshold | ⬜ | — | `yn_sbe_bgr_threshold`, gate 5e18 |
 | C8 | Dissipator sub-cycling | ⬜ | — | when ν·(h/2) ≳ 0.2 |
@@ -62,6 +62,7 @@ Roadmap source: the Si + nonlocal-super-compute task (Parts A–F) plus future c
 | `test_hf_sublattice_proj.py` | Part E | proj zeroes inter-sublattice, keeps diag, Hermitian; real GaAs weights |
 | `test_superres_rates.f90` | Part C primitives | ν(ε) limits, N_B, energy-bin area/peak, Fröhlich asinh, II 2^a scaling, BGR −19/−41 meV, data tables (standalone gfortran) |
 | `test_eph_cptp.f90` | Part C5/C6 | amplitude-damping map: trace, qubit positivity (det≥0), transfer formulas, coherence damping, Hermiticity, γ=0 identity |
+| `test_superres_rates.f90` (extended) | Part C5 | + unit conversions (meV/eV·cm/eV·Å/g·cm⁻³→a.u.), golden_rule_prefactor, eph_thermal_split (fe+fa=1, fe/fa=(N+1)/N) |
 | _(add per increment)_ | | |
 
 End-to-end smoke (manual): scalar GaAs 4³, `yn_sbe_superres='y'` + `yn_sbe_eph='y'`
@@ -78,25 +79,23 @@ Run all: `python3 tests/run_all.py` (each test prints PASS/FAIL and exits nonzer
 ---
 
 ## Next action on resume
-Part C so far: C0 (flags), C-prim (primitives), C2 (Houston reuse), C5 (k-local
-e-ph Lindblad), C6 (CPTP gate) all ✅ and tested. The e-ph channel currently
-uses ONE effective optical phonon and `sbe_eph_nu_sat` as the rate scale.
+Part C so far: C0, C-prim, C2, C5 (now full phonon-table sum), C6 all ✅ tested.
+The k-local super-mode (e-ph cooling) is physically reasonable: Si 6 intervalley
+/ GaAs LO+5, golden-rule weights, detailed balance, ν(ε) saturation cap.
 
-**Next increment — physical e-ph rates (still k-local, gated OFF):**
-1. Add the golden-rule deformation-potential PREFACTOR primitive to
-   `sbe_superres_ssbe` (convert D [1e8 eV/cm or eV/Å], ρ_mass [g/cm³],
-   ħω [meV] → a rate scale in a.u.), with its own unit-conversion test against
-   a hand-computed value. Add the Fröhlich polar-optical rate assembly for GaAs
-   (using `frohlich_hi_factor`).
-2. Replace the single effective phonon in `apply_eph_relaxation` with the SUM
-   over the material phonon table (Si 6 intervalley g/f; GaAs Fröhlich +
-   5 intervalley): each phonon contributes emission/absorption to its
-   energy-matched partner; keep the ν(ε) saturation as the high-energy cap.
-   Add a test that the total rate saturates to ν_sat and detailed balance holds
-   (emission/absorption ratio = (N_B+1)/N_B).
-3. Then C7 (BGR-gated II threshold, `yn_sbe_bgr_threshold`) — small, uses
-   `bgr_gap_shift_ev` + the running carrier density; and C8 (sub-cycling) when
-   ν_max·(h/2) ≳ 0.2.
-Nonlocal momentum-exchange versions of II (C4) and e-ph + the ring MPI (D) come
-after the serial k-local super-mode is physically validated (Chefonov bleaching
-staging in wiki/04). Keep everything behind `yn_sbe_superres`/`yn_sbe_eph` OFF.
+**Next increment — finish the k-local super-mode feature set (small, gated OFF):**
+1. **C7 BGR-gated II threshold** (`yn_sbe_bgr_threshold`): each step, compute the
+   excited carrier density n(t) (reuse the nex trace / cell volume), and if
+   n > `sbe_bgr_n_gate` shift the impact-ionization threshold
+   E_th(t) = E_th0 − |bgr_gap_shift_ev(n, K)| (K = `sbe_bgr_coeff`). Store
+   E_th0; update sbe%ii_eth_au before the dissipative step. Test: shift = 0
+   below the gate, −19/−41 meV at 1e18/1e19 (already in the primitive test);
+   add an end-to-end check that the gap-edge II turns on slightly earlier.
+2. **C8 sub-cycling**: in `houston_dissipate`, when ν_max·(τ) ≳ 0.2 (collision
+   time faster than the step), split the dissipative application into m CPTP
+   sub-steps [exp((τ/m)D)]^m with (τ/m)·ν_max ≲ 0.1. Each sub-step CPTP →
+   positivity safe. Test: result converges as m grows; trace preserved.
+3. **F** — e-e architecture TODO hook (comment + ring-pass accumulator slot).
+Then the NONLOCAL momentum-exchange versions of II (C4) and e-ph, plus the ring
+MPI (D) — the final major effort — after the serial k-local super-mode is
+physically validated (Chefonov bleaching staging, wiki/04). Keep all OFF.

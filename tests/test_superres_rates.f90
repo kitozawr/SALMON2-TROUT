@@ -70,6 +70,28 @@ program test_superres_rates
     call check("GaAs Gamma-L D = 10 eV/A", GAAS_IV_D_EVANG(1), 10d0, TOL)
     call check("GaAs hw_LO = 36 meV", GAAS_HW_LO_MEV, 36d0, TOL)
 
+    ! --- unit conversions to a.u. (golden-rule e-ph) -------------------------
+    call check("mev_to_ha(1000)=1eV in Ha", mev_to_ha(1000d0), 1d0/27.211386245988d0, 1d-9)
+    call check("D[eV/A]/D[eV/cm] ratio = 1e8", &
+               d_evang_to_au(1d0)/d_evcm_to_au(1d0), 1d8, 1d-6)
+    call check("rho(2.33 g/cm3) in m_e/Bohr^3", rho_gcm3_to_au(2.33d0), 379.0d0, 2d0)
+
+    ! --- golden_rule_prefactor pi D^2/(rho omega) ----------------------------
+    call check("golden prefactor pi*4/(3*4)=pi/3", &
+               golden_rule_prefactor(2d0,3d0,4d0), 3.141592653589793d0/3d0, 1d-9)
+    call check("golden prefactor omega=0 guard", golden_rule_prefactor(2d0,3d0,0d0), 0d0, TOL)
+
+    ! --- eph_thermal_split: normalization + detailed balance -----------------
+    block
+        real(8) :: fe, fa
+        call eph_thermal_split(0.5d0, fe, fa)
+        call check("split fe+fa=1", fe+fa, 1d0, TOL)
+        call check("split fe/fa=(N+1)/N", fe/fa, 1.5d0/0.5d0, 1d-9)
+        call eph_thermal_split(0d0, fe, fa)
+        call check("split N=0: fe=1", fe, 1d0, TOL)
+        call check("split N=0: fa=0", fa, 0d0, TOL)
+    end block
+
     if (nfail == 0) then
         write(*,'(a)') 'PASS'
         call exit(0)

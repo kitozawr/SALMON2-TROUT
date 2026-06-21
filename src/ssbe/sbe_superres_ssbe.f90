@@ -23,10 +23,17 @@ module sbe_superres_ssbe
     private
 
     real(8), parameter :: PI = 3.14159265358979323846d0
+    ! Unit conversions to Hartree atomic units (a.u.). [CODATA 2018]
+    real(8), parameter :: HA_EV    = 27.211386245988d0   ! 1 Hartree in eV
+    real(8), parameter :: BOHR_CM  = 0.529177210903d-8   ! 1 Bohr in cm
+    real(8), parameter :: BOHR_ANG = 0.529177210903d0    ! 1 Bohr in Angstrom
+    real(8), parameter :: ME_G     = 9.1093837015d-28    ! electron mass in g
 
     public :: nu_saturation, bose_factor, gaussian_bin, rect_bin, &
               frohlich_hi_factor, ii_rate_general, bgr_gap_shift_ev, &
-              gaussian_shape, amp_damp_channel
+              gaussian_shape, amp_damp_channel, &
+              mev_to_ha, d_evcm_to_au, d_evang_to_au, rho_gcm3_to_au, &
+              golden_rule_prefactor, eph_thermal_split
 
     ! =====================================================================
     ! Silicon intervalley deformation potentials -- Pop "new" set (default).
@@ -213,5 +220,60 @@ contains
             dE = -K * n_cm3 ** (1d0 / 3d0)
         end if
     end function bgr_gap_shift_ev
+
+    ! --- unit conversions to a.u. (for golden-rule e-ph rates, C5) -----------
+    pure function mev_to_ha(E_mev) result(E)
+        real(8), intent(in) :: E_mev
+        real(8) :: E
+        E = E_mev * 1d-3 / HA_EV
+    end function mev_to_ha
+
+    ! Deformation potential D [eV/cm] -> [Ha/Bohr]. (Si tables are in 1e8 eV/cm,
+    ! so pass D_table*1e8.)
+    pure function d_evcm_to_au(D_evcm) result(D)
+        real(8), intent(in) :: D_evcm
+        real(8) :: D
+        D = D_evcm * BOHR_CM / HA_EV
+    end function d_evcm_to_au
+
+    ! Deformation potential D [eV/Angstrom] -> [Ha/Bohr]. (GaAs intervalley tables.)
+    pure function d_evang_to_au(D_eva) result(D)
+        real(8), intent(in) :: D_eva
+        real(8) :: D
+        D = D_eva * BOHR_ANG / HA_EV
+    end function d_evang_to_au
+
+    ! Mass density rho [g/cm^3] -> [m_e/Bohr^3].
+    pure function rho_gcm3_to_au(rho) result(r)
+        real(8), intent(in) :: rho
+        real(8) :: r
+        r = rho * BOHR_CM**3 / ME_G
+    end function rho_gcm3_to_au
+
+    ! Golden-rule deformation-potential rate PREFACTOR pi D^2/(rho omega), all
+    ! arguments in a.u. (rate per unit final-state density-of-states; the DOS /
+    ! energy-bin factor is applied by the caller). [Jacoboni-Reggiani RMP 55, 645]
+    pure function golden_rule_prefactor(D_au, rho_au, omega_au) result(g)
+        real(8), intent(in) :: D_au, rho_au, omega_au
+        real(8) :: g
+        if (rho_au <= 0d0 .or. omega_au <= 0d0) then
+            g = 0d0
+        else
+            g = PI * D_au * D_au / (rho_au * omega_au)
+        end if
+    end function golden_rule_prefactor
+
+    ! Normalized thermal emission/absorption split for one phonon mode:
+    !   fe = (N_B+1)/(2 N_B+1),  fa = N_B/(2 N_B+1).
+    ! fe+fa = 1 (so the per-mode total is the mode weight) and fe/fa = (N_B+1)/N_B
+    ! (detailed balance). At N_B=0: fe=1, fa=0 (spontaneous emission only).
+    pure subroutine eph_thermal_split(Nb, fe, fa)
+        real(8), intent(in)  :: Nb
+        real(8), intent(out) :: fe, fa
+        real(8) :: denom
+        denom = 2d0 * Nb + 1d0
+        fe = (Nb + 1d0) / denom
+        fa = Nb / denom
+    end subroutine eph_thermal_split
 
 end module sbe_superres_ssbe

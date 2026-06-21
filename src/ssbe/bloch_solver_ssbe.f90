@@ -84,11 +84,13 @@ module bloch_solver_ssbe
         real(8) :: eph_nusat_au = 0d0   ! saturation rate nu_sat [1/a.u.time]
         real(8) :: eph_eps0_au  = 0d0   ! nu(eps) onset eps_0 [Ha]
         real(8) :: eph_n        = 2d0   ! nu(eps) shape exponent
-        real(8) :: eph_nb       = 0d0   ! Bose factor N_B(hw, T_ph) (frozen)
-        real(8) :: eph_hw_au    = 0d0   ! effective phonon energy hw [Ha]
         real(8) :: eph_sigma_au = 0d0   ! energy-bin width sigma_E [Ha]
         real(8) :: eph_ecbm_au  = 0d0   ! field-free CBM [Ha]
         real(8) :: eph_evbm_au  = 0d0   ! field-free VBM [Ha]
+        integer :: eph_nph      = 0     ! number of phonon modes in the table
+        real(8), allocatable :: eph_hw(:)   ! phonon energies hw_p [Ha]
+        real(8), allocatable :: eph_nb(:)   ! Bose factors N_B(hw_p, T_ph)
+        real(8), allocatable :: eph_wrel(:) ! relative golden-rule weights (sum=1)
 
         real(8) :: coul_pref     = 0d0  ! strength * 4 pi / (eps * Omega_cell * Nk)
         real(8) :: coul_screen2  = 0d0  ! kappa^2 [1/Bohr^2] (Yukawa regulariser)
@@ -111,6 +113,56 @@ module bloch_solver_ssbe
     real(8), parameter :: yoshida_p2 = -1.70241438392d0
 
 contains
+
+! Build the per-material phonon table for the e-ph channel: energies hw_p [Ha],
+! Bose factors N_B(hw_p, T), and normalized relative golden-rule weights
+! w_p ~ D_p^2/hw_p (the common pi/rho factors cancel in the per-material
+! normalization). Si: 6 intervalley (g/f) phonons. GaAs: the Frohlich LO plus
+! 5 intervalley; the polar LO is given the dominant weight (sum of the
+! intervalley weights) -- a documented skeleton choice (the full Frohlich asinh
+! energy-dependence is a later refinement). [tables + sources in 02_constants]
+subroutine init_eph_phonon_table(sbe, material, kT_au)
+    use sbe_superres_ssbe, only: bose_factor, mev_to_ha, &
+        SI_N_PHONON, SI_PHONON_E_MEV, SI_PHONON_D_1E8EVCM, &
+        GAAS_N_IV, GAAS_IV_E_MEV, GAAS_IV_D_EVANG, GAAS_HW_LO_MEV
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    character(*), intent(in) :: material
+    real(8),      intent(in) :: kT_au
+    integer :: np, p
+    real(8) :: wsum
+
+    if (material == 'GaAs') then
+        np = GAAS_N_IV + 1                 ! Frohlich LO + 5 intervalley
+    else
+        np = SI_N_PHONON                   ! Si: 6 intervalley (g/f)
+    end if
+    sbe%eph_nph = np
+    allocate(sbe%eph_hw(np), sbe%eph_nb(np), sbe%eph_wrel(np))
+
+    if (material == 'GaAs') then
+        wsum = 0d0
+        do p = 1, GAAS_N_IV
+            sbe%eph_hw(p + 1)   = mev_to_ha(GAAS_IV_E_MEV(p))
+            sbe%eph_wrel(p + 1) = GAAS_IV_D_EVANG(p)**2 / GAAS_IV_E_MEV(p)
+            wsum = wsum + sbe%eph_wrel(p + 1)
+        end do
+        sbe%eph_hw(1)   = mev_to_ha(GAAS_HW_LO_MEV)
+        sbe%eph_wrel(1) = wsum             ! polar LO ~ dominant (50% after norm)
+    else
+        do p = 1, SI_N_PHONON
+            sbe%eph_hw(p)   = mev_to_ha(SI_PHONON_E_MEV(p))
+            sbe%eph_wrel(p) = SI_PHONON_D_1E8EVCM(p)**2 / SI_PHONON_E_MEV(p)
+        end do
+    end if
+
+    wsum = sum(sbe%eph_wrel(1:np))
+    do p = 1, np
+        sbe%eph_wrel(p) = sbe%eph_wrel(p) / max(wsum, 1d-300)
+        sbe%eph_nb(p)   = bose_factor(sbe%eph_hw(p), kT_au)
+    end do
+end subroutine init_eph_phonon_table
+
 
 subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     use util_ssbe
@@ -372,23 +424,17 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     ! =========================================================================
     sbe%flag_eph = (yn_sbe_eph == 'y')
     if (sbe%flag_eph) then
-        ! Effective optical-phonon energy: GaAs LO 36 meV, Si g-LO 63 meV.
-        if (trim(epm_material) == 'GaAs') then
-            sbe%eph_hw_au = 36.0d-3 / au_ev
-        else
-            sbe%eph_hw_au = 63.0d-3 / au_ev      ! Si (and default)
-        end if
-        ! Saturation rate: material default if not set (Si 1.3e14, GaAs 1e14).
+        call init_eph_phonon_table(sbe, trim(epm_material), kB_au * sbe_eph_temperature_k)
+        ! Saturation rate (overall magnitude cap): material default if not set.
         if (sbe_eph_nu_sat > 0d0) then
             sbe%eph_nusat_au = sbe_eph_nu_sat * (au_fs * 1d-15)
         else if (trim(epm_material) == 'GaAs') then
-            sbe%eph_nusat_au = 1.0d14 * (au_fs * 1d-15)
+            sbe%eph_nusat_au = 1.0d14 * (au_fs * 1d-15)   ! [Fischetti IEEE TED 38, 634]
         else
-            sbe%eph_nusat_au = 1.3d14 * (au_fs * 1d-15)
+            sbe%eph_nusat_au = 1.3d14 * (au_fs * 1d-15)   ! Si [Meng PRB 91, 075201]
         end if
         sbe%eph_eps0_au = sbe_eph_eps0_ev / au_ev
         sbe%eph_n       = sbe_eph_n
-        sbe%eph_nb      = bose_factor(sbe%eph_hw_au, kB_au * sbe_eph_temperature_k)
         if (sbe_search_sigma_e_ev > 0d0) then
             sbe%eph_sigma_au = sbe_search_sigma_e_ev / au_ev
         else
@@ -400,10 +446,13 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
         sbe%eph_evbm_au = maxval(gs%eigen(homo_idx, :))
         if (irank == 0) then
             write(*, '(a)') '# electron-phonon population relaxation (Part C5) enabled:'
-            write(*, '(a,f8.2,a,f8.2,a)') '#   hw = ', sbe%eph_hw_au*au_ev*1d3, &
-                ' meV, N_B = ', sbe%eph_nb, ''
-            write(*, '(a,ES12.5,a,f6.3,a)') '#   nu_sat = ', sbe%eph_nusat_au, &
-                ' 1/a.u.t, eps0 = ', sbe%eph_eps0_au*au_ev, ' eV'
+            write(*, '(a,i2,a,ES12.5,a)') '#   ', sbe%eph_nph, &
+                ' phonon modes; nu_sat = ', sbe%eph_nusat_au, ' 1/a.u.t'
+            do ib = 1, sbe%eph_nph
+                write(*, '(a,i2,a,f7.2,a,f6.3,a,f6.3)') '#   mode ', ib, ': hw = ', &
+                    sbe%eph_hw(ib)*au_ev*1d3, ' meV, N_B = ', sbe%eph_nb(ib), &
+                    ', weight = ', sbe%eph_wrel(ib)
+            end do
             write(*, '(a)') '#   k-local skeleton; CPTP amplitude damping; toggle Kuhn-Zurek off'
         end if
     end if
@@ -1250,7 +1299,8 @@ end subroutine apply_impact_ionization
 ! [Jacoboni-Reggiani RMP 55, 645 (1983); nu sat: Meng et al. PRB 91, 075201]
 !=============================================================================
 subroutine apply_eph_relaxation(sbe, nba, rho_ad, evals, Ac, tau)
-    use sbe_superres_ssbe, only: nu_saturation, gaussian_shape, amp_damp_channel
+    use sbe_superres_ssbe, only: nu_saturation, gaussian_shape, amp_damp_channel, &
+                                 eph_thermal_split
     implicit none
     type(s_sbe_bloch_solver), intent(in)    :: sbe
     integer,                  intent(in)    :: nba
@@ -1259,13 +1309,12 @@ subroutine apply_eph_relaxation(sbe, nba, rho_ad, evals, Ac, tau)
     real(8),                  intent(in)    :: Ac(3)
     real(8),                  intent(in)    :: tau
 
-    integer :: ia, ib, b_em, b_ab
-    real(8) :: f, a2half, eps_kin, nu, hw, sig, ekin
+    integer :: ia, ib, b_em, b_ab, ip
+    real(8) :: f, a2half, eps_kin, nu, hw, sig, ekin, fe, fa
     real(8) :: best_em, best_ab, dE, shp, gam, blk
     real(8), parameter :: occ_eps = 1d-12
 
     f = sbe%occ_max
-    hw = sbe%eph_hw_au
     sig = sbe%eph_sigma_au
     a2half = 0.5d0 * dot_product(Ac, Ac)
 
@@ -1275,37 +1324,44 @@ subroutine apply_eph_relaxation(sbe, nba, rho_ad, evals, Ac, tau)
         ! restore the dropped A^2/2 (Houston identity), as in impact ionization.
         ekin = evals(ia) + a2half
         eps_kin = max(ekin - sbe%eph_ecbm_au, sbe%eph_evbm_au - ekin, 0d0)
+        ! saturating collision rate = total magnitude cap for this level
         nu = nu_saturation(eps_kin, sbe%eph_nusat_au, sbe%eph_eps0_au, sbe%eph_n)
         if (nu * tau < 1d-14) cycle
 
-        ! best energy-matched emission (below) and absorption (above) partners
-        b_em = 0; best_em = huge(1d0)
-        b_ab = 0; best_ab = huge(1d0)
-        do ib = 1, nba
-            if (ib == ia) cycle
-            if (evals(ib) < evals(ia)) then
-                dE = abs((evals(ia) - evals(ib)) - hw)
-                if (dE < best_em) then; best_em = dE; b_em = ib; end if
-            else
-                dE = abs((evals(ib) - evals(ia)) - hw)
-                if (dE < best_ab) then; best_ab = dE; b_ab = ib; end if
+        ! sum over phonon modes: each mode p relaxes the carrier to the partner
+        ! level energy-matched to eps_a -/+ hw_p, split into emission/absorption
+        ! (detailed balance), weighted by the mode weight w_p (sum_p w_p = 1) so
+        ! the total channel rate stays ~ nu(eps).
+        do ip = 1, sbe%eph_nph
+            hw = sbe%eph_hw(ip)
+            call eph_thermal_split(sbe%eph_nb(ip), fe, fa)
+            ! best energy-matched emission (below) and absorption (above)
+            b_em = 0; best_em = huge(1d0)
+            b_ab = 0; best_ab = huge(1d0)
+            do ib = 1, nba
+                if (ib == ia) cycle
+                if (evals(ib) < evals(ia)) then
+                    dE = abs((evals(ia) - evals(ib)) - hw)
+                    if (dE < best_em) then; best_em = dE; b_em = ib; end if
+                else
+                    dE = abs((evals(ib) - evals(ia)) - hw)
+                    if (dE < best_ab) then; best_ab = dE; b_ab = ib; end if
+                end if
+            end do
+
+            if (b_em > 0) then
+                shp = gaussian_shape(best_em, sig)
+                blk = min(max(1d0 - real(rho_ad(b_em, b_em)) / f, 0d0), 1d0)
+                gam = nu * sbe%eph_wrel(ip) * fe * shp * blk
+                call amp_damp_channel(nba, rho_ad, ia, b_em, gam, tau)
+            end if
+            if (b_ab > 0 .and. fa > 0d0) then
+                shp = gaussian_shape(best_ab, sig)
+                blk = min(max(1d0 - real(rho_ad(b_ab, b_ab)) / f, 0d0), 1d0)
+                gam = nu * sbe%eph_wrel(ip) * fa * shp * blk
+                call amp_damp_channel(nba, rho_ad, ia, b_ab, gam, tau)
             end if
         end do
-
-        ! emission a -> b_em, rate nu (N_B+1) * shape * Pauli(b_em)
-        if (b_em > 0) then
-            shp = gaussian_shape(best_em, sig)
-            blk = min(max(1d0 - real(rho_ad(b_em, b_em)) / f, 0d0), 1d0)
-            gam = nu * (sbe%eph_nb + 1d0) * shp * blk
-            call amp_damp_channel(nba, rho_ad, ia, b_em, gam, tau)
-        end if
-        ! absorption a -> b_ab, rate nu N_B * shape * Pauli(b_ab)
-        if (b_ab > 0 .and. sbe%eph_nb > 0d0) then
-            shp = gaussian_shape(best_ab, sig)
-            blk = min(max(1d0 - real(rho_ad(b_ab, b_ab)) / f, 0d0), 1d0)
-            gam = nu * sbe%eph_nb * shp * blk
-            call amp_damp_channel(nba, rho_ad, ia, b_ab, gam, tau)
-        end if
     end do
 end subroutine apply_eph_relaxation
 
