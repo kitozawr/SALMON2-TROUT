@@ -25,11 +25,11 @@ Roadmap source: the Si + nonlocal-super-compute task (Parts A–F) plus future c
 | **C** | Nonlocal super-compute (`yn_sbe_superres`) | 🚧 | #44 | flags scaffolded (all OFF); primitives done; integration pending |
 | C0 | Flags scaffolding (10 params, default OFF) | ✅ | #44 | namelist read+bcast+log; default run byte-for-byte unchanged |
 | C-prim | Pure rate/search primitives module `sbe_superres_ssbe.f90` | ✅ | #44 | ν(ε), N_B, gaussian/rect bins, Fröhlich asinh, II rate, BGR, Si/GaAs tables |
-| C2 | Houston-basis adiabatic populations reuse | ⬜ | — | reuse existing ZHEEV of H_VG |
-| C3 | Energy-bin final-state SEARCH (enumeration, expanding radius) | 🚧 | — | bin primitives ✅; partner enumeration pending |
-| C4 | Nonlocal impact ionization (momentum exchange) | ⬜ | — | needs C3 + ring (D) |
-| C5 | e-ph population-relaxing Lindblad (Si phonons, GaAs Fröhlich) | 🚧 | — | rate primitives ✅; golden-rule assembly + Lindblad integration pending |
-| C6 | T1/T2 bookkeeping (½ only on T1) | ⬜ | — | unit test: Hermitian dissipator conserves populations |
+| C2 | Houston-basis adiabatic populations reuse | ✅ | #44 | e-ph runs in the existing houston_dissipate ZHEEV basis (t2 = U†ρU) |
+| C3 | Energy-bin final-state SEARCH (enumeration, expanding radius) | 🚧 | #44 | bin primitives ✅; nearest ±ħω partner used in C5; full expanding-radius enum pending (nonlocal C4) |
+| C4 | Nonlocal impact ionization (momentum exchange) | ⬜ | — | needs C3 expanding search + ring (D) |
+| C5 | e-ph population-relaxing Lindblad (k-local skeleton) | ✅ | #44 | single eff. phonon, ν(ε) sat, N_B emis/abs, Pauli-clamped, CPTP; trace=32 conserved end-to-end. Full phonon-table sum + nonlocal + golden-rule prefactor pending |
+| C6 | CPTP gate (amplitude-damping map test) | ✅ | #44 | trace, qubit positivity det≥0, transfer formulas, Hermiticity, γ=0 identity |
 | C7 | BGR-gated II threshold | ⬜ | — | `yn_sbe_bgr_threshold`, gate 5e18 |
 | C8 | Dissipator sub-cycling | ⬜ | — | when ν·(h/2) ≳ 0.2 |
 | **D** | Ring/pipeline MPI (replace all-gather in super-mode) | ⬜ | — | one fused pass for Σ^HF + nl-II + nl-eph |
@@ -61,7 +61,12 @@ Roadmap source: the Si + nonlocal-super-compute task (Parts A–F) plus future c
 | `test_ii_form_switch.py` | Part B | rate γ=P(ε−E_th)^a scaling for a=2 vs 4 |
 | `test_hf_sublattice_proj.py` | Part E | proj zeroes inter-sublattice, keeps diag, Hermitian; real GaAs weights |
 | `test_superres_rates.f90` | Part C primitives | ν(ε) limits, N_B, energy-bin area/peak, Fröhlich asinh, II 2^a scaling, BGR −19/−41 meV, data tables (standalone gfortran) |
+| `test_eph_cptp.f90` | Part C5/C6 | amplitude-damping map: trace, qubit positivity (det≥0), transfer formulas, coherence damping, Hermiticity, γ=0 identity |
 | _(add per increment)_ | | |
+
+End-to-end smoke (manual): scalar GaAs 4³, `yn_sbe_superres='y'` + `yn_sbe_eph='y'`
+→ runs stable, correct diagnostics (ħω=36 meV, N_B=0.33 @300 K), trace = 32.000
+conserved over all steps (CPTP at the dynamics level).
 
 End-to-end smoke (manual, not in run_all): scalar GaAs 4³, `yn_sbe_coulomb='y'`
 + `yn_sbe_hf_sublattice_proj='y'`, weak field → runs stable, finite, projection
@@ -73,24 +78,25 @@ Run all: `python3 tests/run_all.py` (each test prints PASS/FAIL and exits nonzer
 ---
 
 ## Next action on resume
-Done so far in Part C: flags scaffolding (C0 ✅) and the pure rate/search
-primitives module `sbe_superres_ssbe.f90` (C-prim ✅, Fortran-unit-tested).
+Part C so far: C0 (flags), C-prim (primitives), C2 (Houston reuse), C5 (k-local
+e-ph Lindblad), C6 (CPTP gate) all ✅ and tested. The e-ph channel currently
+uses ONE effective optical phonon and `sbe_eph_nu_sat` as the rate scale.
 
-**Next increment — C5 e-ph Lindblad, assembled but still inert by default:**
-1. Add an amplitude-damping helper that, in the Houston basis, transfers
-   adiabatic population a→b at a frozen rate ν with the −½{L†L,ρ} coherence
-   damping (mirror `apply_damping_channel`, but population-RELAXING so
-   Γ_aa ≠ 0). This is the e-ph jump L = √ν c†_b c_a.
-2. Build `apply_eph_relaxation(...)` (called only when `yn_sbe_eph='y'`):
-   for each adiabatic level, total rate ν_total(ε) from `nu_saturation` +
-   intervalley channels (energy-bin matched partner levels via `gaussian_bin`),
-   emission/absorption weighted by N_B; Pauli factors clamped [0,1];
-   predictor-corrector (C1/C6); sub-cycling (C8). Insert as a Strang half-step
-   inside `houston_dissipate` (k-local first; nonlocal/ring later).
-3. **C6 CPTP unit test (gate):** a Hermitian-only / pure-dephasing dissipator
-   must conserve populations exactly (Γ_aa=0); the population-relaxing channel
-   must keep Σρ_aa constant (trace) and all ρ_aa∈[0,1]. Add as a Fortran test.
-Keep `yn_sbe_superres`/`yn_sbe_eph` OFF by default so GaAs runs are unchanged.
-Golden-rule deformation-potential PREFACTOR (D, ρ_mass, ω → a.u.) is the one
-remaining unit to add to the primitives module (with its own conversion test)
-before wiring real rates; until then use `sbe_eph_nu_sat` as the scale.
+**Next increment — physical e-ph rates (still k-local, gated OFF):**
+1. Add the golden-rule deformation-potential PREFACTOR primitive to
+   `sbe_superres_ssbe` (convert D [1e8 eV/cm or eV/Å], ρ_mass [g/cm³],
+   ħω [meV] → a rate scale in a.u.), with its own unit-conversion test against
+   a hand-computed value. Add the Fröhlich polar-optical rate assembly for GaAs
+   (using `frohlich_hi_factor`).
+2. Replace the single effective phonon in `apply_eph_relaxation` with the SUM
+   over the material phonon table (Si 6 intervalley g/f; GaAs Fröhlich +
+   5 intervalley): each phonon contributes emission/absorption to its
+   energy-matched partner; keep the ν(ε) saturation as the high-energy cap.
+   Add a test that the total rate saturates to ν_sat and detailed balance holds
+   (emission/absorption ratio = (N_B+1)/N_B).
+3. Then C7 (BGR-gated II threshold, `yn_sbe_bgr_threshold`) — small, uses
+   `bgr_gap_shift_ev` + the running carrier density; and C8 (sub-cycling) when
+   ν_max·(h/2) ≳ 0.2.
+Nonlocal momentum-exchange versions of II (C4) and e-ph + the ring MPI (D) come
+after the serial k-local super-mode is physically validated (Chefonov bleaching
+staging in wiki/04). Keep everything behind `yn_sbe_superres`/`yn_sbe_eph` OFF.

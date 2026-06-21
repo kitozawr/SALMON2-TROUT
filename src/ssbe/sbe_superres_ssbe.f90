@@ -25,7 +25,8 @@ module sbe_superres_ssbe
     real(8), parameter :: PI = 3.14159265358979323846d0
 
     public :: nu_saturation, bose_factor, gaussian_bin, rect_bin, &
-              frohlich_hi_factor, ii_rate_general, bgr_gap_shift_ev
+              frohlich_hi_factor, ii_rate_general, bgr_gap_shift_ev, &
+              gaussian_shape, amp_damp_channel
 
     ! =====================================================================
     ! Silicon intervalley deformation potentials -- Pop "new" set (default).
@@ -154,6 +155,51 @@ contains
             g = P * d ** a
         end if
     end function ii_rate_general
+
+    ! Peak-normalized Gaussian energy-conservation weight (dimensionless, in
+    ! [0,1]): exp(-dE^2 / (2 sigma^2)). Used to weight a discrete partner
+    ! transition by how well it conserves energy (vs gaussian_bin, which is
+    ! area-normalized for converting a state sum into a rate).
+    pure function gaussian_shape(dE, sigma) result(w)
+        real(8), intent(in) :: dE, sigma
+        real(8) :: w, z
+        if (sigma <= 0d0) then
+            w = merge(1d0, 0d0, dE == 0d0)
+        else
+            z = dE / sigma
+            w = exp(-0.5d0 * z * z)
+        end if
+    end function gaussian_shape
+
+    ! Exact finite-time amplitude-damping (population-transfer) CPTP map for a
+    ! single GKLS jump L = sqrt(gamma) |dst><src| in the basis where src,dst are
+    ! basis states (here the Houston/adiabatic basis):
+    !   rho_ss -> e^{-g} rho_ss ;  rho_dd -> rho_dd + (1 - e^{-g}) rho_ss
+    !   rho_sb -> e^{-g/2} rho_sb  and  rho_bs -> e^{-g/2} rho_bs  (b /= s)
+    ! with g = gamma*tau. Trace-preserving and completely positive for any
+    ! gamma,tau >= 0 (a genuine GKLS map). This is the building block of the
+    ! population-relaxing electron-phonon channel; the impact-ionization channel
+    ! uses an identical (separately validated) copy in bloch_solver_ssbe.
+    ! [Lindblad, Commun. Math. Phys. 48, 119 (1976)]
+    subroutine amp_damp_channel(nba, rho, i_src, i_dst, gamma, tau)
+        integer,    intent(in)    :: nba, i_src, i_dst
+        complex(8), intent(inout) :: rho(nba, nba)
+        real(8),    intent(in)    :: gamma, tau
+        real(8) :: g, gh, transfer
+        integer :: b
+        if (i_src == i_dst) return
+        if (gamma * tau < 1d-14) return
+        g  = exp(-gamma * tau)
+        gh = sqrt(g)
+        transfer = (1d0 - g) * real(rho(i_src, i_src))
+        do b = 1, nba
+            if (b == i_src) cycle
+            rho(i_src, b) = gh * rho(i_src, b)
+            rho(b, i_src) = gh * rho(b, i_src)
+        end do
+        rho(i_src, i_src) = g * rho(i_src, i_src)
+        rho(i_dst, i_dst) = rho(i_dst, i_dst) + transfer
+    end subroutine amp_damp_channel
 
     ! Electron-hole-plasma bandgap-renormalization cube-root law (C7):
     !   Delta E_gap [eV] = -K * (n [cm^-3])^(1/3),  K ~ 1.9e-8 eV.cm.

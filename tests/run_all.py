@@ -23,6 +23,7 @@ ROOT = os.path.dirname(HERE)
 # Fortran tests and the (self-contained) module sources they compile against.
 FORTRAN_DEPS = {
     "test_superres_rates.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
+    "test_eph_cptp.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
 }
 
 

@@ -74,6 +74,22 @@ module bloch_solver_ssbe
         ! von Neumann commutator. Frozen over a dt step (mean-field predictor).
         logical :: flag_coulomb = .false.
         logical :: flag_hf_subproj = .false. ! project Sigma^HF onto FCC sublattice blocks
+
+        ! Population-relaxing electron-phonon Lindblad (Part C5, super-mode).
+        ! k-local skeleton: each adiabatic level relaxes toward an energy-matched
+        ! (+-hw) partner at the saturated rate nu(eps_kin), emission ~ (N_B+1),
+        ! absorption ~ N_B, Pauli-blocked. CPTP (amplitude damping). Off unless
+        ! yn_sbe_eph='y'. Drives THz bleaching (collision-rate saturation).
+        logical :: flag_eph     = .false.
+        real(8) :: eph_nusat_au = 0d0   ! saturation rate nu_sat [1/a.u.time]
+        real(8) :: eph_eps0_au  = 0d0   ! nu(eps) onset eps_0 [Ha]
+        real(8) :: eph_n        = 2d0   ! nu(eps) shape exponent
+        real(8) :: eph_nb       = 0d0   ! Bose factor N_B(hw, T_ph) (frozen)
+        real(8) :: eph_hw_au    = 0d0   ! effective phonon energy hw [Ha]
+        real(8) :: eph_sigma_au = 0d0   ! energy-bin width sigma_E [Ha]
+        real(8) :: eph_ecbm_au  = 0d0   ! field-free CBM [Ha]
+        real(8) :: eph_evbm_au  = 0d0   ! field-free VBM [Ha]
+
         real(8) :: coul_pref     = 0d0  ! strength * 4 pi / (eps * Omega_cell * Nk)
         real(8) :: coul_screen2  = 0d0  ! kappa^2 [1/Bohr^2] (Yukawa regulariser)
         integer :: icomm         = 0    ! MPI communicator (for the non-local exchange sum)
@@ -106,7 +122,11 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
                              sbe_ii_form, sbe_ii_exponent, &
                              yn_sbe_coulomb, sbe_coulomb_epsilon, &
                              sbe_coulomb_strength, sbe_coulomb_screen_au, &
-                             yn_sbe_hf_sublattice_proj
+                             yn_sbe_hf_sublattice_proj, &
+                             yn_sbe_eph, sbe_eph_temperature_k, sbe_eph_nu_sat, &
+                             sbe_eph_eps0_ev, sbe_eph_n, sbe_search_sigma_e_ev, &
+                             epm_material
+    use sbe_superres_ssbe, only: bose_factor
     use math_constants, only: pi
     use phys_constants, only: au_fs, kB_au, au_ev
     implicit none
@@ -341,6 +361,50 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
             else
                 write(*, '(a)') '#   sublattice projection OFF (no unfold weights / disabled)'
             end if
+        end if
+    end if
+
+    ! =========================================================================
+    ! Population-relaxing electron-phonon Lindblad (Part C5, super-mode).
+    ! k-local skeleton with a single effective optical phonon. Off by default.
+    ! [Jacoboni-Reggiani RMP 55, 645 (1983); nu saturation: Meng et al.,
+    !  PRB 91, 075201 (2015); Fischetti-Laux PRB 38, 9721 (1988)]
+    ! =========================================================================
+    sbe%flag_eph = (yn_sbe_eph == 'y')
+    if (sbe%flag_eph) then
+        ! Effective optical-phonon energy: GaAs LO 36 meV, Si g-LO 63 meV.
+        if (trim(epm_material) == 'GaAs') then
+            sbe%eph_hw_au = 36.0d-3 / au_ev
+        else
+            sbe%eph_hw_au = 63.0d-3 / au_ev      ! Si (and default)
+        end if
+        ! Saturation rate: material default if not set (Si 1.3e14, GaAs 1e14).
+        if (sbe_eph_nu_sat > 0d0) then
+            sbe%eph_nusat_au = sbe_eph_nu_sat * (au_fs * 1d-15)
+        else if (trim(epm_material) == 'GaAs') then
+            sbe%eph_nusat_au = 1.0d14 * (au_fs * 1d-15)
+        else
+            sbe%eph_nusat_au = 1.3d14 * (au_fs * 1d-15)
+        end if
+        sbe%eph_eps0_au = sbe_eph_eps0_ev / au_ev
+        sbe%eph_n       = sbe_eph_n
+        sbe%eph_nb      = bose_factor(sbe%eph_hw_au, kB_au * sbe_eph_temperature_k)
+        if (sbe_search_sigma_e_ev > 0d0) then
+            sbe%eph_sigma_au = sbe_search_sigma_e_ev / au_ev
+        else
+            sbe%eph_sigma_au = 0.2d0 / au_ev     ! grid-matched default (Stobbe 0.2 eV)
+        end if
+        if (homo_idx + 1 <= gs%nb) then
+            sbe%eph_ecbm_au = minval(gs%eigen(homo_idx + 1, :))
+        end if
+        sbe%eph_evbm_au = maxval(gs%eigen(homo_idx, :))
+        if (irank == 0) then
+            write(*, '(a)') '# electron-phonon population relaxation (Part C5) enabled:'
+            write(*, '(a,f8.2,a,f8.2,a)') '#   hw = ', sbe%eph_hw_au*au_ev*1d3, &
+                ' meV, N_B = ', sbe%eph_nb, ''
+            write(*, '(a,ES12.5,a,f6.3,a)') '#   nu_sat = ', sbe%eph_nusat_au, &
+                ' 1/a.u.t, eps0 = ', sbe%eph_eps0_au*au_ev, ' eV'
+            write(*, '(a)') '#   k-local skeleton; CPTP amplitude damping; toggle Kuhn-Zurek off'
         end if
     end if
 
@@ -962,6 +1026,11 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
         call apply_impact_ionization(sbe, nba, t2, evals, Ac, tau, wsub_branch, sbe%flag_unfold_ii)
     end if
 
+    ! k-local population-relaxing electron-phonon channel (super-mode)
+    if (sbe%flag_eph) then
+        call apply_eph_relaxation(sbe, nba, t2, evals, Ac, tau)
+    end if
+
     ! rho = U rho~ U^dagger
     call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0, 0d0), W,  nba, t2, nba, dcmplx(0d0, 0d0), t1, nba)
     call ZGEMM('N', 'C', nba, nba, nba, dcmplx(1d0, 0d0), t1, nba, W,  nba, dcmplx(0d0, 0d0), rho, nba)
@@ -1161,6 +1230,84 @@ subroutine apply_impact_ionization(sbe, nba, rho_ad, evals, Ac, tau, wsub, use_u
         end do
     end do
 end subroutine apply_impact_ionization
+
+
+!=============================================================================
+! Population-relaxing electron-phonon Lindblad (Part C5), k-local skeleton, in
+! the Houston/adiabatic basis. Unlike Kuhn-Zurek pure dephasing this channel
+! RELAXES populations (Gamma_aa != 0) -- it cools hot carriers toward the band
+! edges and is what reproduces THz bleaching (collision-rate saturation).
+!
+! Model (single effective optical phonon hw): each adiabatic level a with a
+! carrier present relaxes to the energy-matched partner level b ~ eps_a -/+ hw:
+!   emission   a -> b (b below, eps_a - eps_b ~ hw): rate nu(eps_a)(N_B+1)
+!   absorption a -> b (b above, eps_b - eps_a ~ hw): rate nu(eps_a) N_B
+! weighted by a Gaussian energy-conservation shape exp(-dE^2/2 sigma^2) and the
+! target Pauli blocker (1 - rho_bb/f) clamped to [0,1]. nu(eps) is the smooth
+! saturating collision rate; eps = carrier kinetic energy from the nearest band
+! edge (electron above CBM or hole below VBM). Each transfer is the exact CPTP
+! amplitude-damping map amp_damp_channel -> the whole channel is CPTP.
+! [Jacoboni-Reggiani RMP 55, 645 (1983); nu sat: Meng et al. PRB 91, 075201]
+!=============================================================================
+subroutine apply_eph_relaxation(sbe, nba, rho_ad, evals, Ac, tau)
+    use sbe_superres_ssbe, only: nu_saturation, gaussian_shape, amp_damp_channel
+    implicit none
+    type(s_sbe_bloch_solver), intent(in)    :: sbe
+    integer,                  intent(in)    :: nba
+    complex(8),               intent(inout) :: rho_ad(nba, nba)
+    real(8),                  intent(in)    :: evals(nba)
+    real(8),                  intent(in)    :: Ac(3)
+    real(8),                  intent(in)    :: tau
+
+    integer :: ia, ib, b_em, b_ab
+    real(8) :: f, a2half, eps_kin, nu, hw, sig, ekin
+    real(8) :: best_em, best_ab, dE, shp, gam, blk
+    real(8), parameter :: occ_eps = 1d-12
+
+    f = sbe%occ_max
+    hw = sbe%eph_hw_au
+    sig = sbe%eph_sigma_au
+    a2half = 0.5d0 * dot_product(Ac, Ac)
+
+    do ia = 1, nba
+        if (real(rho_ad(ia, ia)) < occ_eps) cycle
+        ! carrier kinetic energy from the nearest band edge (electron or hole);
+        ! restore the dropped A^2/2 (Houston identity), as in impact ionization.
+        ekin = evals(ia) + a2half
+        eps_kin = max(ekin - sbe%eph_ecbm_au, sbe%eph_evbm_au - ekin, 0d0)
+        nu = nu_saturation(eps_kin, sbe%eph_nusat_au, sbe%eph_eps0_au, sbe%eph_n)
+        if (nu * tau < 1d-14) cycle
+
+        ! best energy-matched emission (below) and absorption (above) partners
+        b_em = 0; best_em = huge(1d0)
+        b_ab = 0; best_ab = huge(1d0)
+        do ib = 1, nba
+            if (ib == ia) cycle
+            if (evals(ib) < evals(ia)) then
+                dE = abs((evals(ia) - evals(ib)) - hw)
+                if (dE < best_em) then; best_em = dE; b_em = ib; end if
+            else
+                dE = abs((evals(ib) - evals(ia)) - hw)
+                if (dE < best_ab) then; best_ab = dE; b_ab = ib; end if
+            end if
+        end do
+
+        ! emission a -> b_em, rate nu (N_B+1) * shape * Pauli(b_em)
+        if (b_em > 0) then
+            shp = gaussian_shape(best_em, sig)
+            blk = min(max(1d0 - real(rho_ad(b_em, b_em)) / f, 0d0), 1d0)
+            gam = nu * (sbe%eph_nb + 1d0) * shp * blk
+            call amp_damp_channel(nba, rho_ad, ia, b_em, gam, tau)
+        end if
+        ! absorption a -> b_ab, rate nu N_B * shape * Pauli(b_ab)
+        if (b_ab > 0 .and. sbe%eph_nb > 0d0) then
+            shp = gaussian_shape(best_ab, sig)
+            blk = min(max(1d0 - real(rho_ad(b_ab, b_ab)) / f, 0d0), 1d0)
+            gam = nu * sbe%eph_nb * shp * blk
+            call amp_damp_channel(nba, rho_ad, ia, b_ab, gam, tau)
+        end if
+    end do
+end subroutine apply_eph_relaxation
 
 
 ! Exact finite-time map of a single Lindblad jump channel L = sqrt(Gamma)|f><i|
