@@ -51,6 +51,19 @@ module bloch_solver_ssbe
         integer :: nv_act       = 0     ! valence branches inside the active subspace
         real(8) :: occ_max      = 2d0   ! 2 (scalar bands) / 1 (spinor bands)
 
+        ! Bandgap-renormalization-coupled impact-ionization threshold (Part C7).
+        ! When the excited carrier density exceeds bgr_n_gate, the II threshold
+        ! shrinks: E_th(t) = E_th0 - |K n(t)^(1/3)|. [Vashishta-Kalia PRB 25, 6492]
+        logical :: flag_bgr     = .false.
+        real(8) :: ii_eth0_au   = 0d0   ! fixed input threshold E_th0 [Ha]
+        real(8) :: bgr_n_gate   = 5d18  ! gate density [cm^-3]
+        real(8) :: bgr_coeff    = 1.9d-8 ! K [eV cm]
+        integer :: homo_idx     = 0     ! HOMO band index (valence/conduction split)
+        real(8) :: au_dens_cm3  = 0d0   ! a.u.^-3 -> cm^-3 number-density conversion
+        ! Dissipator sub-cycling (Part C8): split the dissipative half-step into
+        ! diss_subcycle CPTP sub-steps when the collision rate is fast vs dt.
+        real(8) :: eph_numax_au = 0d0   ! estimated peak e-ph rate [1/a.u.time]
+
         ! Sublattice (band-unfolding) awareness of the impact-ionization
         ! channel. When the unfolding weights gs%unfold_w are available
         ! (non-zero), the k-local two-particle event is resolved per FCC
@@ -177,6 +190,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
                              yn_sbe_hf_sublattice_proj, &
                              yn_sbe_eph, sbe_eph_temperature_k, sbe_eph_nu_sat, &
                              sbe_eph_eps0_ev, sbe_eph_n, sbe_search_sigma_e_ev, &
+                             yn_sbe_bgr_threshold, sbe_bgr_n_gate, sbe_bgr_coeff, &
                              epm_material
     use sbe_superres_ssbe, only: bose_factor
     use math_constants, only: pi
@@ -444,6 +458,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
             sbe%eph_ecbm_au = minval(gs%eigen(homo_idx + 1, :))
         end if
         sbe%eph_evbm_au = maxval(gs%eigen(homo_idx, :))
+        sbe%eph_numax_au = 2d0 * sbe%eph_nusat_au   ! peak-rate estimate for sub-cycling
         if (irank == 0) then
             write(*, '(a)') '# electron-phonon population relaxation (Part C5) enabled:'
             write(*, '(a,i2,a,ES12.5,a)') '#   ', sbe%eph_nph, &
@@ -454,6 +469,26 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
                     ', weight = ', sbe%eph_wrel(ib)
             end do
             write(*, '(a)') '#   k-local skeleton; CPTP amplitude damping; toggle Kuhn-Zurek off'
+        end if
+    end if
+
+    ! =========================================================================
+    ! Bandgap-renormalization-coupled impact-ionization threshold (Part C7).
+    ! Bookkeeping (homo_idx, a.u.->cm^-3 density conversion) is always stored;
+    ! the threshold only moves when yn_sbe_bgr_threshold='y' AND impact
+    ! ionization is on AND the carrier density exceeds the gate. [Vashishta-Kalia]
+    ! =========================================================================
+    sbe%homo_idx    = homo_idx
+    sbe%au_dens_cm3 = 1d24 / (0.52917721067d0)**3     ! a.u.^-3 -> cm^-3 (Bohr in Angstrom)
+    sbe%ii_eth0_au  = sbe%ii_eth_au                   ! fixed reference threshold
+    sbe%flag_bgr    = (yn_sbe_bgr_threshold == 'y') .and. sbe%flag_impact
+    if (sbe%flag_bgr) then
+        sbe%bgr_n_gate = sbe_bgr_n_gate
+        sbe%bgr_coeff  = sbe_bgr_coeff
+        if (irank == 0) then
+            write(*, '(a)') '# BGR-coupled impact-ionization threshold (Part C7) enabled:'
+            write(*, '(a,ES12.5,a,ES12.5,a)') '#   gate n = ', sbe%bgr_n_gate, &
+                ' cm^-3, K = ', sbe%bgr_coeff, ' eV cm'
         end if
     end if
 
@@ -671,6 +706,10 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     ! (it is an MPI all-gather + convolution, must run collectively once).
     if (sbe%flag_coulomb .and. nba > 0) call compute_coulomb_selfenergy(sbe, gs)
 
+    ! BGR-coupled impact-ionization threshold (Part C7): shift E_th with the
+    ! running excited-carrier density (global reduction; once per step).
+    if (sbe%flag_bgr) call update_bgr_threshold(sbe, gs)
+
     !$omp parallel default(shared) &
     !$omp    private(ik, i, j, idir, in, im, isub, s) &
     !$omp    private(p_active, rho_a, H1, H2, HVG, eigen_active, V_begin, V_end, X_a, w_act_sub) &
@@ -817,6 +856,38 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     !$omp end parallel
 
 end subroutine dt_evolve_bloch_cf4
+
+
+! Part C7: update the impact-ionization threshold from the running excited
+! carrier density n(t). n = (excited electrons per cell, BZ-averaged) / V_cell,
+! converted to cm^-3 (the /N_k is already in the kweight average -- see the
+! density note in the wiki). Above the gate, E_th(t) = E_th0 - |K n^(1/3)|.
+subroutine update_bgr_threshold(sbe, gs)
+    use communication, only: comm_summation
+    use sbe_superres_ssbe, only: bgr_gap_shift_ev
+    use phys_constants, only: au_ev
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info),      intent(in)    :: gs
+    integer :: ik, ib
+    real(8) :: loc, glob, n_cm3, dEbgr_ev
+
+    loc = 0d0
+    do ik = sbe%ik_min, sbe%ik_max
+        do ib = sbe%homo_idx + 1, sbe%nb
+            loc = loc + real(sbe%rho(ib, ib, ik)) * gs%kweight(ik)
+        end do
+    end do
+    call comm_summation(loc, glob, sbe%icomm)
+    n_cm3 = (glob / sum(gs%kweight)) / gs%volume * sbe%au_dens_cm3
+
+    if (n_cm3 > sbe%bgr_n_gate) then
+        dEbgr_ev = bgr_gap_shift_ev(n_cm3, sbe%bgr_coeff)        ! negative [eV]
+        sbe%ii_eth_au = sbe%ii_eth0_au - abs(dEbgr_ev) / au_ev   ! threshold shrinks
+    else
+        sbe%ii_eth_au = sbe%ii_eth0_au
+    end if
+end subroutine update_bgr_threshold
 
 
 ! Build the instantaneous velocity-gauge Hamiltonian in the active subspace:
@@ -1034,8 +1105,8 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
 
     real(8)    :: evals(nba), ehat(3), Ac_norm
     complex(8) :: W(nba, nba), t1(nba, nba), t2(nba, nba)
-    real(8)    :: wsub_branch(4, nba), wcoef
-    integer :: i, j, idir, a, s
+    real(8)    :: wsub_branch(4, nba), wcoef, tau_sub_d
+    integer :: i, j, idir, a, s, m_sub, isub_d
 
     call eigen_zheev(H, evals, W)
 
@@ -1052,14 +1123,18 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
         end do
     end if
 
-    ! k-local impact-ionization channels (threshold-gated, frozen rates)
-    if (sbe%flag_impact) then
-        ! Project the field-free sublattice weights of the active Bloch bands
-        ! onto the instantaneous Houston branches a:
-        !   w_s(a) = sum_i |U_ia|^2 w_s(band_i),   sum_s w_s(a) = 1.
-        ! This makes the sublattice character field-aware (correct under the
-        ! Houston rotation U) and degenerates to the bare band weights at A=0.
-        if (sbe%flag_unfold_ii) then
+    ! k-local impact-ionization (threshold-gated) + population-relaxing e-ph.
+    ! These amplitude-damping channels are applied via Strang sub-cycling
+    ! (Part C8): split the half-step into m_sub CPTP sub-steps so that, when the
+    ! collision rate is fast vs the step (nu_max*tau >~ 0.2), the operator-split
+    ! error stays small and the per-sub-step re-read of the populations protects
+    ! the Pauli factors (a built-in predictor-corrector). Each sub-step is CPTP,
+    ! so positivity is never threatened. m_sub = 1 unless e-ph is active, so
+    ! impact-ionization-only runs are byte-for-byte unchanged.
+    if (sbe%flag_impact .or. sbe%flag_eph) then
+        ! field-aware Houston-branch sublattice weights for the unfolding-aware
+        ! impact ionization (computed once; field-frozen over the half-step)
+        if (sbe%flag_impact .and. sbe%flag_unfold_ii) then
             wsub_branch = 0d0
             do a = 1, nba
                 do i = 1, nba
@@ -1072,12 +1147,18 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
         else
             wsub_branch = 0d0
         end if
-        call apply_impact_ionization(sbe, nba, t2, evals, Ac, tau, wsub_branch, sbe%flag_unfold_ii)
-    end if
 
-    ! k-local population-relaxing electron-phonon channel (super-mode)
-    if (sbe%flag_eph) then
-        call apply_eph_relaxation(sbe, nba, t2, evals, Ac, tau)
+        m_sub = 1
+        if (sbe%flag_eph) &
+            m_sub = min(20, max(1, ceiling(10d0 * sbe%eph_numax_au * tau)))
+        tau_sub_d = tau / dble(m_sub)
+        do isub_d = 1, m_sub
+            if (sbe%flag_impact) &
+                call apply_impact_ionization(sbe, nba, t2, evals, Ac, tau_sub_d, &
+                                             wsub_branch, sbe%flag_unfold_ii)
+            if (sbe%flag_eph) &
+                call apply_eph_relaxation(sbe, nba, t2, evals, Ac, tau_sub_d)
+        end do
     end if
 
     ! rho = U rho~ U^dagger

@@ -30,8 +30,8 @@ Roadmap source: the Si + nonlocal-super-compute task (Parts A–F) plus future c
 | C4 | Nonlocal impact ionization (momentum exchange) | ⬜ | — | needs C3 expanding search + ring (D) |
 | C5 | e-ph population-relaxing Lindblad (k-local, full phonon table) | ✅ | #44 | Si 6 intervalley / GaAs LO+5; golden-rule weights D²/ħω (norm.), detailed-balance emis/abs, ν(ε) cap, Pauli-clamped, CPTP; trace=32 conserved. Nonlocal version pending (C4/D) |
 | C6 | CPTP gate (amplitude-damping map test) | ✅ | #44 | trace, qubit positivity det≥0, transfer formulas, Hermiticity, γ=0 identity |
-| C7 | BGR-gated II threshold | ⬜ | — | `yn_sbe_bgr_threshold`, gate 5e18 |
-| C8 | Dissipator sub-cycling | ⬜ | — | when ν·(h/2) ≳ 0.2 |
+| C7 | BGR-gated II threshold | ✅ | #44 | running n(t) shifts E_th=E_th0−|K n^⅓| above gate; end-to-end stable |
+| C8 | Dissipator sub-cycling | ✅ | #44 | m_sub from eph_numax·τ; II+e-ph split into m CPTP sub-steps; trace conserved at ν_sat=1e18. m=1 (unchanged) when e-ph off |
 | **D** | Ring/pipeline MPI (replace all-gather in super-mode) | ⬜ | — | one fused pass for Σ^HF + nl-II + nl-eph |
 | **F** | e-e scattering — architecture TODO hook only | ⬜ | — | comment + ring hook, no coefficients |
 | doc | Wiki pages 01–05 committed as long-term memory | 🚧 | #44+ | this commit establishes them |
@@ -79,23 +79,27 @@ Run all: `python3 tests/run_all.py` (each test prints PASS/FAIL and exits nonzer
 ---
 
 ## Next action on resume
-Part C so far: C0, C-prim, C2, C5 (now full phonon-table sum), C6 all ✅ tested.
-The k-local super-mode (e-ph cooling) is physically reasonable: Si 6 intervalley
-/ GaAs LO+5, golden-rule weights, detailed balance, ν(ε) saturation cap.
+The k-local super-mode feature set is COMPLETE and tested: C0, C-prim, C2, C5
+(full phonon table), C6, C7 (BGR threshold), C8 (sub-cycling) all ✅. Every
+new channel is CPTP (trace conserved end-to-end) and gated OFF by default.
 
-**Next increment — finish the k-local super-mode feature set (small, gated OFF):**
-1. **C7 BGR-gated II threshold** (`yn_sbe_bgr_threshold`): each step, compute the
-   excited carrier density n(t) (reuse the nex trace / cell volume), and if
-   n > `sbe_bgr_n_gate` shift the impact-ionization threshold
-   E_th(t) = E_th0 − |bgr_gap_shift_ev(n, K)| (K = `sbe_bgr_coeff`). Store
-   E_th0; update sbe%ii_eth_au before the dissipative step. Test: shift = 0
-   below the gate, −19/−41 meV at 1e18/1e19 (already in the primitive test);
-   add an end-to-end check that the gap-edge II turns on slightly earlier.
-2. **C8 sub-cycling**: in `houston_dissipate`, when ν_max·(τ) ≳ 0.2 (collision
-   time faster than the step), split the dissipative application into m CPTP
-   sub-steps [exp((τ/m)D)]^m with (τ/m)·ν_max ≲ 0.1. Each sub-step CPTP →
-   positivity safe. Test: result converges as m grows; trace preserved.
-3. **F** — e-e architecture TODO hook (comment + ring-pass accumulator slot).
-Then the NONLOCAL momentum-exchange versions of II (C4) and e-ph, plus the ring
-MPI (D) — the final major effort — after the serial k-local super-mode is
-physically validated (Chefonov bleaching staging, wiki/04). Keep all OFF.
+**Next increment — Part F (e-e architecture TODO hook):** small, no physics.
+Add a clearly-marked TODO + design comment for the e-e density-fluctuation
+channel (L_q = Σ_k c†_{k+q} c_k, screened-Coulomb rates, O(N_k²) double-q sum,
+mean-field (1−ρ) closure, Thomas-Fermi→Lindhard screening) sited so it slots
+into the ring pass alongside Σ^HF + nonlocal II without redesign. Leave a
+named accumulator-slot hook in the (future) ring data structures. Phase-2, no
+coefficients. [Taj-Rossi PRA 78, 052113; Rosati et al. PRB 90, 125140]
+
+**Then the final major effort — nonlocal (C4) + ring MPI (D):**
+- C3 full energy-windowed expanding-radius partner search (enumeration, no MC).
+- C4 nonlocal momentum-exchange impact ionization + nonlocal e-ph (genuine q).
+- D systolic-ring MPI replacing the all-gather; ONE fused ring pass for Σ^HF +
+  nonlocal II + nonlocal e-ph (+ the F e-e hook); active-subspace compression;
+  C1 predictor-corrector.
+Validate against the Chefonov Si THz-bleaching staging (wiki/04 Example 4)
+before claiming physical correctness. Keep all behind yn_sbe_superres OFF.
+
+Also pending (validation, not code): a longer Si super-mode run to check the
+e-ph cooling actually reduces the Drude conductivity (bleaching) -- needs a Si
+dataset (epm_material='Si', scalar) and the carrier-density/current diagnostics.
