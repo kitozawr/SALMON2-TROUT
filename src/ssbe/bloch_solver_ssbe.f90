@@ -42,13 +42,41 @@ module bloch_solver_ssbe
         ! creation v1 -> c1, applied in the same Houston basis as the
         ! Kuhn-Zurek dephasing (no extra ZHEEV).
         logical :: flag_impact  = .false.
-        real(8) :: ii_pref_au   = 0d0   ! P in 1/(Ha^4 a.u.time)
+        real(8) :: ii_pref_au   = 0d0   ! P in 1/(Ha^a a.u.time)
+        real(8) :: ii_exponent  = 4d0   ! fit exponent a (4 GaAs Stobbe, 2 Si Keldysh)
         real(8) :: ii_eth_au    = 0d0   ! threshold E_th [Ha]
         real(8) :: ii_ramp_au   = 0d0   ! linear Theta-smoothing width [Ha]
         real(8) :: ii_ecbm_au   = 0d0   ! global CBM of the field-free bands [Ha]
         real(8) :: ii_eg_au     = 0d0   ! band gap E_g [Ha] (primary loses E_g)
         integer :: nv_act       = 0     ! valence branches inside the active subspace
         real(8) :: occ_max      = 2d0   ! 2 (scalar bands) / 1 (spinor bands)
+
+        ! Bandgap-renormalization-coupled impact-ionization threshold (Part C7).
+        ! When the excited carrier density exceeds bgr_n_gate, the II threshold
+        ! shrinks: E_th(t) = E_th0 - |K n(t)^(1/3)|. [Vashishta-Kalia PRB 25, 6492]
+        logical :: flag_bgr     = .false.
+        real(8) :: ii_eth0_au   = 0d0   ! fixed input threshold E_th0 [Ha]
+        real(8) :: bgr_n_gate   = 5d18  ! gate density [cm^-3]
+        real(8) :: bgr_coeff    = 1.9d-8 ! K [eV cm]
+        integer :: homo_idx     = 0     ! HOMO band index (valence/conduction split)
+        real(8) :: au_dens_cm3  = 0d0   ! a.u.^-3 -> cm^-3 number-density conversion
+        ! Dissipator sub-cycling (Part C8): split the dissipative half-step into
+        ! diss_subcycle CPTP sub-steps when the collision rate is fast vs dt.
+        real(8) :: eph_numax_au = 0d0   ! estimated peak e-ph rate [1/a.u.time]
+
+        ! Carrier-carrier (e-e/e-h) thermalization (Part F): CPTP relaxation of
+        ! the adiabatic populations toward a Fermi-Dirac with the SAME number
+        ! and energy, plus coherence damping (EID). Off unless yn_sbe_eeh='y'.
+        logical :: flag_eeh   = .false.
+        real(8) :: eeh_nu_au  = 0d0     ! carrier-carrier rate [1/a.u.time]
+
+        ! Nonlocal impact ionization (Part C4): the hot electron ionizes a
+        ! valence partner drawn from the WHOLE BZ (momentum exchange), so the
+        ! partner-population / Pauli factors use the global BZ-averaged active-
+        ! band occupations gathered once per step (rides the ring/all-gather).
+        ! The full momentum-resolved final-state version is the refinement.
+        logical :: flag_nl_ii = .false.
+        real(8), allocatable :: glob_occ(:)   ! (nba) BZ-averaged active-band occupation
 
         ! Sublattice (band-unfolding) awareness of the impact-ionization
         ! channel. When the unfolding weights gs%unfold_w are available
@@ -72,10 +100,36 @@ module bloch_solver_ssbe
         ! with the (1-f_e-f_h) Pauli factor coming for free from the
         ! von Neumann commutator. Frozen over a dt step (mean-field predictor).
         logical :: flag_coulomb = .false.
+        logical :: flag_hf_subproj = .false. ! project Sigma^HF onto FCC sublattice blocks
+
+        ! Population-relaxing electron-phonon Lindblad (Part C5, super-mode).
+        ! k-local skeleton: each adiabatic level relaxes toward an energy-matched
+        ! (+-hw) partner at the saturated rate nu(eps_kin), emission ~ (N_B+1),
+        ! absorption ~ N_B, Pauli-blocked. CPTP (amplitude damping). Off unless
+        ! yn_sbe_eph='y'. Drives THz bleaching (collision-rate saturation).
+        logical :: flag_eph     = .false.
+        real(8) :: eph_nusat_au = 0d0   ! saturation rate nu_sat [1/a.u.time]
+        real(8) :: eph_eps0_au  = 0d0   ! nu(eps) onset eps_0 [Ha]
+        real(8) :: eph_n        = 2d0   ! nu(eps) shape exponent
+        real(8) :: eph_sigma_au = 0d0   ! energy-bin width sigma_E [Ha]
+        real(8) :: eph_ecbm_au  = 0d0   ! field-free CBM [Ha]
+        real(8) :: eph_evbm_au  = 0d0   ! field-free VBM [Ha]
+        integer :: eph_nph      = 0     ! number of phonon modes in the table
+        real(8), allocatable :: eph_hw(:)   ! phonon energies hw_p [Ha]
+        real(8), allocatable :: eph_nb(:)   ! Bose factors N_B(hw_p, T_ph)
+        real(8), allocatable :: eph_wrel(:) ! relative golden-rule weights (sum=1)
+
         real(8) :: coul_pref     = 0d0  ! strength * 4 pi / (eps * Omega_cell * Nk)
         real(8) :: coul_screen2  = 0d0  ! kappa^2 [1/Bohr^2] (Yukawa regulariser)
         integer :: icomm         = 0    ! MPI communicator (for the non-local exchange sum)
         complex(8), allocatable :: sigma_hf(:, :, :) ! (nba, nba, ik_min:ik_max) exchange Sigma
+
+        ! Ring/pipeline MPI (Part D): systolic-ring all-pairs pass replacing the
+        ! all-gather for the non-local sums in super-mode. Memory O(N_k/P + one
+        ! transit block) instead of O(N_k). [Plimpton JCP 117, 1 (1995)]
+        logical :: flag_ring = .false.
+        integer :: irank = 0, nproc = 1
+        integer, allocatable :: itbl_min(:), itbl_max(:)  ! k-partition per rank (0:nproc-1)
     end type
 
     !=========================================================================
@@ -94,6 +148,56 @@ module bloch_solver_ssbe
 
 contains
 
+! Build the per-material phonon table for the e-ph channel: energies hw_p [Ha],
+! Bose factors N_B(hw_p, T), and normalized relative golden-rule weights
+! w_p ~ D_p^2/hw_p (the common pi/rho factors cancel in the per-material
+! normalization). Si: 6 intervalley (g/f) phonons. GaAs: the Frohlich LO plus
+! 5 intervalley; the polar LO is given the dominant weight (sum of the
+! intervalley weights) -- a documented skeleton choice (the full Frohlich asinh
+! energy-dependence is a later refinement). [tables + sources in 02_constants]
+subroutine init_eph_phonon_table(sbe, material, kT_au)
+    use sbe_superres_ssbe, only: bose_factor, mev_to_ha, &
+        SI_N_PHONON, SI_PHONON_E_MEV, SI_PHONON_D_1E8EVCM, &
+        GAAS_N_IV, GAAS_IV_E_MEV, GAAS_IV_D_EVANG, GAAS_HW_LO_MEV
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    character(*), intent(in) :: material
+    real(8),      intent(in) :: kT_au
+    integer :: np, p
+    real(8) :: wsum
+
+    if (material == 'GaAs') then
+        np = GAAS_N_IV + 1                 ! Frohlich LO + 5 intervalley
+    else
+        np = SI_N_PHONON                   ! Si: 6 intervalley (g/f)
+    end if
+    sbe%eph_nph = np
+    allocate(sbe%eph_hw(np), sbe%eph_nb(np), sbe%eph_wrel(np))
+
+    if (material == 'GaAs') then
+        wsum = 0d0
+        do p = 1, GAAS_N_IV
+            sbe%eph_hw(p + 1)   = mev_to_ha(GAAS_IV_E_MEV(p))
+            sbe%eph_wrel(p + 1) = GAAS_IV_D_EVANG(p)**2 / GAAS_IV_E_MEV(p)
+            wsum = wsum + sbe%eph_wrel(p + 1)
+        end do
+        sbe%eph_hw(1)   = mev_to_ha(GAAS_HW_LO_MEV)
+        sbe%eph_wrel(1) = wsum             ! polar LO ~ dominant (50% after norm)
+    else
+        do p = 1, SI_N_PHONON
+            sbe%eph_hw(p)   = mev_to_ha(SI_PHONON_E_MEV(p))
+            sbe%eph_wrel(p) = SI_PHONON_D_1E8EVCM(p)**2 / SI_PHONON_E_MEV(p)
+        end do
+    end if
+
+    wsum = sum(sbe%eph_wrel(1:np))
+    do p = 1, np
+        sbe%eph_wrel(p) = sbe%eph_wrel(p) / max(wsum, 1d-300)
+        sbe%eph_nb(p)   = bose_factor(sbe%eph_hw(p), kT_au)
+    end do
+end subroutine init_eph_phonon_table
+
+
 subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     use util_ssbe
     use communication, only: comm_get_groupinfo, comm_summation, comm_bcast
@@ -101,8 +205,15 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
                              sbe_decoh_temperature_k, sbe_decoh_tau_m_fs, yn_sbe_spinor, &
                              yn_sbe_impact_ionization, sbe_ii_prefactor, &
                              sbe_ii_threshold_ev, sbe_ii_ramp_ev, &
+                             sbe_ii_form, sbe_ii_exponent, &
                              yn_sbe_coulomb, sbe_coulomb_epsilon, &
-                             sbe_coulomb_strength, sbe_coulomb_screen_au
+                             sbe_coulomb_strength, sbe_coulomb_screen_au, &
+                             yn_sbe_hf_sublattice_proj, &
+                             yn_sbe_eph, sbe_eph_temperature_k, sbe_eph_nu_sat, &
+                             sbe_eph_eps0_ev, sbe_eph_n, sbe_search_sigma_e_ev, &
+                             yn_sbe_bgr_threshold, sbe_bgr_n_gate, sbe_bgr_coeff, &
+                             yn_sbe_superres, yn_sbe_eeh, sbe_eeh_nu_sat, epm_material
+    use sbe_superres_ssbe, only: bose_factor
     use math_constants, only: pi
     use phys_constants, only: au_fs, kB_au, au_ev
     implicit none
@@ -125,6 +236,12 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     call split_range(1, sbe%nk, nproc, itbl_min, itbl_max)
     sbe%ik_min = itbl_min(irank)
     sbe%ik_max = itbl_max(irank)
+    ! store the partition + rank info for the ring-pipeline (Part D)
+    sbe%irank = irank
+    sbe%nproc = nproc
+    allocate(sbe%itbl_min(0:nproc-1), sbe%itbl_max(0:nproc-1))
+    sbe%itbl_min = itbl_min
+    sbe%itbl_max = itbl_max
 
     allocate(sbe%rho(1:sbe%nb, 1:sbe%nb, sbe%ik_min:sbe%ik_max))
     
@@ -248,9 +365,15 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     sbe%occ_max = merge(1d0, 2d0, yn_sbe_spinor == 'y')
     sbe%flag_impact = (yn_sbe_impact_ionization == 'y')
     if (sbe%flag_impact) then
-        ! Stobbe prefactor P [s^-1 eV^-4] -> [1/(Ha^4 a.u.time)]:
-        ! rate_au = P * t_au[s] * (dE[Ha] * au_ev)^4
-        sbe%ii_pref_au = sbe_ii_prefactor * (au_fs * 1d-15) * au_ev**4
+        ! Fit-form exponent a: GaAs Stobbe quartic (a=4, hard threshold)
+        ! [Stobbe-Redmer-Schattke, PRB 49, 4494 (1994)]; Si Keldysh quadratic
+        ! (a=2, soft near-gap threshold) [Keldysh, JETP 21, 1135 (1965);
+        ! Cartier et al., APL 62, 3339 (1993)]; Si full-band option a=4.6
+        ! [Kamakura et al., JAP 75, 3500 (1994)].
+        sbe%ii_exponent = sbe_ii_exponent
+        ! Prefactor P [s^-1 eV^-a] -> [1/(Ha^a a.u.time)]:
+        ! rate_au = P * t_au[s] * (dE[Ha] * au_ev)^a
+        sbe%ii_pref_au = sbe_ii_prefactor * (au_fs * 1d-15) * au_ev**sbe_ii_exponent
         sbe%ii_eth_au  = sbe_ii_threshold_ev / au_ev
         sbe%ii_ramp_au = sbe_ii_ramp_ev / au_ev
         ! Global CBM of the field-free band structure (kinetic-energy zero of
@@ -286,6 +409,12 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
             if (sbe%nv_act < 1 .or. sbe%nv_act >= sbe%n_active_bands) &
                 write(*, '(a)') '#   WARNING: no valence or no conduction branches active -- channel is inert'
         end if
+        ! Nonlocal impact ionization (Part C4): partner sourced from the whole BZ
+        sbe%flag_nl_ii = (yn_sbe_superres == 'y')
+        if (sbe%n_active_bands > 0) allocate(sbe%glob_occ(sbe%n_active_bands))
+        if (sbe%flag_nl_ii) sbe%glob_occ = 0d0
+        if (sbe%flag_nl_ii .and. irank == 0) &
+            write(*, '(a)') '#   nonlocal mode: valence partner drawn from the whole BZ (momentum exchange)'
     end if
 
     ! =========================================================================
@@ -305,15 +434,116 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
                       / (max(sbe_coulomb_epsilon, 1d-12) * gs%volume * dble(gs%nk))
         sbe%coul_screen2 = sbe_coulomb_screen_au**2
         sbe%icomm = icomm
+        ! Use the systolic ring (Part D) for the non-local exchange sum in
+        ! super-mode (memory O(Nk/P)); otherwise the all-gather (memory O(Nk)).
+        sbe%flag_ring = (yn_sbe_superres == 'y')
         if (sbe%n_active_bands > 0) &
             allocate(sbe%sigma_hf(1:sbe%n_active_bands, 1:sbe%n_active_bands, &
                                   sbe%ik_min:sbe%ik_max))
+        ! Folding fix: project Sigma^HF block-diagonally onto the 4 FCC
+        ! sublattices (zero the spurious inter-sublattice exchange that the
+        ! cubic-cell folding creates). Requires the unfold weights and a
+        ! folded cubic cell; otherwise inert. [Popescu-Zunger, PRB 85, 085201]
+        sbe%flag_hf_subproj = (yn_sbe_hf_sublattice_proj == 'y')
+        if (sbe%flag_hf_subproj) then
+            if (.not. allocated(gs%unfold_w)) then
+                sbe%flag_hf_subproj = .false.
+            else if (maxval(abs(gs%unfold_w)) <= 1d-12) then
+                sbe%flag_hf_subproj = .false.
+            end if
+        end if
         if (irank == 0) then
             write(*, '(a)') '# Coulomb HF (Golde-Kira-Meier-Koch SBE) enabled:'
             write(*, '(a,ES12.5)') '#   exchange prefactor 4pi*str/(eps*Omega*Nk) = ', sbe%coul_pref
             write(*, '(a,f8.3,a,ES12.5,a)') '#   eps = ', sbe_coulomb_epsilon, &
                 ', screening kappa^2 = ', sbe%coul_screen2, ' 1/Bohr^2'
             write(*, '(a)') '#   NOTE: non-k-local mean field, O(Nk^2) per step (frozen over dt)'
+            if (sbe%flag_hf_subproj) then
+                write(*, '(a)') '#   sublattice projection ON: inter-sublattice exchange zeroed'
+            else
+                write(*, '(a)') '#   sublattice projection OFF (no unfold weights / disabled)'
+            end if
+        end if
+    end if
+
+    ! =========================================================================
+    ! Population-relaxing electron-phonon Lindblad (Part C5, super-mode).
+    ! k-local skeleton with a single effective optical phonon. Off by default.
+    ! [Jacoboni-Reggiani RMP 55, 645 (1983); nu saturation: Meng et al.,
+    !  PRB 91, 075201 (2015); Fischetti-Laux PRB 38, 9721 (1988)]
+    ! =========================================================================
+    sbe%flag_eph = (yn_sbe_eph == 'y')
+    if (sbe%flag_eph) then
+        call init_eph_phonon_table(sbe, trim(epm_material), kB_au * sbe_eph_temperature_k)
+        ! Saturation rate (overall magnitude cap): material default if not set.
+        if (sbe_eph_nu_sat > 0d0) then
+            sbe%eph_nusat_au = sbe_eph_nu_sat * (au_fs * 1d-15)
+        else if (trim(epm_material) == 'GaAs') then
+            sbe%eph_nusat_au = 1.0d14 * (au_fs * 1d-15)   ! [Fischetti IEEE TED 38, 634]
+        else
+            sbe%eph_nusat_au = 1.3d14 * (au_fs * 1d-15)   ! Si [Meng PRB 91, 075201]
+        end if
+        sbe%eph_eps0_au = sbe_eph_eps0_ev / au_ev
+        sbe%eph_n       = sbe_eph_n
+        if (sbe_search_sigma_e_ev > 0d0) then
+            sbe%eph_sigma_au = sbe_search_sigma_e_ev / au_ev
+        else
+            sbe%eph_sigma_au = 0.2d0 / au_ev     ! grid-matched default (Stobbe 0.2 eV)
+        end if
+        if (homo_idx + 1 <= gs%nb) then
+            sbe%eph_ecbm_au = minval(gs%eigen(homo_idx + 1, :))
+        end if
+        sbe%eph_evbm_au = maxval(gs%eigen(homo_idx, :))
+        sbe%eph_numax_au = 2d0 * sbe%eph_nusat_au   ! peak-rate estimate for sub-cycling
+        if (irank == 0) then
+            write(*, '(a)') '# electron-phonon population relaxation (Part C5) enabled:'
+            write(*, '(a,i2,a,ES12.5,a)') '#   ', sbe%eph_nph, &
+                ' phonon modes; nu_sat = ', sbe%eph_nusat_au, ' 1/a.u.t'
+            do ib = 1, sbe%eph_nph
+                write(*, '(a,i2,a,f7.2,a,f6.3,a,f6.3)') '#   mode ', ib, ': hw = ', &
+                    sbe%eph_hw(ib)*au_ev*1d3, ' meV, N_B = ', sbe%eph_nb(ib), &
+                    ', weight = ', sbe%eph_wrel(ib)
+            end do
+            write(*, '(a)') '#   k-local skeleton; CPTP amplitude damping; toggle Kuhn-Zurek off'
+        end if
+    end if
+
+    ! =========================================================================
+    ! Carrier-carrier (e-e/e-h) thermalization channel (Part F). Rate scale only;
+    ! the per-step (mu,T) Fermi-Dirac fit is done inside the channel.
+    ! [rate scale: Goodnick-Lugli PRB 37, 2578; Fischetti-Laux PRB 38, 9721]
+    ! =========================================================================
+    sbe%flag_eeh = (yn_sbe_eeh == 'y')
+    if (sbe%flag_eeh) then
+        if (sbe_eeh_nu_sat > 0d0) then
+            sbe%eeh_nu_au = sbe_eeh_nu_sat * (au_fs * 1d-15)
+        else
+            sbe%eeh_nu_au = 1.0d14 * (au_fs * 1d-15)   ! 1e13-1e14 s^-1 scale
+        end if
+        if (irank == 0) then
+            write(*, '(a)') '# carrier-carrier (e-e/e-h) thermalization (Part F) enabled:'
+            write(*, '(a,ES12.5,a)') '#   nu_cc = ', sbe%eeh_nu_au, &
+                ' 1/a.u.t; CPTP relax to Fermi-Dirac (conserves number+energy)'
+        end if
+    end if
+
+    ! =========================================================================
+    ! Bandgap-renormalization-coupled impact-ionization threshold (Part C7).
+    ! Bookkeeping (homo_idx, a.u.->cm^-3 density conversion) is always stored;
+    ! the threshold only moves when yn_sbe_bgr_threshold='y' AND impact
+    ! ionization is on AND the carrier density exceeds the gate. [Vashishta-Kalia]
+    ! =========================================================================
+    sbe%homo_idx    = homo_idx
+    sbe%au_dens_cm3 = 1d24 / (0.52917721067d0)**3     ! a.u.^-3 -> cm^-3 (Bohr in Angstrom)
+    sbe%ii_eth0_au  = sbe%ii_eth_au                   ! fixed reference threshold
+    sbe%flag_bgr    = (yn_sbe_bgr_threshold == 'y') .and. sbe%flag_impact
+    if (sbe%flag_bgr) then
+        sbe%bgr_n_gate = sbe_bgr_n_gate
+        sbe%bgr_coeff  = sbe_bgr_coeff
+        if (irank == 0) then
+            write(*, '(a)') '# BGR-coupled impact-ionization threshold (Part C7) enabled:'
+            write(*, '(a,ES12.5,a,ES12.5,a)') '#   gate n = ', sbe%bgr_n_gate, &
+                ' cm^-3, K = ', sbe%bgr_coeff, ' eV cm'
         end if
     end if
 
@@ -531,6 +761,14 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     ! (it is an MPI all-gather + convolution, must run collectively once).
     if (sbe%flag_coulomb .and. nba > 0) call compute_coulomb_selfenergy(sbe, gs)
 
+    ! BGR-coupled impact-ionization threshold (Part C7): shift E_th with the
+    ! running excited-carrier density (global reduction; once per step).
+    if (sbe%flag_bgr) call update_bgr_threshold(sbe, gs)
+
+    ! Nonlocal impact ionization (Part C4): gather the BZ-averaged active-band
+    ! occupations once per step (the valence partner is sourced from anywhere).
+    if (sbe%flag_nl_ii .and. nba > 0) call gather_global_occupation(sbe, gs)
+
     !$omp parallel default(shared) &
     !$omp    private(ik, i, j, idir, in, im, isub, s) &
     !$omp    private(p_active, rho_a, H1, H2, HVG, eigen_active, V_begin, V_end, X_a, w_act_sub) &
@@ -679,6 +917,62 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
 end subroutine dt_evolve_bloch_cf4
 
 
+! Part C4: BZ-averaged occupation of each active band (global reduction), used
+! by the nonlocal impact ionization so the valence partner / Pauli factors are
+! sourced from the whole BZ rather than the local k-point (momentum exchange).
+subroutine gather_global_occupation(sbe, gs)
+    use communication, only: comm_summation
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info),      intent(in)    :: gs
+    integer :: nba, ik, a
+    real(8), allocatable :: loc(:), glob(:)
+    nba = sbe%n_active_bands
+    allocate(loc(nba), glob(nba))
+    loc = 0d0
+    do ik = sbe%ik_min, sbe%ik_max
+        do a = 1, nba
+            loc(a) = loc(a) + real(sbe%rho(sbe%active_idx(a), sbe%active_idx(a), ik)) * gs%kweight(ik)
+        end do
+    end do
+    call comm_summation(loc, glob, nba, sbe%icomm)
+    sbe%glob_occ(1:nba) = glob(1:nba) / sum(gs%kweight)
+    deallocate(loc, glob)
+end subroutine gather_global_occupation
+
+
+! Part C7: update the impact-ionization threshold from the running excited
+! carrier density n(t). n = (excited electrons per cell, BZ-averaged) / V_cell,
+! converted to cm^-3 (the /N_k is already in the kweight average -- see the
+! density note in the wiki). Above the gate, E_th(t) = E_th0 - |K n^(1/3)|.
+subroutine update_bgr_threshold(sbe, gs)
+    use communication, only: comm_summation
+    use sbe_superres_ssbe, only: bgr_gap_shift_ev
+    use phys_constants, only: au_ev
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info),      intent(in)    :: gs
+    integer :: ik, ib
+    real(8) :: loc, glob, n_cm3, dEbgr_ev
+
+    loc = 0d0
+    do ik = sbe%ik_min, sbe%ik_max
+        do ib = sbe%homo_idx + 1, sbe%nb
+            loc = loc + real(sbe%rho(ib, ib, ik)) * gs%kweight(ik)
+        end do
+    end do
+    call comm_summation(loc, glob, sbe%icomm)
+    n_cm3 = (glob / sum(gs%kweight)) / gs%volume * sbe%au_dens_cm3
+
+    if (n_cm3 > sbe%bgr_n_gate) then
+        dEbgr_ev = bgr_gap_shift_ev(n_cm3, sbe%bgr_coeff)        ! negative [eV]
+        sbe%ii_eth_au = sbe%ii_eth0_au - abs(dEbgr_ev) / au_ev   ! threshold shrinks
+    else
+        sbe%ii_eth_au = sbe%ii_eth0_au
+    end if
+end subroutine update_bgr_threshold
+
+
 ! Build the instantaneous velocity-gauge Hamiltonian in the active subspace:
 !   H_VG(t) = diag(eigen) + A(t) . pi
 subroutine build_HVG(nba, eigen_active, p_active, Ac, H)
@@ -726,18 +1020,60 @@ end subroutine build_HVG
 ! each rank forms Sigma for its local k. Cost O(Nk^2 nba^2) per call; evaluated
 ! once per dt step (the mean field is frozen over the Strang/CF4 sub-steps).
 !=============================================================================
+! Dispatcher: form Sigma^HF either via the all-gather (default) or the systolic
+! ring (super-mode, Part D), then apply the sublattice-block projection (Part E).
 subroutine compute_coulomb_selfenergy(sbe, gs)
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info),      intent(in)    :: gs
+    if (sbe%n_active_bands < 1) return
+    if (sbe%flag_ring) then
+        call compute_coulomb_selfenergy_ring(sbe, gs)
+    else
+        call compute_coulomb_selfenergy_allgather(sbe, gs)
+    end if
+    if (sbe%flag_hf_subproj) call apply_hf_sublattice_projection(sbe, gs)
+end subroutine compute_coulomb_selfenergy
+
+
+! Screened-Coulomb kernel V(k-q) [a.u.] with minimum-image |k-q| and the q=k
+! self-term excluded (returns 0). Shared by the all-gather and the ring.
+pure function coulomb_kernel(sbe, gs, ik, iq) result(vkq)
+    implicit none
+    type(s_sbe_bloch_solver), intent(in) :: sbe
+    type(s_sbe_gs_info),      intent(in) :: gs
+    integer,                  intent(in) :: ik, iq
+    real(8) :: vkq, dr(3), dkx, dky, dkz, q2
+    dr(1) = gs%kpoint(1, ik) - gs%kpoint(1, iq)
+    dr(2) = gs%kpoint(2, ik) - gs%kpoint(2, iq)
+    dr(3) = gs%kpoint(3, ik) - gs%kpoint(3, iq)
+    dr(1) = dr(1) - dnint(dr(1))
+    dr(2) = dr(2) - dnint(dr(2))
+    dr(3) = dr(3) - dnint(dr(3))
+    dkx = dr(1)*gs%b_matrix(1,1) + dr(2)*gs%b_matrix(2,1) + dr(3)*gs%b_matrix(3,1)
+    dky = dr(1)*gs%b_matrix(1,2) + dr(2)*gs%b_matrix(2,2) + dr(3)*gs%b_matrix(3,2)
+    dkz = dr(1)*gs%b_matrix(1,3) + dr(2)*gs%b_matrix(2,3) + dr(3)*gs%b_matrix(3,3)
+    q2 = dkx*dkx + dky*dky + dkz*dkz
+    if (q2 < 1d-12) then
+        vkq = 0d0                          ! exclude q = k (the V(0) self term)
+    else
+        vkq = sbe%coul_pref / (q2 + sbe%coul_screen2)
+    end if
+end function coulomb_kernel
+
+
+! All-gather implementation: zero-pad the local drho and comm_summation to the
+! full-BZ drho on every rank, then form Sigma for the local k. Memory O(Nk).
+subroutine compute_coulomb_selfenergy_allgather(sbe, gs)
     use communication, only: comm_summation
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info),      intent(in)    :: gs
     integer :: nba, ik, iq, i, j, in, im
-    real(8) :: dr(3), dkx, dky, dkz, q2, vkq
+    real(8) :: vkq
     complex(8), allocatable :: rho_loc(:, :, :), rho_all(:, :, :)
 
     nba = sbe%n_active_bands
-    if (nba < 1) return
-
     allocate(rho_loc(nba, nba, sbe%nk), rho_all(nba, nba, sbe%nk))
     rho_loc = (0d0, 0d0)
     do ik = sbe%ik_min, sbe%ik_max
@@ -747,30 +1083,17 @@ subroutine compute_coulomb_selfenergy(sbe, gs)
                 in = sbe%active_idx(i)
                 rho_loc(i, j, ik) = sbe%rho(in, im, ik)
             end do
-            ! subtract the ground-state occupation (rho_0) on the diagonal
             rho_loc(j, j, ik) = rho_loc(j, j, ik) - dcmplx(gs%occup(im, ik), 0d0)
         end do
     end do
     call comm_summation(rho_loc, rho_all, nba * nba * sbe%nk, sbe%icomm)
 
-    !$omp parallel do default(shared) schedule(dynamic) &
-    !$omp    private(ik, iq, i, j, dr, dkx, dky, dkz, q2, vkq)
+    !$omp parallel do default(shared) schedule(dynamic) private(ik, iq, i, j, vkq)
     do ik = sbe%ik_min, sbe%ik_max
         sbe%sigma_hf(:, :, ik) = (0d0, 0d0)
         do iq = 1, sbe%nk
-            ! minimum image of (k - q) in reduced coords, then -> Cartesian
-            dr(1) = gs%kpoint(1, ik) - gs%kpoint(1, iq)
-            dr(2) = gs%kpoint(2, ik) - gs%kpoint(2, iq)
-            dr(3) = gs%kpoint(3, ik) - gs%kpoint(3, iq)
-            dr(1) = dr(1) - dnint(dr(1))
-            dr(2) = dr(2) - dnint(dr(2))
-            dr(3) = dr(3) - dnint(dr(3))
-            dkx = dr(1)*gs%b_matrix(1,1) + dr(2)*gs%b_matrix(2,1) + dr(3)*gs%b_matrix(3,1)
-            dky = dr(1)*gs%b_matrix(1,2) + dr(2)*gs%b_matrix(2,2) + dr(3)*gs%b_matrix(3,2)
-            dkz = dr(1)*gs%b_matrix(1,3) + dr(2)*gs%b_matrix(2,3) + dr(3)*gs%b_matrix(3,3)
-            q2 = dkx*dkx + dky*dky + dkz*dkz
-            if (q2 < 1d-12) cycle          ! exclude q = k (the V(0) self term)
-            vkq = sbe%coul_pref / (q2 + sbe%coul_screen2)
+            vkq = coulomb_kernel(sbe, gs, ik, iq)
+            if (vkq == 0d0) cycle
             do j = 1, nba
                 do i = 1, nba
                     sbe%sigma_hf(i, j, ik) = sbe%sigma_hf(i, j, ik) - vkq * rho_all(i, j, iq)
@@ -779,9 +1102,108 @@ subroutine compute_coulomb_selfenergy(sbe, gs)
         end do
     end do
     !$omp end parallel do
-
     deallocate(rho_loc, rho_all)
-end subroutine compute_coulomb_selfenergy
+end subroutine compute_coulomb_selfenergy_allgather
+
+
+! Ring/pipeline implementation (Part D): each rank holds its local drho block
+! plus ONE transit buffer. Blocks circulate around the ring (comm_exchange =
+! MPI_Sendrecv) in nproc steps; at each hop the rank contracts its local k
+! against the transit q-block into Sigma. After nproc-1 hops every block has
+! visited, completing the full O(Nk^2) sum. Memory O(Nk/P + one block) -- does
+! NOT grow with P. Bit-identical to the all-gather (same kernel, same order of
+! the q-blocks). One fused pass: extra nonlocal accumulators (II, e-ph, e-e)
+! can be added here without new communication. [Plimpton JCP 117, 1 (1995)]
+subroutine compute_coulomb_selfenergy_ring(sbe, gs)
+    use communication, only: comm_exchange
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info),      intent(in)    :: gs
+    integer :: nba, nproc, maxn, hop, src, q0, ntr, ik, jq, iq, i, j, in, im
+    integer :: idest, isrc
+    real(8) :: vkq
+    complex(8), allocatable :: transit(:, :, :), recvbuf(:, :, :)
+
+    nba = sbe%n_active_bands
+    nproc = sbe%nproc
+    maxn = 0
+    do i = 0, nproc - 1
+        maxn = max(maxn, sbe%itbl_max(i) - sbe%itbl_min(i) + 1)
+    end do
+    allocate(transit(nba, nba, maxn), recvbuf(nba, nba, maxn))
+
+    ! local drho block packed into transit[1:nloc]
+    transit = (0d0, 0d0)
+    do ik = sbe%ik_min, sbe%ik_max
+        jq = ik - sbe%ik_min + 1
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                transit(i, j, jq) = sbe%rho(in, im, ik)
+            end do
+            transit(j, j, jq) = transit(j, j, jq) - dcmplx(gs%occup(im, ik), 0d0)
+        end do
+    end do
+    do ik = sbe%ik_min, sbe%ik_max
+        sbe%sigma_hf(:, :, ik) = (0d0, 0d0)
+    end do
+
+    idest = mod(sbe%irank + 1, nproc)
+    isrc  = mod(sbe%irank - 1 + nproc, nproc)
+    src   = sbe%irank
+    do hop = 0, nproc - 1
+        q0  = sbe%itbl_min(src)
+        ntr = sbe%itbl_max(src) - sbe%itbl_min(src) + 1
+        !$omp parallel do default(shared) schedule(dynamic) private(ik, jq, iq, i, j, vkq)
+        do ik = sbe%ik_min, sbe%ik_max
+            do jq = 1, ntr
+                iq = q0 + jq - 1
+                vkq = coulomb_kernel(sbe, gs, ik, iq)
+                if (vkq == 0d0) cycle
+                do j = 1, nba
+                    do i = 1, nba
+                        sbe%sigma_hf(i, j, ik) = sbe%sigma_hf(i, j, ik) - vkq * transit(i, j, jq)
+                    end do
+                end do
+            end do
+        end do
+        !$omp end parallel do
+        if (hop < nproc - 1) then
+            call comm_exchange(transit, idest, recvbuf, isrc, 1, sbe%icomm)
+            transit = recvbuf
+            src = mod(src - 1 + nproc, nproc)
+        end if
+    end do
+    deallocate(transit, recvbuf)
+end subroutine compute_coulomb_selfenergy_ring
+
+
+! Part E sublattice-block projection of Sigma^HF (shared by all-gather & ring).
+subroutine apply_hf_sublattice_projection(sbe, gs)
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info),      intent(in)    :: gs
+    integer :: nba, ik, i, j, in, im, s
+    real(8) :: proj
+    nba = sbe%n_active_bands
+    !$omp parallel do default(shared) private(ik, i, j, in, im, s, proj)
+    do ik = sbe%ik_min, sbe%ik_max
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                if (i == j) cycle
+                in = sbe%active_idx(i)
+                proj = 0d0
+                do s = 1, 4
+                    proj = proj + gs%unfold_w(s, in, ik) * gs%unfold_w(s, im, ik)
+                end do
+                sbe%sigma_hf(i, j, ik) = sbe%sigma_hf(i, j, ik) * proj
+            end do
+        end do
+    end do
+    !$omp end parallel do
+end subroutine apply_hf_sublattice_projection
 
 
 ! Single CF4 (commutator-free Magnus, 4th order) sub-step of length tau,
@@ -867,8 +1289,8 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
 
     real(8)    :: evals(nba), ehat(3), Ac_norm
     complex(8) :: W(nba, nba), t1(nba, nba), t2(nba, nba)
-    real(8)    :: wsub_branch(4, nba), wcoef
-    integer :: i, j, idir, a, s
+    real(8)    :: wsub_branch(4, nba), wcoef, tau_sub_d
+    integer :: i, j, idir, a, s, m_sub, isub_d
 
     call eigen_zheev(H, evals, W)
 
@@ -885,14 +1307,18 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
         end do
     end if
 
-    ! k-local impact-ionization channels (threshold-gated, frozen rates)
-    if (sbe%flag_impact) then
-        ! Project the field-free sublattice weights of the active Bloch bands
-        ! onto the instantaneous Houston branches a:
-        !   w_s(a) = sum_i |U_ia|^2 w_s(band_i),   sum_s w_s(a) = 1.
-        ! This makes the sublattice character field-aware (correct under the
-        ! Houston rotation U) and degenerates to the bare band weights at A=0.
-        if (sbe%flag_unfold_ii) then
+    ! k-local impact-ionization (threshold-gated) + population-relaxing e-ph.
+    ! These amplitude-damping channels are applied via Strang sub-cycling
+    ! (Part C8): split the half-step into m_sub CPTP sub-steps so that, when the
+    ! collision rate is fast vs the step (nu_max*tau >~ 0.2), the operator-split
+    ! error stays small and the per-sub-step re-read of the populations protects
+    ! the Pauli factors (a built-in predictor-corrector). Each sub-step is CPTP,
+    ! so positivity is never threatened. m_sub = 1 unless e-ph is active, so
+    ! impact-ionization-only runs are byte-for-byte unchanged.
+    if (sbe%flag_impact .or. sbe%flag_eph .or. sbe%flag_eeh) then
+        ! field-aware Houston-branch sublattice weights for the unfolding-aware
+        ! impact ionization (computed once; field-frozen over the half-step)
+        if (sbe%flag_impact .and. sbe%flag_unfold_ii) then
             wsub_branch = 0d0
             do a = 1, nba
                 do i = 1, nba
@@ -905,7 +1331,22 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
         else
             wsub_branch = 0d0
         end if
-        call apply_impact_ionization(sbe, nba, t2, evals, Ac, tau, wsub_branch, sbe%flag_unfold_ii)
+
+        m_sub = 1
+        if (sbe%flag_eph) &
+            m_sub = max(m_sub, min(20, max(1, ceiling(10d0 * sbe%eph_numax_au * tau))))
+        if (sbe%flag_eeh) &
+            m_sub = max(m_sub, min(20, max(1, ceiling(10d0 * sbe%eeh_nu_au * tau))))
+        tau_sub_d = tau / dble(m_sub)
+        do isub_d = 1, m_sub
+            if (sbe%flag_impact) &
+                call apply_impact_ionization(sbe, nba, t2, evals, Ac, tau_sub_d, &
+                                             wsub_branch, sbe%flag_unfold_ii)
+            if (sbe%flag_eph) &
+                call apply_eph_relaxation(sbe, nba, t2, evals, Ac, tau_sub_d)
+            if (sbe%flag_eeh) &
+                call apply_carrier_carrier(sbe, nba, t2, evals, tau_sub_d)
+        end do
     end if
 
     ! rho = U rho~ U^dagger
@@ -1017,7 +1458,7 @@ subroutine apply_impact_ionization(sbe, nba, rho_ad, evals, Ac, tau, wsub, use_u
             d = ekin - sbe%ii_eth_au
             if (d <= 0d0) cycle
             if (real(rho_ad(ih, ih)) < occ_eps) cycle
-            gam = sbe%ii_pref_au * d**4
+            gam = sbe%ii_pref_au * d**sbe%ii_exponent
             if (sbe%ii_ramp_au > 0d0 .and. d < sbe%ii_ramp_au) gam = gam * d / sbe%ii_ramp_au
             etgt = evals(ih) - sbe%ii_eg_au
             ihp = ic1
@@ -1025,9 +1466,16 @@ subroutine apply_impact_ionization(sbe, nba, rho_ad, evals, Ac, tau, wsub, use_u
                 if (abs(evals(a) - etgt) < abs(evals(ihp) - etgt)) ihp = a
             end do
             if (ihp == ih) cycle
-            pv1 = min(max(real(rho_ad(iv1, iv1)) / f, 0d0), 1d0)
+            ! valence partner + conduction blocker: global BZ average in the
+            ! nonlocal mode (Part C4, momentum exchange), else local-k.
+            if (sbe%flag_nl_ii) then
+                pv1 = min(max(sbe%glob_occ(iv1) / f, 0d0), 1d0)
+                bc1 = min(max(1d0 - sbe%glob_occ(ic1) / f, 0d0), 1d0)
+            else
+                pv1 = min(max(real(rho_ad(iv1, iv1)) / f, 0d0), 1d0)
+                bc1 = min(max(1d0 - real(rho_ad(ic1, ic1)) / f, 0d0), 1d0)
+            end if
             phh = min(max(real(rho_ad(ih,  ih )) / f, 0d0), 1d0)
-            bc1 = min(max(1d0 - real(rho_ad(ic1, ic1)) / f, 0d0), 1d0)
             bhp = min(max(1d0 - real(rho_ad(ihp, ihp)) / f, 0d0), 1d0)
             g_rel  = gam * pv1 * bc1 * bhp
             g_pair = gam * phh * bc1 * bhp
@@ -1072,7 +1520,7 @@ subroutine apply_impact_ionization(sbe, nba, rho_ad, evals, Ac, tau, wsub, use_u
         if (real(rho_ad(ih, ih)) < occ_eps) cycle
 
         ! Stobbe rate, with optional linear ramp over the fit resolution
-        gam = sbe%ii_pref_au * d**4
+        gam = sbe%ii_pref_au * d**sbe%ii_exponent
         if (sbe%ii_ramp_au > 0d0 .and. d < sbe%ii_ramp_au) gam = gam * d / sbe%ii_ramp_au
 
         etgt = evals(ih) - sbe%ii_eg_au
@@ -1094,9 +1542,14 @@ subroutine apply_impact_ionization(sbe, nba, rho_ad, evals, Ac, tau, wsub, use_u
             ! Frozen scalar factors at the s-resolved branches, clamped to
             ! [0,1]; the leading w_s(h) splits the primary across sublattices
             ! (sum_s w_s(h) = 1 => total primary relaxation preserved)
-            pv1 = min(max(real(rho_ad(iv1_sub(s), iv1_sub(s))) / f, 0d0), 1d0)
+            if (sbe%flag_nl_ii) then
+                pv1 = min(max(sbe%glob_occ(iv1_sub(s)) / f, 0d0), 1d0)
+                bc1 = min(max(1d0 - sbe%glob_occ(ic1_sub(s)) / f, 0d0), 1d0)
+            else
+                pv1 = min(max(real(rho_ad(iv1_sub(s), iv1_sub(s))) / f, 0d0), 1d0)
+                bc1 = min(max(1d0 - real(rho_ad(ic1_sub(s), ic1_sub(s))) / f, 0d0), 1d0)
+            end if
             phh = min(max(real(rho_ad(ih,         ih        )) / f, 0d0), 1d0)
-            bc1 = min(max(1d0 - real(rho_ad(ic1_sub(s), ic1_sub(s))) / f, 0d0), 1d0)
             bhp = min(max(1d0 - real(rho_ad(ihp_s,      ihp_s     )) / f, 0d0), 1d0)
             g_rel  = gam * ws * pv1 * bc1 * bhp
             g_pair = gam * ws * phh * bc1 * bhp
@@ -1107,6 +1560,121 @@ subroutine apply_impact_ionization(sbe, nba, rho_ad, evals, Ac, tau, wsub, use_u
         end do
     end do
 end subroutine apply_impact_ionization
+
+
+!=============================================================================
+! Population-relaxing electron-phonon Lindblad (Part C5), k-local skeleton, in
+! the Houston/adiabatic basis. Unlike Kuhn-Zurek pure dephasing this channel
+! RELAXES populations (Gamma_aa != 0) -- it cools hot carriers toward the band
+! edges and is what reproduces THz bleaching (collision-rate saturation).
+!
+! Model (single effective optical phonon hw): each adiabatic level a with a
+! carrier present relaxes to the energy-matched partner level b ~ eps_a -/+ hw:
+!   emission   a -> b (b below, eps_a - eps_b ~ hw): rate nu(eps_a)(N_B+1)
+!   absorption a -> b (b above, eps_b - eps_a ~ hw): rate nu(eps_a) N_B
+! weighted by a Gaussian energy-conservation shape exp(-dE^2/2 sigma^2) and the
+! target Pauli blocker (1 - rho_bb/f) clamped to [0,1]. nu(eps) is the smooth
+! saturating collision rate; eps = carrier kinetic energy from the nearest band
+! edge (electron above CBM or hole below VBM). Each transfer is the exact CPTP
+! amplitude-damping map amp_damp_channel -> the whole channel is CPTP.
+! [Jacoboni-Reggiani RMP 55, 645 (1983); nu sat: Meng et al. PRB 91, 075201]
+!=============================================================================
+subroutine apply_eph_relaxation(sbe, nba, rho_ad, evals, Ac, tau)
+    use sbe_superres_ssbe, only: nu_saturation, gaussian_shape, amp_damp_channel, &
+                                 eph_thermal_split
+    implicit none
+    type(s_sbe_bloch_solver), intent(in)    :: sbe
+    integer,                  intent(in)    :: nba
+    complex(8),               intent(inout) :: rho_ad(nba, nba)
+    real(8),                  intent(in)    :: evals(nba)
+    real(8),                  intent(in)    :: Ac(3)
+    real(8),                  intent(in)    :: tau
+
+    integer :: ia, ib, b_em, b_ab, ip
+    real(8) :: f, a2half, eps_kin, nu, hw, sig, ekin, fe, fa
+    real(8) :: best_em, best_ab, dE, shp, gam, blk
+    real(8), parameter :: occ_eps = 1d-12
+
+    f = sbe%occ_max
+    sig = sbe%eph_sigma_au
+    a2half = 0.5d0 * dot_product(Ac, Ac)
+
+    do ia = 1, nba
+        if (real(rho_ad(ia, ia)) < occ_eps) cycle
+        ! carrier kinetic energy from the nearest band edge (electron or hole);
+        ! restore the dropped A^2/2 (Houston identity), as in impact ionization.
+        ekin = evals(ia) + a2half
+        eps_kin = max(ekin - sbe%eph_ecbm_au, sbe%eph_evbm_au - ekin, 0d0)
+        ! saturating collision rate = total magnitude cap for this level
+        nu = nu_saturation(eps_kin, sbe%eph_nusat_au, sbe%eph_eps0_au, sbe%eph_n)
+        if (nu * tau < 1d-14) cycle
+
+        ! sum over phonon modes: each mode p relaxes the carrier to the partner
+        ! level energy-matched to eps_a -/+ hw_p, split into emission/absorption
+        ! (detailed balance), weighted by the mode weight w_p (sum_p w_p = 1) so
+        ! the total channel rate stays ~ nu(eps).
+        do ip = 1, sbe%eph_nph
+            hw = sbe%eph_hw(ip)
+            call eph_thermal_split(sbe%eph_nb(ip), fe, fa)
+            ! best energy-matched emission (below) and absorption (above)
+            b_em = 0; best_em = huge(1d0)
+            b_ab = 0; best_ab = huge(1d0)
+            do ib = 1, nba
+                if (ib == ia) cycle
+                if (evals(ib) < evals(ia)) then
+                    dE = abs((evals(ia) - evals(ib)) - hw)
+                    if (dE < best_em) then; best_em = dE; b_em = ib; end if
+                else
+                    dE = abs((evals(ib) - evals(ia)) - hw)
+                    if (dE < best_ab) then; best_ab = dE; b_ab = ib; end if
+                end if
+            end do
+
+            if (b_em > 0) then
+                shp = gaussian_shape(best_em, sig)
+                blk = min(max(1d0 - real(rho_ad(b_em, b_em)) / f, 0d0), 1d0)
+                gam = nu * sbe%eph_wrel(ip) * fe * shp * blk
+                call amp_damp_channel(nba, rho_ad, ia, b_em, gam, tau)
+            end if
+            if (b_ab > 0 .and. fa > 0d0) then
+                shp = gaussian_shape(best_ab, sig)
+                blk = min(max(1d0 - real(rho_ad(b_ab, b_ab)) / f, 0d0), 1d0)
+                gam = nu * sbe%eph_wrel(ip) * fa * shp * blk
+                call amp_damp_channel(nba, rho_ad, ia, b_ab, gam, tau)
+            end if
+        end do
+    end do
+end subroutine apply_eph_relaxation
+
+
+!=============================================================================
+! Part F: carrier-carrier (e-e/e-h) thermalization as a CPTP channel in the
+! Houston/adiabatic basis. Carrier-carrier scattering conserves total carrier
+! NUMBER and ENERGY (it thermalizes the distribution to a hot Fermi-Dirac and
+! produces excitation-induced dephasing, but does NOT relax energy to the
+! lattice). We realize this by relaxing the adiabatic populations toward the
+! Fermi-Dirac with the SAME number and energy, with coherence damping (EID):
+!
+!   rho~ -> (1 - alpha) rho~ + alpha * diag(occ * f_FD),  alpha = 1 - exp(-nu_cc tau),
+!
+! a convex combination of the identity and the constant-state channel
+! diag(occ f_FD) -> EXACTLY CPTP. Because f_FD is fitted to the current (N,E),
+! both Tr rho~ (number) and sum_a eps_a rho~_aa (energy) are conserved exactly.
+! This is the intra-k thermalization model (the standard relaxation-time /
+! BGK carrier-carrier closure); the full inter-k momentum-resolved collision
+! integral rides the ring (Part D) and is the documented refinement.
+! [Taj-Rossi PRA 78, 052113; Rosati et al. PRB 90, 125140; Goodnick-Lugli
+!  PRB 37, 2578; conserves N and E -- validation invariants]
+!=============================================================================
+subroutine apply_carrier_carrier(sbe, nba, rho_ad, evals, tau)
+    use sbe_superres_ssbe, only: carrier_carrier_relax
+    implicit none
+    type(s_sbe_bloch_solver), intent(in)    :: sbe
+    integer,                  intent(in)    :: nba
+    complex(8),               intent(inout) :: rho_ad(nba, nba)
+    real(8),                  intent(in)    :: evals(nba), tau
+    call carrier_carrier_relax(nba, rho_ad, evals, sbe%occ_max, sbe%eeh_nu_au, tau)
+end subroutine apply_carrier_carrier
 
 
 ! Exact finite-time map of a single Lindblad jump channel L = sqrt(Gamma)|f><i|

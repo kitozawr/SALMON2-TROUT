@@ -449,9 +449,13 @@ character(256),allocatable :: atom_name(:)
   ! k-local impact-ionization Lindblad channel (Stobbe-Redmer-Schattke fit, GaAs):
   ! gamma(e_kin) = P * (e_kin - E_th)^4 * Theta(e_kin - E_th), e_kin from the CBM
   character(1)   :: yn_sbe_impact_ionization
-  real(8)        :: sbe_ii_prefactor      ! P [s^-1 eV^-4]
+  real(8)        :: sbe_ii_prefactor      ! P [s^-1 eV^-a]
   real(8)        :: sbe_ii_threshold_ev   ! E_th [eV]
   real(8)        :: sbe_ii_ramp_ev        ! linear Theta-smoothing width delta_E [eV]
+  ! Impact-ionization fit-form switch: gamma = P (eps-E_th)^a Theta(eps-E_th).
+  ! GaAs: Stobbe quartic (a=4, hard). Si: Keldysh quadratic (a=2, soft).
+  character(32)  :: sbe_ii_form           ! 'stobbe_quartic' | 'keldysh_quadratic'
+  real(8)        :: sbe_ii_exponent       ! fit exponent a (operative value)
   ! Coulomb (time-dependent Hartree-Fock / exchange) renormalization
   ! [Golde-Kira-Meier-Koch, Phys. Status Solidi B 248, 863 (2011)]:
   ! Sigma_nm(k) = - sum_{q/=k} V(k-q) rho_nm(q), V(p)=str*4pi/(eps*Omega*Nk*(p^2+kappa^2))
@@ -459,6 +463,30 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: sbe_coulomb_epsilon    ! background dielectric constant eps
   real(8)        :: sbe_coulomb_strength   ! overall scaling of the exchange kernel
   real(8)        :: sbe_coulomb_screen_au  ! Yukawa screening kappa [1/Bohr]
+  ! Hartree-Fock folding fix: project Sigma^HF block-diagonally onto the 4 FCC
+  ! sublattice sectors (zero the spurious inter-sublattice exchange coupling
+  ! that the cubic-cell band folding creates). [Popescu-Zunger PRB 85, 085201]
+  character(1)   :: yn_sbe_hf_sublattice_proj
+
+  ! Nonlocal "super-compute" mode (Part C): genuine momentum-exchange impact
+  ! ionization + population-relaxing electron-phonon Lindblad. All OFF by
+  ! default; the k-local channels remain the fast default. [scaffolding only at
+  ! this stage -- the dynamics integration follows in later increments]
+  character(1)   :: yn_sbe_superres        ! master switch for the nonlocal mode
+  character(1)   :: yn_sbe_eph             ! population-relaxing e-ph Lindblad
+  real(8)        :: sbe_eph_temperature_k  ! phonon bath T_ph [K] (Bose factor)
+  real(8)        :: sbe_eph_nu_sat         ! collision-rate saturation nu_sat [s^-1]
+  real(8)        :: sbe_eph_eps0_ev        ! nu(eps) saturation onset eps_0 [eV]
+  real(8)        :: sbe_eph_n              ! nu(eps) shape exponent n
+  character(1)   :: yn_sbe_bgr_threshold   ! density-dependent II threshold (BGR)
+  real(8)        :: sbe_bgr_n_gate         ! apply BGR shift only above n [cm^-3]
+  real(8)        :: sbe_bgr_coeff          ! BGR coefficient K [eV cm] (cube-root law)
+  real(8)        :: sbe_search_sigma_e_ev  ! energy-bin width sigma_E [eV] (<=0: grid-matched)
+  ! Carrier-carrier (e-e/e-h) scattering (Part F): CPTP relaxation of the
+  ! adiabatic populations toward a Fermi-Dirac with the same number AND energy
+  ! (intraband thermalization + EID), at a screened-Coulomb rate.
+  character(1)   :: yn_sbe_eeh             ! enable carrier-carrier channel
+  real(8)        :: sbe_eeh_nu_sat         ! carrier-carrier rate scale [s^-1]
 
   !! &epm (local empirical pseudopotential method, Cohen-Bergstresser)
   character(32)  :: epm_material

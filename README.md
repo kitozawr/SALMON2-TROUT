@@ -18,6 +18,7 @@ This fork extends SALMON's Semiconductor Bloch Equations (SBE) module with a **c
   - [Spinor (spin-orbit) EPM → SBE Pipeline Example](#spinor-spin-orbit-epm--sbe-pipeline-example)
   - [Band-structure calculation (`theory='dft_band'`)](#band-structure-calculation-theorydft_band)
 - [Building & Continuous Integration](#building--continuous-integration)
+- [Documentation & Project Wiki](#documentation--project-wiki)
 - [References & Theoretical Background](#references--theoretical-background)
 - [License](#license)
 
@@ -420,6 +421,22 @@ cmake --build build -j "$(nproc)"
 ```
 
 The `-fallow-argument-mismatch -fallow-invalid-boz` flags are needed for the bundled serial-communication stub under modern gfortran (≥ 10). For production runs configure with `-D USE_MPI=ON` and an MPI Fortran compiler, or use `configure.py` as in the upstream SALMON documentation.
+
+---
+
+## Documentation & Project Wiki
+
+In-depth documentation — physics models, every default constant with its primary-source citation, numerical methods, configuration examples, and band folding/unfolding — lives in the [`wiki/`](wiki/) directory, which doubles as the project's persistent design memory:
+
+- **[Wiki home](wiki/README.md)** — index, unit/basis conventions, working conventions.
+- **[Implementation Status](wiki/00_implementation_status.md)** — live progress tracker, decisions log, test inventory.
+- **[Physics Models & Approximations](wiki/01_physics_models.md)** — master equation and dissipation channels (Kuhn-Zurek dephasing, impact ionization, electron-phonon, carrier-carrier), cited.
+- **[Constants & Coefficients](wiki/02_constants.md)** — every default value with its primary source.
+- **[Numerical Methods](wiki/03_numerical_methods.md)** — CF4 Magnus, Yoshida, Strang, Houston basis, energy-bin search, ring-pipeline MPI, sublattice-block HF projection, CPTP proofs.
+- **[Configuration & Examples](wiki/04_configuration_examples.md)** — all namelist parameters and runnable pipelines (GaAs and Silicon).
+- **[Band Folding & Unfolding](wiki/05_folding_unfolding.md)** — cubic-cell 4-fold FCC folding, exact-folding proof, unfold/refold pipeline.
+
+These pages also cover the **Silicon EPM** ground state (`epm_material='Si'`, diamond V^A=0) and the optional nonlocal **"super-compute" mode** (`yn_sbe_superres`): ring-pipeline-MPI Hartree-Fock, electron-phonon and carrier-carrier CPTP Lindblad channels, and density-dependent (band-gap-renormalized) impact-ionization thresholds — all gated OFF by default so existing GaAs runs are unchanged.
 
 ---
 

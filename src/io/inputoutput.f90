@@ -601,10 +601,25 @@ contains
       & sbe_ii_prefactor, &
       & sbe_ii_threshold_ev, &
       & sbe_ii_ramp_ev, &
+      & sbe_ii_form, &
+      & sbe_ii_exponent, &
       & yn_sbe_coulomb, &
       & sbe_coulomb_epsilon, &
       & sbe_coulomb_strength, &
-      & sbe_coulomb_screen_au
+      & sbe_coulomb_screen_au, &
+      & yn_sbe_hf_sublattice_proj, &
+      & yn_sbe_superres, &
+      & yn_sbe_eph, &
+      & sbe_eph_temperature_k, &
+      & sbe_eph_nu_sat, &
+      & sbe_eph_eps0_ev, &
+      & sbe_eph_n, &
+      & yn_sbe_bgr_threshold, &
+      & sbe_bgr_n_gate, &
+      & sbe_bgr_coeff, &
+      & sbe_search_sigma_e_ev, &
+      & yn_sbe_eeh, &
+      & sbe_eeh_nu_sat
 
     namelist/epm/ &
       & epm_material, &
@@ -1046,10 +1061,25 @@ contains
     sbe_ii_prefactor        = 2.0d12     ! Stobbe fit prefactor P [s^-1 eV^-4] (GaAs, PRB 49, 4494)
     sbe_ii_threshold_ev     = 2.1d0      ! Stobbe fit threshold E_th [eV] above the CBM
     sbe_ii_ramp_ev          = 0.2d0      ! linear Theta-smoothing width [eV] (fit resolution); <=0: hard step
+    sbe_ii_form             = 'stobbe_quartic'  ! 'stobbe_quartic'(GaAs,a=4) | 'keldysh_quadratic'(Si,a=2)
+    sbe_ii_exponent         = 4.0d0      ! fit exponent a (operative; set 2 for Si soft threshold, 4.6 for Si full-band)
     yn_sbe_coulomb          = 'n'        ! 'y': enable Coulomb HF (exchange) renormalization (non-k-local, may be slow)
     sbe_coulomb_epsilon     = 12.9d0     ! background dielectric constant eps (GaAs)
     sbe_coulomb_strength    = 1.0d0      ! overall scaling of the exchange kernel (tuning)
     sbe_coulomb_screen_au   = 0.0d0      ! Yukawa screening kappa [1/Bohr]; 0 = bare (q=0 excluded)
+    yn_sbe_hf_sublattice_proj = 'y'      ! project Sigma^HF block-diagonal over 4 FCC sublattices (folding fix)
+    yn_sbe_superres         = 'n'        ! 'y': nonlocal super-compute mode (Part C; scaffolding only so far)
+    yn_sbe_eph              = 'n'        ! 'y': population-relaxing electron-phonon Lindblad
+    sbe_eph_temperature_k   = 300.0d0    ! phonon bath T_ph [K]
+    sbe_eph_nu_sat          = -1.0d0     ! collision-rate saturation [s^-1]; <=0: material default
+    sbe_eph_eps0_ev         = 0.8d0      ! nu(eps) saturation onset eps_0 [eV]
+    sbe_eph_n               = 2.0d0      ! nu(eps) shape exponent n
+    yn_sbe_bgr_threshold    = 'n'        ! 'y': density-dependent II threshold (bandgap renormalization)
+    sbe_bgr_n_gate          = 5.0d18     ! apply BGR shift only above this density [cm^-3]
+    sbe_bgr_coeff           = 1.9d-8     ! BGR coefficient K [eV cm] (tunable [1.9,3.8]e-8)
+    sbe_search_sigma_e_ev   = -1.0d0     ! energy-bin width sigma_E [eV]; <=0: grid-matched
+    yn_sbe_eeh              = 'n'        ! 'y': carrier-carrier (e-e/e-h) thermalization channel
+    sbe_eeh_nu_sat          = -1.0d0     ! carrier-carrier rate scale [s^-1]; <=0: 1e14 default
                                             ! (occupation 1 per spinor band, nelec valence bands instead of nelec/2)
 !! == default for &epm
     epm_material            = 'GaAs'
@@ -1694,10 +1724,25 @@ contains
     call comm_bcast(sbe_ii_prefactor,        nproc_group_global)
     call comm_bcast(sbe_ii_threshold_ev,     nproc_group_global)
     call comm_bcast(sbe_ii_ramp_ev,          nproc_group_global)
+    call comm_bcast(sbe_ii_form,             nproc_group_global)
+    call comm_bcast(sbe_ii_exponent,         nproc_group_global)
     call comm_bcast(yn_sbe_coulomb,          nproc_group_global)
     call comm_bcast(sbe_coulomb_epsilon,     nproc_group_global)
     call comm_bcast(sbe_coulomb_strength,    nproc_group_global)
     call comm_bcast(sbe_coulomb_screen_au,   nproc_group_global)
+    call comm_bcast(yn_sbe_hf_sublattice_proj, nproc_group_global)
+    call comm_bcast(yn_sbe_superres,         nproc_group_global)
+    call comm_bcast(yn_sbe_eph,              nproc_group_global)
+    call comm_bcast(sbe_eph_temperature_k,   nproc_group_global)
+    call comm_bcast(sbe_eph_nu_sat,          nproc_group_global)
+    call comm_bcast(sbe_eph_eps0_ev,         nproc_group_global)
+    call comm_bcast(sbe_eph_n,               nproc_group_global)
+    call comm_bcast(yn_sbe_bgr_threshold,    nproc_group_global)
+    call comm_bcast(sbe_bgr_n_gate,          nproc_group_global)
+    call comm_bcast(sbe_bgr_coeff,           nproc_group_global)
+    call comm_bcast(sbe_search_sigma_e_ev,   nproc_group_global)
+    call comm_bcast(yn_sbe_eeh,              nproc_group_global)
+    call comm_bcast(sbe_eeh_nu_sat,          nproc_group_global)
 !! == bcast for epm
     call comm_bcast(epm_material,            nproc_group_global)
     call comm_bcast(epm_lattice_constant_au, nproc_group_global)
@@ -2697,6 +2742,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_ii_prefactor', sbe_ii_prefactor
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_ii_threshold_ev', sbe_ii_threshold_ev
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_ii_ramp_ev', sbe_ii_ramp_ev
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'sbe_ii_form', trim(sbe_ii_form)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_ii_exponent', sbe_ii_exponent
       if(yn_sbe_coulomb == 'y')then
         write(fh_variables_log, '("# info: Coulomb HF (exchange) renormalization enabled: eps=",ES12.5,&
           & ", strength=",ES12.5,", screen kappa=",ES12.5," 1/Bohr")') &
@@ -2706,6 +2753,19 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_coulomb_epsilon', sbe_coulomb_epsilon
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_coulomb_strength', sbe_coulomb_strength
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_coulomb_screen_au', sbe_coulomb_screen_au
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_hf_sublattice_proj', yn_sbe_hf_sublattice_proj
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_superres', yn_sbe_superres
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_eph', yn_sbe_eph
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_eph_temperature_k', sbe_eph_temperature_k
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_eph_nu_sat', sbe_eph_nu_sat
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_eph_eps0_ev', sbe_eph_eps0_ev
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_eph_n', sbe_eph_n
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_bgr_threshold', yn_sbe_bgr_threshold
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_bgr_n_gate', sbe_bgr_n_gate
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_bgr_coeff', sbe_bgr_coeff
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_search_sigma_e_ev', sbe_search_sigma_e_ev
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_eeh', yn_sbe_eeh
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_eeh_nu_sat', sbe_eeh_nu_sat
 
       if(inml_epm >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'epm', inml_epm
@@ -2825,6 +2885,11 @@ contains
     call yn_argument_check(yn_sbe_spinor)
     call yn_argument_check(yn_sbe_impact_ionization)
     call yn_argument_check(yn_sbe_coulomb)
+    call yn_argument_check(yn_sbe_hf_sublattice_proj)
+    call yn_argument_check(yn_sbe_superres)
+    call yn_argument_check(yn_sbe_eph)
+    call yn_argument_check(yn_sbe_bgr_threshold)
+    call yn_argument_check(yn_sbe_eeh)
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
       stop "Nk must be 1 when yn_periodic=='n'"

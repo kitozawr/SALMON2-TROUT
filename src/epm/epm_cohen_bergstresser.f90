@@ -47,8 +47,36 @@ contains
             case (11)
                 VS_ry =  0.06d0;  VA_ry =  0.01d0
             end select
+        case ('Si', 'Si_kunikiyo')
+            ! Silicon (diamond): two IDENTICAL atoms per primitive cell, so the
+            ! antisymmetric structure factor vanishes -> V^A == 0 for all shells.
+            ! Default (production) symmetric form factors, Kunikiyo Table I:
+            !   V^S(3) = -0.2258 Ry, V^S(8) = +0.05698 Ry, V^S(11) = +0.070709 Ry
+            ! [T. Kunikiyo et al., J. Appl. Phys. 75, 297 (1994), Table I]
+            ! Validated: converged indirect gap ~1.06 eV (Kunikiyo's own calc
+            ! 1.068 eV; exp 1.12 eV), CBM at 0.86*(2pi/a) along <100>.
+            select case (G2)
+            case (3)
+                VS_ry = -0.2258d0;   VA_ry = 0.0d0
+            case (8)
+                VS_ry =  0.05698d0;  VA_ry = 0.0d0
+            case (11)
+                VS_ry =  0.070709d0; VA_ry = 0.0d0
+            end select
+        case ('Si_cb')
+            ! Silicon (diamond), Cohen-Bergstresser (1966) symmetric set
+            ! (validation alternative): V^S(3)=-0.21, V^S(8)=+0.04, V^S(11)=+0.08 Ry.
+            ! V^A == 0 (diamond). [Cohen & Bergstresser, Phys. Rev. 141, 789 (1966)]
+            select case (G2)
+            case (3)
+                VS_ry = -0.21d0;  VA_ry = 0.0d0
+            case (8)
+                VS_ry =  0.04d0;  VA_ry = 0.0d0
+            case (11)
+                VS_ry =  0.08d0;  VA_ry = 0.0d0
+            end select
         case default
-            stop 'epm_cohen_bergstresser: unsupported epm_material (only "GaAs" form factors are tabulated)'
+            stop 'epm_cohen_bergstresser: unsupported epm_material (use "GaAs", "Si" or "Si_cb")'
         end select
 
         VS_ha = VS_ry * ry_to_ha
