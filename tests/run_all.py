@@ -24,6 +24,7 @@ ROOT = os.path.dirname(HERE)
 FORTRAN_DEPS = {
     "test_superres_rates.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
     "test_eph_cptp.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
+    "test_screening.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
 }
 
 

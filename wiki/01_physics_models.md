@@ -78,5 +78,23 @@ E_th is tied to the gap; Σ^HF shrinks the gap with density. Make E_th density-d
 
 −19 meV at 1e18, −41 meV at 1e19 (~2–5% of a ~1.1 eV Si threshold). [Vashishta & Kalia, PRB 25, 6492 (1982)]. Distinct from dopant BGN (√n) [Lanyon & Tuft, IEEE TED ED-26, 1014 (1979)]. K carries a factor-~2 ambiguity; treat [1.9, 3.8]e-8 eV·cm as tunable.
 
-## 10. Electron-electron scattering (future — architecture only) 🔭
-Density-fluctuation jump operators L_q = Σ_k c†_{k+q} c_k, screened-Coulomb rates; CPTP Markov limit + mean-field closure as for II. O(N_k²) double-q sum sharing the ring pass. Mean-field closure carries (1−ρ) Pauli factors. Screening: Thomas-Fermi → Lindhard/RPA. Phase-2. [Taj & Rossi, PRA 78, 052113 (2008); Rosati et al., PRB 90, 125140 (2014)]
+## 10. Carrier-carrier (e-e / e-h) scattering — Part F (channel 🚧, screening G ✅)
+A **second-Born / GW statically-(or dynamically-)screened-Coulomb collision integral cast into CPTP Lindblad form**. The diagonal (population) part is the in−out screened-Coulomb collision integral with (1−f) Pauli factors and a **direct−exchange** matrix element
+
+> Γ_cc(k₁) = (2π/ħ) Σ_{k₂,q,λ} |W̃(q)|² { f_{k₂}(1−f_{k₁+q})(1−f_{k₂−q}) − (1−f_{k₂}) f_{k₁+q} f_{k₂−q} } δ(E_{k₁}+E_{k₂}−E_{k₁+q}−E_{k₂−q}),  |W̃|² = W(W*_dir − W*_exch),
+
+and the off-diagonal part is the **excitation-induced dephasing (EID)** of the polarization (γ = γ₀ + a·n). It becomes CPTP via density-fluctuation jump operators L_q = Σ_k c†_{k+q}c_k under the **Taj-Rossi** completely-positive Markov limit [PRA 78, 052113 (2008)] with the **Rosati-Iotti-Dolcini-Rossi** nonlinear single-particle closure [PRB 90, 125140 (2014)] (carries the (1−ρ) Pauli factors; preserves Tr ρ=N and 0≤ρ≤1).
+
+**Conservation (validation invariants):** conserves total carrier **number** Σf_k AND **energy** ΣE_k f_k within the carrier subsystem (thermalizes to a hot Fermi-Dirac), but does **not** relax energy to the lattice (that is e-ph, §6).
+
+**No double-counting with HF (§5):** HF is the first-order coherent self-energy (energy/Rabi renormalization, no scattering); carrier-carrier is the correlation (2nd-Born/GW) self-energy (real scattering + dephasing). Add carrier-carrier ONLY as the dissipative channel — do not also add a static screened-exchange shift from the same W. [Baym Φ-derivable; Σ=Σ^HF+Σ^(2B)]
+
+**Computation:** O(N_k²) double sum over (k₂,q) → rides the **same ring pass** (Part D) as Σ^HF + nonlocal II + nonlocal e-ph (one extra accumulator, no new communication); ε(q) computed once/step from the gathered ρ; broadened-delta bins; Houston basis; predictor-corrector. **Rate scale 1e13–1e14 s⁻¹** at n=1e17–1e19 cm⁻³ (~10–200 fs). [Goodnick-Lugli PRB 37, 2578; Fischetti-Laux PRB 38, 9721; Mocatti et al. arXiv:2512.08618 (2025) Eq.55; EID: Honold PRB 40, 6442 (1989), Wang PRL 71, 1261 (1993)]
+
+## 11. Dielectric screening — Part G (✅ primitives implemented)
+W(q)=V(q)/ε(q[,ω]); three selectable models (pure functions in `sbe_superres_ssbe`, unit-tested):
+- **(a) Thomas-Fermi/Debye:** ε(q)=1+κ²/q², degenerate κ_TF²=4(3n/π)^⅓/ε or nondegenerate κ_D²=4πn/(εk_BT). [Ashcroft-Mermin]
+- **(b) static Lindhard/RPA — default:** ε(q,0)=1+(κ_TF²/q²)F(q/2k_F), F(x)=½+(1−x²)/(4x)ln|(1+x)/(1−x)| (2k_F kink → Friedel). TF over-screens for q>2k_F. [Lindhard 1954]
+- **(c) dynamic Lindhard / LOPC — GaAs only, n≳5e17:** ω_{L±}²=½[(ω_p²+ω_LO²)±√((ω_p²+ω_LO²)²−4ω_p²ω_TO²)], ω_p²=4πn/(ε_∞m*), single-plasmon-pole. **Disabled for Si** (non-polar). [Varga PR 137, A1896; Mooradian-McWhorter PR 177, 1231 (1969)]
+
+Static screening under-estimates the rate; dynamic (LOPC) is needed for sub-100-fs thermalization (Elsaesser/Shah).

@@ -33,7 +33,9 @@ module sbe_superres_ssbe
               frohlich_hi_factor, ii_rate_general, bgr_gap_shift_ev, &
               gaussian_shape, amp_damp_channel, &
               mev_to_ha, d_evcm_to_au, d_evang_to_au, rho_gcm3_to_au, &
-              golden_rule_prefactor, eph_thermal_split
+              golden_rule_prefactor, eph_thermal_split, &
+              eps_thomas_fermi, tf_kappa2_degenerate, debye_kappa2, &
+              lindhard_F, eps_lindhard_static, plasmon_freq2, lopc_branches
 
     ! =====================================================================
     ! Silicon intervalley deformation potentials -- Pop "new" set (default).
@@ -66,10 +68,23 @@ module sbe_superres_ssbe
     real(8), parameter, public :: GAAS_IV_D_EVANG(GAAS_N_IV) = &
         (/ 10.0d0, 10.0d0, 10.0d0,  5.0d0,  7.0d0 /)
     real(8), parameter, public :: GAAS_HW_LO_MEV = 36.0d0    ! Frohlich LO phonon [meV]
+    real(8), parameter, public :: GAAS_HW_TO_MEV = 33.6d0    ! TO phonon [meV] (LOPC)
     real(8), parameter, public :: GAAS_ALPHA_FR  = 0.068d0   ! Frohlich coupling
     real(8), parameter, public :: GAAS_EPS0      = 12.9d0    ! static dielectric
     real(8), parameter, public :: GAAS_EPS_INF   = 10.89d0   ! high-freq dielectric
     real(8), parameter, public :: GAAS_M_GAMMA   = 0.067d0   ! Gamma effective mass [m_e]
+    real(8), parameter, public :: GAAS_M_HH      = 0.51d0    ! heavy-hole mass [m_e]
+    real(8), parameter, public :: GAAS_M_LH      = 0.082d0   ! light-hole mass [m_e]
+
+    ! =====================================================================
+    ! Silicon screening constants (non-polar: no LO-phonon-plasmon coupling).
+    ! [eps: std Si; masses: Si effective-mass tables (m_l/m_t, hh/lh)]
+    ! =====================================================================
+    real(8), parameter, public :: SI_EPS    = 11.7d0    ! static dielectric (non-polar)
+    real(8), parameter, public :: SI_M_L    = 0.98d0    ! longitudinal mass [m_e]
+    real(8), parameter, public :: SI_M_T    = 0.19d0    ! transverse mass [m_e]
+    real(8), parameter, public :: SI_M_HH   = 0.49d0    ! heavy-hole mass [m_e]
+    real(8), parameter, public :: SI_M_LH   = 0.16d0    ! light-hole mass [m_e]
 
 contains
 
@@ -275,5 +290,106 @@ contains
         fe = (Nb + 1d0) / denom
         fa = Nb / denom
     end subroutine eph_thermal_split
+
+    ! =====================================================================
+    ! Part G -- dielectric screening models for the carrier-carrier channel.
+    ! W(q) = V(q)/eps(q[,omega]). Pure functions; the caller supplies the
+    ! carrier density, Fermi wavevector and phonon frequencies in a.u.
+    ! =====================================================================
+
+    ! Static dielectric, model (a) Thomas-Fermi/Debye: eps(q) = 1 + kappa^2/q^2.
+    ! [Ashcroft & Mermin; long-wavelength limit of Lindhard theory]
+    pure function eps_thomas_fermi(q, kappa2) result(eps)
+        real(8), intent(in) :: q, kappa2
+        real(8) :: eps
+        if (q <= 0d0) then
+            eps = huge(1d0)            ! q->0: perfect screening
+        else
+            eps = 1d0 + kappa2 / (q * q)
+        end if
+    end function eps_thomas_fermi
+
+    ! Degenerate (T->0) Thomas-Fermi screening wavevector squared [a.u.]:
+    !   kappa_TF^2 = 4 (3 n / pi)^(1/3) / eps  ( = 4 k_F/(pi eps) ).
+    ! [arXiv:2312.13059; Ashcroft & Mermin]
+    pure function tf_kappa2_degenerate(n_au, eps_bg) result(k2)
+        real(8), intent(in) :: n_au, eps_bg
+        real(8) :: k2
+        if (n_au <= 0d0) then
+            k2 = 0d0
+        else
+            k2 = 4d0 * (3d0 * n_au / PI) ** (1d0 / 3d0) / max(eps_bg, 1d-12)
+        end if
+    end function tf_kappa2_degenerate
+
+    ! Nondegenerate (Debye-Huckel) screening wavevector squared [a.u.]:
+    !   kappa_D^2 = 4 pi n / (eps k_B T).  [Ashcroft & Mermin]
+    pure function debye_kappa2(n_au, eps_bg, kT_au) result(k2)
+        real(8), intent(in) :: n_au, eps_bg, kT_au
+        real(8) :: k2
+        if (n_au <= 0d0 .or. kT_au <= 0d0) then
+            k2 = 0d0
+        else
+            k2 = 4d0 * PI * n_au / (max(eps_bg, 1d-12) * kT_au)
+        end if
+    end function debye_kappa2
+
+    ! 3D static Lindhard function F(x), x = q/(2 k_F):
+    !   F(x) = 1/2 + (1-x^2)/(4x) ln|(1+x)/(1-x)|.
+    ! F(0)=1 (recovers Thomas-Fermi), F(1)=1/2 (the 2k_F kink -> Friedel
+    ! oscillations). [J. Lindhard, Mat.-Fys. Medd. 28, 8 (1954); Ashcroft & Mermin]
+    pure function lindhard_F(x) result(F)
+        real(8), intent(in) :: x
+        real(8) :: F
+        if (abs(x) < 1d-8) then
+            F = 1d0
+        else if (abs(x - 1d0) < 1d-8) then
+            F = 0.5d0
+        else
+            F = 0.5d0 + (1d0 - x * x) / (4d0 * x) * log(abs((1d0 + x) / (1d0 - x)))
+        end if
+    end function lindhard_F
+
+    ! Static Lindhard/RPA dielectric, model (b, recommended default):
+    !   eps(q,0) = 1 + (kappa_TF^2/q^2) F(q/2k_F).
+    ! Correct across the q range that dominates the collision integral (Thomas-
+    ! Fermi over-screens for q>2k_F). [Lindhard 1954; arXiv:1206.2003]
+    pure function eps_lindhard_static(q, kF, kappa2) result(eps)
+        real(8), intent(in) :: q, kF, kappa2
+        real(8) :: eps
+        if (q <= 0d0) then
+            eps = huge(1d0)
+        else if (kF <= 0d0) then
+            eps = 1d0 + kappa2 / (q * q)        ! no carriers: bare TF form
+        else
+            eps = 1d0 + kappa2 / (q * q) * lindhard_F(q / (2d0 * kF))
+        end if
+    end function eps_lindhard_static
+
+    ! Bulk plasmon frequency squared [a.u.]: omega_p^2 = 4 pi n/(eps_inf m*).
+    ! (the high-frequency plasmon screens with eps_inf, not eps_0). [Mahan]
+    pure function plasmon_freq2(n_au, eps_inf, mstar) result(wp2)
+        real(8), intent(in) :: n_au, eps_inf, mstar
+        real(8) :: wp2
+        if (n_au <= 0d0) then
+            wp2 = 0d0
+        else
+            wp2 = 4d0 * PI * n_au / (max(eps_inf, 1d-12) * max(mstar, 1d-12))
+        end if
+    end function plasmon_freq2
+
+    ! Coupled LO-phonon-plasmon (LOPC) branches, model (c, GaAs only):
+    !   omega_{L+/-}^2 = 1/2 [ (wp^2+wLO^2) +/- sqrt((wp^2+wLO^2)^2 - 4 wp^2 wTO^2) ].
+    ! Vieta: wLp2+wLm2 = wp^2+wLO^2, wLp2*wLm2 = wp^2 wTO^2. The branches
+    ! anticross at wp = wLO. [Varga PR 137, A1896; Mooradian-McWhorter PR 177, 1231]
+    pure subroutine lopc_branches(wp2, wLO2, wTO2, wLp2, wLm2)
+        real(8), intent(in)  :: wp2, wLO2, wTO2
+        real(8), intent(out) :: wLp2, wLm2
+        real(8) :: b, disc
+        b = wp2 + wLO2
+        disc = sqrt(max(b * b - 4d0 * wp2 * wTO2, 0d0))
+        wLp2 = 0.5d0 * (b + disc)
+        wLm2 = 0.5d0 * (b - disc)
+    end subroutine lopc_branches
 
 end module sbe_superres_ssbe

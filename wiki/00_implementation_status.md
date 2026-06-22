@@ -32,9 +32,10 @@ Roadmap source: the Si + nonlocal-super-compute task (Parts A–F) plus future c
 | C6 | CPTP gate (amplitude-damping map test) | ✅ | #44 | trace, qubit positivity det≥0, transfer formulas, Hermiticity, γ=0 identity |
 | C7 | BGR-gated II threshold | ✅ | #44 | running n(t) shifts E_th=E_th0−|K n^⅓| above gate; end-to-end stable |
 | C8 | Dissipator sub-cycling | ✅ | #44 | m_sub from eph_numax·τ; II+e-ph split into m CPTP sub-steps; trace conserved at ν_sat=1e18. m=1 (unchanged) when e-ph off |
-| **D** | Ring/pipeline MPI (replace all-gather in super-mode) | ⬜ | — | one fused pass for Σ^HF + nl-II + nl-eph |
-| **F** | e-e scattering — architecture TODO hook only | ⬜ | — | comment + ring hook, no coefficients |
-| doc | Wiki pages 01–05 committed as long-term memory | 🚧 | #44+ | this commit establishes them |
+| **D** | Ring/pipeline MPI (replace all-gather in super-mode) | ⬜ | — | one fused pass for Σ^HF + nl-II + nl-eph + e-e |
+| **G** | Screening primitives (TF/Debye, Lindhard/RPA, LOPC) | ✅ | #44 | pure functions + GaAs/Si dielectric constants; unit-tested |
+| **F** | Carrier-carrier (e-e/e-h) nonlocal CPTP Lindblad channel | 🚧 | #44 | design spec done; uses G screening; collision integral rides the ring (D) — pending |
+| doc | Wiki pages 01–05 committed as long-term memory | ✅ | #44 | maintained per increment |
 
 ---
 
@@ -46,6 +47,10 @@ Roadmap source: the Si + nonlocal-super-compute task (Parts A–F) plus future c
 - **Max ionization ceiling** (32 e per cubic cell) = 1.77e23 cm⁻³ (full valence inversion).
 - **GitHub CI is serial-only by request** (compiler/syntax gate). MPI verified locally.
 - **Commits are signed-off** (`git commit -s`), trailers Co-Authored-By + Claude-Session.
+- **Part G = screening** (TF/Debye, static Lindhard/RPA = default, dynamic LOPC = GaAs-only); **Part F = carrier-carrier (e-e/e-h)** collision channel that USES G.
+- **No HF double-counting:** carrier-carrier (F) is the correlation (2nd-Born/GW) self-energy — dissipative only. The static screened-exchange energy shift stays SOLELY in HF (Σ^HF). Do not add it twice.
+- **Carrier-carrier invariants:** conserves Σf_k (number) AND ΣE_k f_k (energy) within the carrier subsystem (it thermalizes to a hot Fermi-Dirac, does NOT relax energy to the lattice). Use both as machine-precision validation invariants.
+- **e-e/e-h rate scale:** 1e13–1e14 s⁻¹ at n=1e17–1e19 cm⁻³ (thermalization ~10–200 fs). Static screening under-estimates; dynamic (LOPC) needed for sub-100-fs.
 
 ## CPTP invariants (must hold for every new dissipator)
 - Each exp(τD) a genuine GKLS map; clamp all (1−ρ) Pauli factors to [0,1].
@@ -63,6 +68,7 @@ Roadmap source: the Si + nonlocal-super-compute task (Parts A–F) plus future c
 | `test_superres_rates.f90` | Part C primitives | ν(ε) limits, N_B, energy-bin area/peak, Fröhlich asinh, II 2^a scaling, BGR −19/−41 meV, data tables (standalone gfortran) |
 | `test_eph_cptp.f90` | Part C5/C6 | amplitude-damping map: trace, qubit positivity (det≥0), transfer formulas, coherence damping, Hermiticity, γ=0 identity |
 | `test_superres_rates.f90` (extended) | Part C5 | + unit conversions (meV/eV·cm/eV·Å/g·cm⁻³→a.u.), golden_rule_prefactor, eph_thermal_split (fe+fa=1, fe/fa=(N+1)/N) |
+| `test_screening.f90` | Part G | eps_TF limits, Lindhard F(0)=1/F(1)=½/monotone, eps_Lindhard→TF at small q, plasmon ω_p², LOPC Vieta sum/product + anticrossing |
 | _(add per increment)_ | | |
 
 End-to-end smoke (manual): scalar GaAs 4³, `yn_sbe_superres='y'` + `yn_sbe_eph='y'`
@@ -79,17 +85,31 @@ Run all: `python3 tests/run_all.py` (each test prints PASS/FAIL and exits nonzer
 ---
 
 ## Next action on resume
-The k-local super-mode feature set is COMPLETE and tested: C0, C-prim, C2, C5
-(full phonon table), C6, C7 (BGR threshold), C8 (sub-cycling) all ✅. Every
-new channel is CPTP (trace conserved end-to-end) and gated OFF by default.
+k-local super-mode COMPLETE (C0,C-prim,C2,C5,C6,C7,C8 ✅). Screening primitives
+(Part G ✅) and the carrier-carrier design spec (Part F) are in. Every new
+channel is CPTP, gated OFF by default.
 
-**Next increment — Part F (e-e architecture TODO hook):** small, no physics.
-Add a clearly-marked TODO + design comment for the e-e density-fluctuation
-channel (L_q = Σ_k c†_{k+q} c_k, screened-Coulomb rates, O(N_k²) double-q sum,
-mean-field (1−ρ) closure, Thomas-Fermi→Lindhard screening) sited so it slots
-into the ring pass alongside Σ^HF + nonlocal II without redesign. Leave a
-named accumulator-slot hook in the (future) ring data structures. Phase-2, no
-coefficients. [Taj-Rossi PRA 78, 052113; Rosati et al. PRB 90, 125140]
+**The remaining big block is the NONLOCAL infrastructure** (needed by nonlocal
+II/e-ph AND by the carrier-carrier channel F). Do it in this order:
+1. **C3 energy-windowed expanding-radius partner search** — a routine over the
+   gathered all-k adiabatic energies returning energy-conserving partner
+   weights (broadened bin), deterministic, no MC. Unit-test on a synthetic grid.
+2. **D ring/pipeline MPI** — systolic ring (Plimpton) replacing the all-gather;
+   ONE fused pass accumulating Σ^HF + nonlocal II + nonlocal e-ph + e-e. Start by
+   refactoring the existing Coulomb all-gather into a ring with a single
+   accumulator, verify 1-rank vs 2-rank identical (as the current Coulomb test
+   does), then add accumulators.
+3. **C4 nonlocal momentum-exchange II + nonlocal e-ph** on the ring.
+4. **F carrier-carrier (e-e/e-h)** on the same ring: in/out screened-Coulomb
+   collision integral with (1−ρ) Pauli factors and direct−exchange |W̃|²,
+   Taj-Rossi CP-Markov + Rosati closure; screening ε(q) from Part G computed
+   once/step from the gathered ρ; broadened-delta energy bins; Houston basis;
+   predictor-corrector. CONSERVE Σf_k and ΣE_k f_k (validation invariants).
+   Do NOT add a static screened-exchange shift (that stays in HF) — no double
+   counting. Default screening = static Lindhard (G option b); LOPC (option c)
+   GaAs-only, n ≳ 5e17.
+Keep everything behind yn_sbe_superres OFF; validate against Chefonov Si
+bleaching (wiki/04) before claiming physical correctness.
 
 **Then the final major effort — nonlocal (C4) + ring MPI (D):**
 - C3 full energy-windowed expanding-radius partner search (enumeration, no MC).

@@ -143,3 +143,25 @@ g-type couple same-⟨100⟩-axis valleys; f-type orthogonal-axis. **Project dec
 | memory per rank | O(N_k/P + one transit block) | Plimpton, JCP 117, 1 (1995) |
 | communication | O(P) sends of size O(N_k/P) | same |
 | force-decomposition upgrade | N/√P | Plimpton & Hendrickson, JCC 17, 326 (1996) |
+
+---
+
+## 12. Dielectric screening (Part G ✅) and carrier-carrier (Part F)
+| Quantity | Value | Source |
+|---|---|---|
+| GaAs ε₀ / ε_∞ | 12.9 / 10.89 | std GaAs; NSM/Ioffe |
+| GaAs ħω_LO / ħω_TO | 36 / 33.6 meV | std GaAs (300 K NSM 36.1/33.2) |
+| GaAs m*_Γ / m_hh / m_lh | 0.067 / 0.51 / 0.082 mₑ | std GaAs |
+| GaAs ω_p (n=1e18 / 1e19) | ≈43.5 / 137 meV (uses ε_∞) | Mahan; Mooradian-McWhorter PR 177, 1231 |
+| GaAs LOPC anticrossing (ω_p=ω_LO) | n ≈ 7×10¹⁷ cm⁻³ | Mooradian-McWhorter PR 177, 1231 (1969) |
+| Si ε (static, non-polar) | 11.7 | std Si |
+| Si m_l / m_t / m_hh / m_lh | 0.98 / 0.19 / 0.49 / 0.16 mₑ | Si effective-mass tables |
+| Si LOPC | N/A (non-polar, no Fröhlich LO-plasmon) | Fischetti PRB 44, 5527 (1991) |
+| κ_TF² (degenerate, a.u.) | 4(3n/π)^⅓/ε = 4k_F/(πε) | Ashcroft-Mermin; arXiv:2312.13059 |
+| κ_D² (Debye, a.u.) | 4πn/(εk_BT) | Ashcroft-Mermin |
+| Lindhard F(x) | ½+(1−x²)/(4x)ln\|(1+x)/(1−x)\| | Lindhard, Mat.-Fys. Medd. 28, 8 (1954) |
+| carrier-carrier rate scale | 1e13–1e14 s⁻¹ @ 1e17–1e19 cm⁻³ | Goodnick-Lugli PRB 37, 2578; Fischetti-Laux PRB 38, 9721 |
+| EID slope (qualitative) | γ=γ₀+a·n, linear; e-carrier ≈8× e-exciton | Honold et al. PRB 40, 6442 (1989) |
+| screening default | static Lindhard/RPA (b); LOPC (c) GaAs-only n≳5e17 | recommendation |
+
+**No HF double-counting:** carrier-carrier (F) = correlation (2nd-Born/GW) self-energy, dissipative only; the static screened-exchange shift stays in Σ^HF. Carrier-carrier conserves Σf_k and ΣE_k f_k (validation invariants).
