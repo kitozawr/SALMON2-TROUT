@@ -109,6 +109,13 @@ module bloch_solver_ssbe
         real(8) :: coul_screen2  = 0d0  ! kappa^2 [1/Bohr^2] (Yukawa regulariser)
         integer :: icomm         = 0    ! MPI communicator (for the non-local exchange sum)
         complex(8), allocatable :: sigma_hf(:, :, :) ! (nba, nba, ik_min:ik_max) exchange Sigma
+
+        ! Ring/pipeline MPI (Part D): systolic-ring all-pairs pass replacing the
+        ! all-gather for the non-local sums in super-mode. Memory O(N_k/P + one
+        ! transit block) instead of O(N_k). [Plimpton JCP 117, 1 (1995)]
+        logical :: flag_ring = .false.
+        integer :: irank = 0, nproc = 1
+        integer, allocatable :: itbl_min(:), itbl_max(:)  ! k-partition per rank (0:nproc-1)
     end type
 
     !=========================================================================
@@ -191,7 +198,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
                              yn_sbe_eph, sbe_eph_temperature_k, sbe_eph_nu_sat, &
                              sbe_eph_eps0_ev, sbe_eph_n, sbe_search_sigma_e_ev, &
                              yn_sbe_bgr_threshold, sbe_bgr_n_gate, sbe_bgr_coeff, &
-                             epm_material
+                             yn_sbe_superres, epm_material
     use sbe_superres_ssbe, only: bose_factor
     use math_constants, only: pi
     use phys_constants, only: au_fs, kB_au, au_ev
@@ -215,6 +222,12 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     call split_range(1, sbe%nk, nproc, itbl_min, itbl_max)
     sbe%ik_min = itbl_min(irank)
     sbe%ik_max = itbl_max(irank)
+    ! store the partition + rank info for the ring-pipeline (Part D)
+    sbe%irank = irank
+    sbe%nproc = nproc
+    allocate(sbe%itbl_min(0:nproc-1), sbe%itbl_max(0:nproc-1))
+    sbe%itbl_min = itbl_min
+    sbe%itbl_max = itbl_max
 
     allocate(sbe%rho(1:sbe%nb, 1:sbe%nb, sbe%ik_min:sbe%ik_max))
     
@@ -401,6 +414,9 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
                       / (max(sbe_coulomb_epsilon, 1d-12) * gs%volume * dble(gs%nk))
         sbe%coul_screen2 = sbe_coulomb_screen_au**2
         sbe%icomm = icomm
+        ! Use the systolic ring (Part D) for the non-local exchange sum in
+        ! super-mode (memory O(Nk/P)); otherwise the all-gather (memory O(Nk)).
+        sbe%flag_ring = (yn_sbe_superres == 'y')
         if (sbe%n_active_bands > 0) &
             allocate(sbe%sigma_hf(1:sbe%n_active_bands, 1:sbe%n_active_bands, &
                                   sbe%ik_min:sbe%ik_max))
@@ -937,18 +953,60 @@ end subroutine build_HVG
 ! each rank forms Sigma for its local k. Cost O(Nk^2 nba^2) per call; evaluated
 ! once per dt step (the mean field is frozen over the Strang/CF4 sub-steps).
 !=============================================================================
+! Dispatcher: form Sigma^HF either via the all-gather (default) or the systolic
+! ring (super-mode, Part D), then apply the sublattice-block projection (Part E).
 subroutine compute_coulomb_selfenergy(sbe, gs)
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info),      intent(in)    :: gs
+    if (sbe%n_active_bands < 1) return
+    if (sbe%flag_ring) then
+        call compute_coulomb_selfenergy_ring(sbe, gs)
+    else
+        call compute_coulomb_selfenergy_allgather(sbe, gs)
+    end if
+    if (sbe%flag_hf_subproj) call apply_hf_sublattice_projection(sbe, gs)
+end subroutine compute_coulomb_selfenergy
+
+
+! Screened-Coulomb kernel V(k-q) [a.u.] with minimum-image |k-q| and the q=k
+! self-term excluded (returns 0). Shared by the all-gather and the ring.
+pure function coulomb_kernel(sbe, gs, ik, iq) result(vkq)
+    implicit none
+    type(s_sbe_bloch_solver), intent(in) :: sbe
+    type(s_sbe_gs_info),      intent(in) :: gs
+    integer,                  intent(in) :: ik, iq
+    real(8) :: vkq, dr(3), dkx, dky, dkz, q2
+    dr(1) = gs%kpoint(1, ik) - gs%kpoint(1, iq)
+    dr(2) = gs%kpoint(2, ik) - gs%kpoint(2, iq)
+    dr(3) = gs%kpoint(3, ik) - gs%kpoint(3, iq)
+    dr(1) = dr(1) - dnint(dr(1))
+    dr(2) = dr(2) - dnint(dr(2))
+    dr(3) = dr(3) - dnint(dr(3))
+    dkx = dr(1)*gs%b_matrix(1,1) + dr(2)*gs%b_matrix(2,1) + dr(3)*gs%b_matrix(3,1)
+    dky = dr(1)*gs%b_matrix(1,2) + dr(2)*gs%b_matrix(2,2) + dr(3)*gs%b_matrix(3,2)
+    dkz = dr(1)*gs%b_matrix(1,3) + dr(2)*gs%b_matrix(2,3) + dr(3)*gs%b_matrix(3,3)
+    q2 = dkx*dkx + dky*dky + dkz*dkz
+    if (q2 < 1d-12) then
+        vkq = 0d0                          ! exclude q = k (the V(0) self term)
+    else
+        vkq = sbe%coul_pref / (q2 + sbe%coul_screen2)
+    end if
+end function coulomb_kernel
+
+
+! All-gather implementation: zero-pad the local drho and comm_summation to the
+! full-BZ drho on every rank, then form Sigma for the local k. Memory O(Nk).
+subroutine compute_coulomb_selfenergy_allgather(sbe, gs)
     use communication, only: comm_summation
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info),      intent(in)    :: gs
-    integer :: nba, ik, iq, i, j, in, im, s
-    real(8) :: dr(3), dkx, dky, dkz, q2, vkq, proj
+    integer :: nba, ik, iq, i, j, in, im
+    real(8) :: vkq
     complex(8), allocatable :: rho_loc(:, :, :), rho_all(:, :, :)
 
     nba = sbe%n_active_bands
-    if (nba < 1) return
-
     allocate(rho_loc(nba, nba, sbe%nk), rho_all(nba, nba, sbe%nk))
     rho_loc = (0d0, 0d0)
     do ik = sbe%ik_min, sbe%ik_max
@@ -958,30 +1016,17 @@ subroutine compute_coulomb_selfenergy(sbe, gs)
                 in = sbe%active_idx(i)
                 rho_loc(i, j, ik) = sbe%rho(in, im, ik)
             end do
-            ! subtract the ground-state occupation (rho_0) on the diagonal
             rho_loc(j, j, ik) = rho_loc(j, j, ik) - dcmplx(gs%occup(im, ik), 0d0)
         end do
     end do
     call comm_summation(rho_loc, rho_all, nba * nba * sbe%nk, sbe%icomm)
 
-    !$omp parallel do default(shared) schedule(dynamic) &
-    !$omp    private(ik, iq, i, j, dr, dkx, dky, dkz, q2, vkq)
+    !$omp parallel do default(shared) schedule(dynamic) private(ik, iq, i, j, vkq)
     do ik = sbe%ik_min, sbe%ik_max
         sbe%sigma_hf(:, :, ik) = (0d0, 0d0)
         do iq = 1, sbe%nk
-            ! minimum image of (k - q) in reduced coords, then -> Cartesian
-            dr(1) = gs%kpoint(1, ik) - gs%kpoint(1, iq)
-            dr(2) = gs%kpoint(2, ik) - gs%kpoint(2, iq)
-            dr(3) = gs%kpoint(3, ik) - gs%kpoint(3, iq)
-            dr(1) = dr(1) - dnint(dr(1))
-            dr(2) = dr(2) - dnint(dr(2))
-            dr(3) = dr(3) - dnint(dr(3))
-            dkx = dr(1)*gs%b_matrix(1,1) + dr(2)*gs%b_matrix(2,1) + dr(3)*gs%b_matrix(3,1)
-            dky = dr(1)*gs%b_matrix(1,2) + dr(2)*gs%b_matrix(2,2) + dr(3)*gs%b_matrix(3,2)
-            dkz = dr(1)*gs%b_matrix(1,3) + dr(2)*gs%b_matrix(2,3) + dr(3)*gs%b_matrix(3,3)
-            q2 = dkx*dkx + dky*dky + dkz*dkz
-            if (q2 < 1d-12) cycle          ! exclude q = k (the V(0) self term)
-            vkq = sbe%coul_pref / (q2 + sbe%coul_screen2)
+            vkq = coulomb_kernel(sbe, gs, ik, iq)
+            if (vkq == 0d0) cycle
             do j = 1, nba
                 do i = 1, nba
                     sbe%sigma_hf(i, j, ik) = sbe%sigma_hf(i, j, ik) - vkq * rho_all(i, j, iq)
@@ -990,36 +1035,108 @@ subroutine compute_coulomb_selfenergy(sbe, gs)
         end do
     end do
     !$omp end parallel do
+    deallocate(rho_loc, rho_all)
+end subroutine compute_coulomb_selfenergy_allgather
 
-    ! Sublattice-block projection (Part E folding fix): a translationally
-    ! invariant Coulomb operator conserves primitive crystal momentum, so the
-    ! exchange between two cubic bands folding to the same cubic k but living on
-    ! DIFFERENT FCC sublattices is exactly zero. Multiply each OFF-diagonal
-    ! Sigma_ij(k) by the same-sublattice probability  sum_s w_s(i) w_s(j)
-    ! (=1 if both bands sit on one sublattice, 0 if on disjoint ones). The
-    ! diagonal (energy renormalization) is kept at full strength; proj is real
-    ! and symmetric, so Sigma stays Hermitian. [Popescu-Zunger PRB 85, 085201]
-    if (sbe%flag_hf_subproj) then
-        !$omp parallel do default(shared) private(ik, i, j, in, im, s, proj)
+
+! Ring/pipeline implementation (Part D): each rank holds its local drho block
+! plus ONE transit buffer. Blocks circulate around the ring (comm_exchange =
+! MPI_Sendrecv) in nproc steps; at each hop the rank contracts its local k
+! against the transit q-block into Sigma. After nproc-1 hops every block has
+! visited, completing the full O(Nk^2) sum. Memory O(Nk/P + one block) -- does
+! NOT grow with P. Bit-identical to the all-gather (same kernel, same order of
+! the q-blocks). One fused pass: extra nonlocal accumulators (II, e-ph, e-e)
+! can be added here without new communication. [Plimpton JCP 117, 1 (1995)]
+subroutine compute_coulomb_selfenergy_ring(sbe, gs)
+    use communication, only: comm_exchange
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info),      intent(in)    :: gs
+    integer :: nba, nproc, maxn, hop, src, q0, ntr, ik, jq, iq, i, j, in, im
+    integer :: idest, isrc
+    real(8) :: vkq
+    complex(8), allocatable :: transit(:, :, :), recvbuf(:, :, :)
+
+    nba = sbe%n_active_bands
+    nproc = sbe%nproc
+    maxn = 0
+    do i = 0, nproc - 1
+        maxn = max(maxn, sbe%itbl_max(i) - sbe%itbl_min(i) + 1)
+    end do
+    allocate(transit(nba, nba, maxn), recvbuf(nba, nba, maxn))
+
+    ! local drho block packed into transit[1:nloc]
+    transit = (0d0, 0d0)
+    do ik = sbe%ik_min, sbe%ik_max
+        jq = ik - sbe%ik_min + 1
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                transit(i, j, jq) = sbe%rho(in, im, ik)
+            end do
+            transit(j, j, jq) = transit(j, j, jq) - dcmplx(gs%occup(im, ik), 0d0)
+        end do
+    end do
+    do ik = sbe%ik_min, sbe%ik_max
+        sbe%sigma_hf(:, :, ik) = (0d0, 0d0)
+    end do
+
+    idest = mod(sbe%irank + 1, nproc)
+    isrc  = mod(sbe%irank - 1 + nproc, nproc)
+    src   = sbe%irank
+    do hop = 0, nproc - 1
+        q0  = sbe%itbl_min(src)
+        ntr = sbe%itbl_max(src) - sbe%itbl_min(src) + 1
+        !$omp parallel do default(shared) schedule(dynamic) private(ik, jq, iq, i, j, vkq)
         do ik = sbe%ik_min, sbe%ik_max
-            do j = 1, nba
-                im = sbe%active_idx(j)
-                do i = 1, nba
-                    if (i == j) cycle
-                    in = sbe%active_idx(i)
-                    proj = 0d0
-                    do s = 1, 4
-                        proj = proj + gs%unfold_w(s, in, ik) * gs%unfold_w(s, im, ik)
+            do jq = 1, ntr
+                iq = q0 + jq - 1
+                vkq = coulomb_kernel(sbe, gs, ik, iq)
+                if (vkq == 0d0) cycle
+                do j = 1, nba
+                    do i = 1, nba
+                        sbe%sigma_hf(i, j, ik) = sbe%sigma_hf(i, j, ik) - vkq * transit(i, j, jq)
                     end do
-                    sbe%sigma_hf(i, j, ik) = sbe%sigma_hf(i, j, ik) * proj
                 end do
             end do
         end do
         !$omp end parallel do
-    end if
+        if (hop < nproc - 1) then
+            call comm_exchange(transit, idest, recvbuf, isrc, 1, sbe%icomm)
+            transit = recvbuf
+            src = mod(src - 1 + nproc, nproc)
+        end if
+    end do
+    deallocate(transit, recvbuf)
+end subroutine compute_coulomb_selfenergy_ring
 
-    deallocate(rho_loc, rho_all)
-end subroutine compute_coulomb_selfenergy
+
+! Part E sublattice-block projection of Sigma^HF (shared by all-gather & ring).
+subroutine apply_hf_sublattice_projection(sbe, gs)
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info),      intent(in)    :: gs
+    integer :: nba, ik, i, j, in, im, s
+    real(8) :: proj
+    nba = sbe%n_active_bands
+    !$omp parallel do default(shared) private(ik, i, j, in, im, s, proj)
+    do ik = sbe%ik_min, sbe%ik_max
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                if (i == j) cycle
+                in = sbe%active_idx(i)
+                proj = 0d0
+                do s = 1, 4
+                    proj = proj + gs%unfold_w(s, in, ik) * gs%unfold_w(s, im, ik)
+                end do
+                sbe%sigma_hf(i, j, ik) = sbe%sigma_hf(i, j, ik) * proj
+            end do
+        end do
+    end do
+    !$omp end parallel do
+end subroutine apply_hf_sublattice_projection
 
 
 ! Single CF4 (commutator-free Magnus, 4th order) sub-step of length tau,
