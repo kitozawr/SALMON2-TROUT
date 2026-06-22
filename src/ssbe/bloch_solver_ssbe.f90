@@ -198,7 +198,7 @@ subroutine init_eph_phonon_table(sbe, material, kT_au)
 end subroutine init_eph_phonon_table
 
 
-subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
+subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     use util_ssbe
     use communication, only: comm_get_groupinfo, comm_summation, comm_bcast
     use salmon_global, only: frozen_core_threshold_ev, frozen_free_threshold_ev, &
@@ -221,13 +221,22 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     type(s_sbe_gs_info), intent(in) :: gs
     integer, intent(in) :: nb_sbe
     integer, intent(in) :: icomm
+    ! Print the channel banners (default .true.). The multiscale driver sets it
+    ! .false. for all but one macropoint so the diagnostics appear once, not once
+    ! per macropoint group.
+    logical, intent(in), optional :: verbose
     integer :: ik, ib, nk_proc, irank, nproc, ierr, count_active
     integer, allocatable :: itbl_min(:), itbl_max(:)
     real(8) :: eigen_ev, fermi_energy_ev
     integer, allocatable :: is_active_buf(:)
     integer :: homo_idx, lumo_idx
+    logical :: lprint
 
     call comm_get_groupinfo(icomm, irank, nproc)
+
+    ! Banner-print gate: only the group root, and only when verbose (or absent).
+    lprint = (irank == 0)
+    if (present(verbose)) lprint = lprint .and. verbose
 
     sbe%nk = gs%nk
     sbe%nb = nb_sbe
@@ -239,6 +248,13 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     ! store the partition + rank info for the ring-pipeline (Part D)
     sbe%irank = irank
     sbe%nproc = nproc
+    ! Communicator the k-points are distributed over (the per-macropoint group
+    ! icomm_macro in multiscale, or the world comm in single-cell realtime). Set
+    ! unconditionally here: every collective in the new channels reduces over it
+    ! (Coulomb all-gather/ring AND the nonlocal-II / BGR global reductions), so
+    ! it must be valid even when Coulomb is off. (Previously it was set only in
+    ! the Coulomb block, leaving icomm=MPI_COMM_NULL for a BGR/nl-II-only run.)
+    sbe%icomm = icomm
     allocate(sbe%itbl_min(0:nproc-1), sbe%itbl_max(0:nproc-1))
     sbe%itbl_min = itbl_min
     sbe%itbl_max = itbl_max
@@ -394,7 +410,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
         if (allocated(gs%unfold_w)) then
             if (maxval(abs(gs%unfold_w)) > 1d-12) sbe%flag_unfold_ii = .true.
         end if
-        if (irank == 0) then
+        if (lprint) then
             write(*, '(a)') '# impact ionization (k-local Lindblad, Stobbe fit) enabled:'
             write(*, '(a,ES12.5,a)') '#   P     = ', sbe%ii_pref_au, ' 1/(Ha^4 a.u.t)'
             write(*, '(a,ES12.5,a,ES12.5,a)') '#   E_th  = ', sbe%ii_eth_au, ' Ha, ramp = ', sbe%ii_ramp_au, ' Ha'
@@ -413,7 +429,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
         sbe%flag_nl_ii = (yn_sbe_superres == 'y')
         if (sbe%n_active_bands > 0) allocate(sbe%glob_occ(sbe%n_active_bands))
         if (sbe%flag_nl_ii) sbe%glob_occ = 0d0
-        if (sbe%flag_nl_ii .and. irank == 0) &
+        if (sbe%flag_nl_ii .and. lprint) &
             write(*, '(a)') '#   nonlocal mode: valence partner drawn from the whole BZ (momentum exchange)'
     end if
 
@@ -433,7 +449,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
         sbe%coul_pref = sbe_coulomb_strength * 4d0 * pi &
                       / (max(sbe_coulomb_epsilon, 1d-12) * gs%volume * dble(gs%nk))
         sbe%coul_screen2 = sbe_coulomb_screen_au**2
-        sbe%icomm = icomm
+        ! sbe%icomm already set above (used by all collectives, not just Coulomb)
         ! Use the systolic ring (Part D) for the non-local exchange sum in
         ! super-mode (memory O(Nk/P)); otherwise the all-gather (memory O(Nk)).
         sbe%flag_ring = (yn_sbe_superres == 'y')
@@ -452,7 +468,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
                 sbe%flag_hf_subproj = .false.
             end if
         end if
-        if (irank == 0) then
+        if (lprint) then
             write(*, '(a)') '# Coulomb HF (Golde-Kira-Meier-Koch SBE) enabled:'
             write(*, '(a,ES12.5)') '#   exchange prefactor 4pi*str/(eps*Omega*Nk) = ', sbe%coul_pref
             write(*, '(a,f8.3,a,ES12.5,a)') '#   eps = ', sbe_coulomb_epsilon, &
@@ -495,7 +511,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
         end if
         sbe%eph_evbm_au = maxval(gs%eigen(homo_idx, :))
         sbe%eph_numax_au = 2d0 * sbe%eph_nusat_au   ! peak-rate estimate for sub-cycling
-        if (irank == 0) then
+        if (lprint) then
             write(*, '(a)') '# electron-phonon population relaxation (Part C5) enabled:'
             write(*, '(a,i2,a,ES12.5,a)') '#   ', sbe%eph_nph, &
                 ' phonon modes; nu_sat = ', sbe%eph_nusat_au, ' 1/a.u.t'
@@ -520,7 +536,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
         else
             sbe%eeh_nu_au = 1.0d14 * (au_fs * 1d-15)   ! 1e13-1e14 s^-1 scale
         end if
-        if (irank == 0) then
+        if (lprint) then
             write(*, '(a)') '# carrier-carrier (e-e/e-h) thermalization (Part F) enabled:'
             write(*, '(a,ES12.5,a)') '#   nu_cc = ', sbe%eeh_nu_au, &
                 ' 1/a.u.t; CPTP relax to Fermi-Dirac (conserves number+energy)'
@@ -540,7 +556,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     if (sbe%flag_bgr) then
         sbe%bgr_n_gate = sbe_bgr_n_gate
         sbe%bgr_coeff  = sbe_bgr_coeff
-        if (irank == 0) then
+        if (lprint) then
             write(*, '(a)') '# BGR-coupled impact-ionization threshold (Part C7) enabled:'
             write(*, '(a,ES12.5,a,ES12.5,a)') '#   gate n = ', sbe%bgr_n_gate, &
                 ' cm^-3, K = ', sbe%bgr_coeff, ' eV cm'
@@ -548,7 +564,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     end if
 
     ! 7. Diagnostic Print
-    if (irank == 0) then
+    if (lprint) then
         write(*, '(a)') '=========================================='
         write(*, '(a)') 'DIAGNOSTIC: Frozen Core Check'
         write(*, '(a, f8.2, a)') '  frozen_core_threshold_ev = ', frozen_core_threshold_ev, ' eV'

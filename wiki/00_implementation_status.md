@@ -35,6 +35,7 @@ Roadmap source: the Si + nonlocal-super-compute task (Parts A–F) plus future c
 | **D** | Ring/pipeline MPI (systolic ring, one fused pass) | ✅ | #44 | Σ^HF via ring in super-mode; O(Nk/P) mem; ring==all-gather (6e-21), MPI 1==2 ranks (per-k 0.0). nl-II/eph/e-e accumulators slot in |
 | **G** | Screening primitives (TF/Debye, Lindhard/RPA, LOPC) | ✅ | #44 | pure functions + GaAs/Si dielectric constants; unit-tested |
 | **F** | Carrier-carrier (e-e/e-h) CPTP thermalization (`yn_sbe_eeh`) | ✅ | #44 | intra-k FD relaxation: conserves number AND energy exactly, EID coherence damping, CPTP; unit-tested + end-to-end. Inter-k momentum-resolved on ring = refinement |
+| **MS** | Maxwell-SBE multiscale adaptation (`theory='multiscale_experiment'`) | ✅ | #44 | all A–G channels usable per-macropoint via the shared `init_sbe_bloch_solver`/`dt_evolve_bloch_cf4`; `sbe%icomm` set unconditionally (was Coulomb-only → MPI_COMM_NULL for BGR/nl-II-only); banner-print gated to one macropoint (`verbose`) |
 | doc | Wiki pages 01–05 committed as long-term memory | ✅ | #44 | maintained per increment |
 
 ---
@@ -51,6 +52,8 @@ Roadmap source: the Si + nonlocal-super-compute task (Parts A–F) plus future c
 - **No HF double-counting:** carrier-carrier (F) is the correlation (2nd-Born/GW) self-energy — dissipative only. The static screened-exchange energy shift stays SOLELY in HF (Σ^HF). Do not add it twice.
 - **Carrier-carrier invariants:** conserves Σf_k (number) AND ΣE_k f_k (energy) within the carrier subsystem (it thermalizes to a hot Fermi-Dirac, does NOT relax energy to the lattice). Use both as machine-precision validation invariants.
 - **e-e/e-h rate scale:** 1e13–1e14 s⁻¹ at n=1e17–1e19 cm⁻³ (thermalization ~10–200 fs). Static screening under-estimates; dynamic (LOPC) needed for sub-100-fs.
+- **Maxwell-SBE multiscale:** the multiscale driver runs ONE independent SBE cell per macropoint, driven by that point's macroscopic Maxwell A(t). It calls the SAME `init_sbe_bloch_solver`/`dt_evolve_bloch_cf4` as the single-cell solver, so every A–G channel flows through the `&sbe` namelist automatically — no per-channel wiring in `multiscale_ssbe`. The nonlocal collectives (Coulomb all-gather/ring, BGR + nl-II global reductions) reduce over the **per-macropoint** group `icomm_macro`, so momentum exchange is correctly confined to each cell's own k-grid. `sbe%icomm` MUST be set for every run (not only Coulomb) — it is now set unconditionally in init.
+- **a.u. conversion audit (verified):** rates s⁻¹→a.u.⁻¹ via `×(au_fs·1e-15)`; energies eV→Ha via `/au_ev`; `mev_to_ha=E·1e-3/au_ev`; deformation potentials `d_evcm_to_au=D·BOHR_CM/au_ev`, `d_evang_to_au=D·BOHR_ANG/au_ev`; mass density `rho_gcm3_to_au=ρ·BOHR_CM³/ME_G`; carrier density a.u.⁻³→cm⁻³ via `1e24/BOHR_ANG³`. The e-ph `eph_wrel=D²/ħω` is normalized to a dimensionless per-mode weight, so GaAs (eV/Å) vs Si (1e8 eV/cm) deformation-potential units only need within-material consistency (the absolute scale is `ν_sat`).
 
 ## CPTP invariants (must hold for every new dissipator)
 - Each exp(τD) a genuine GKLS map; clamp all (1−ρ) Pauli factors to [0,1].

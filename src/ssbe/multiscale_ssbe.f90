@@ -115,10 +115,17 @@ subroutine main_multiscale_ssbe(icomm)
         allocate(Jmat_macro(1:3, nmacro))
         allocate(sbe(imacro_min:imacro_max))
 
-        ! Initialization of SBE solver and density matrix:
+        ! Initialization of SBE solver and density matrix. The dissipation
+        ! channels (Coulomb HF, impact ionization, e-ph, carrier-carrier, BGR,
+        ! super-res ring) are configured here from the &sbe namelist exactly as
+        ! in the single-cell solver -- each macropoint runs an independent SBE
+        ! cell driven by its local macroscopic Maxwell field. Print the channel
+        ! banners only once (global rank 0, first owned macropoint) instead of
+        ! once per macropoint group.
         do i = imacro_min, imacro_max
             call init_sbe_bloch_solver(sbe(i), gs(itbl_macro_itype_sbe(i)), &
-                                       nstate_sbe(itbl_macro_itype_sbe(i)), icomm_macro)
+                                       nstate_sbe(itbl_macro_itype_sbe(i)), icomm_macro, &
+                                       verbose = (irank == 0 .and. i == imacro_min))
             sbe(i)%flag_vnl_correction = (yn_vnl_correction == 'y')
         end do
     end if
