@@ -12,6 +12,8 @@ subroutine main_realtime_ssbe(icomm)
     use input_checker_sbe
     use filesystem, only: get_filehandle
     use phys_constants, only: au_fs
+    use sbe_superres_ssbe, only: vg_ptop_exceeds
+    use iso_fortran_env, only: error_unit
     implicit none
     integer, intent(in) :: icomm
 
@@ -26,7 +28,11 @@ subroutine main_realtime_ssbe(icomm)
     integer :: fh_sbe_nex_k_unfold
     integer :: nk
     integer :: ib_lcb, nb_vb
+    integer :: ib_top
+    real(8) :: ptop
+    real(8), parameter :: PTOP_TOL = 1.0d-3   ! VG basis-edge occupation tolerance
     real(8), allocatable :: pop_k(:)
+    real(8), allocatable :: pop_top_k(:)
     real(8), allocatable :: pop_lev_k(:, :, :)
 
     call comm_get_groupinfo(icomm, irank, nproc)
@@ -65,6 +71,15 @@ subroutine main_realtime_ssbe(icomm)
     ib_lcb = nb_vb + 1
     allocate(pop_k(1:nk))
     if (gs%have_unfold) allocate(pop_lev_k(1:4, 1:4, 1:nk))
+
+    ! Highest band carried into the dynamics (top of the active subspace) -- the
+    ! VG basis edge. We monitor its peak adiabatic occupation P_top as the cheap
+    ! necessary condition for N_b sufficiency (wiki: "VG Basis Sufficiency &
+    ! N_b Convergence", criterion (a)): population reaching the basis edge means
+    ! bands above the cutoff would have mattered too -> enlarge N_b.
+    ib_top = 0
+    if (sbe%n_active_bands > 0) ib_top = sbe%active_idx(sbe%n_active_bands)
+    allocate(pop_top_k(1:nk))
 
     if (irank == 0) then
         ! SYSNAME_sbe_rt.data
@@ -177,6 +192,24 @@ subroutine main_realtime_ssbe(icomm)
                         & gs%kpoint, gs%unfold_offset, pop_lev_k)
                 end if
             end if
+
+            ! VG basis-sufficiency monitor (criterion (a)): peak adiabatic
+            ! occupation of the top retained band over the BZ. If it exceeds the
+            ! tolerance the field is pushing population to the basis edge -- the
+            ! band budget N_b is too small (a separate axis from the PW cutoff,
+            ! and NOT cured by the Houston basis). Warn on the error channel and
+            ! CONTINUE; the user re-runs with more bands and an N_b convergence
+            ! study (criterion (b)) to confirm.
+            if (ib_top > 0) then
+                call calc_bloch_population_k(sbe, gs, Ac_ext_t(:, it), ib_top, pop_top_k, icomm)
+                ptop = maxval(pop_top_k)
+                if (irank == 0 .and. vg_ptop_exceeds(ptop, PTOP_TOL)) then
+                    write(error_unit, '(a,es10.3,a,es10.3,a,f10.3,a,i0,a)') &
+                        ' WARNING: VG basis edge reached -- P_top = ', ptop, &
+                        ' > ', PTOP_TOL, ' at t = ', t * au_fs, &
+                        ' fs (top band ', ib_top, '). Increase N_b (nstate) and re-check convergence.'
+                end if
+            end if
         end if
 
         if (mod(it, 500) == 0) then
@@ -201,6 +234,7 @@ subroutine main_realtime_ssbe(icomm)
     end if
 
     deallocate(pop_k)
+    deallocate(pop_top_k)
     if (allocated(pop_lev_k)) deallocate(pop_lev_k)
 
     return

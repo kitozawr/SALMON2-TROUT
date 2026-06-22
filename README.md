@@ -437,6 +437,7 @@ The wiki also covers the **Silicon EPM** ground state (`epm_material='Si'`, diam
 - **[Numerical Methods](wiki/03_numerical_methods.md)** — CF4 Magnus, Yoshida, Strang, Houston basis, energy-bin search, ring-pipeline MPI, sublattice-block HF projection, CPTP proofs.
 - **[Configuration & Examples](wiki/04_configuration_examples.md)** — all namelist parameters and runnable pipelines, with **per-material recipes** (GaAs / Si) for every new mode and the Maxwell-SBE multiscale run.
 - **[Band Folding & Unfolding](wiki/05_folding_unfolding.md)** — cubic-cell 4-fold FCC folding, exact-folding proof, unfold/refold pipeline, why it matters for Hartree-Fock.
+- **[VG Basis Sufficiency & N_b Convergence](wiki/06_vg_basis_nb_convergence.md)** — why the dynamics band count is a correctness axis separate from the plane-wave cutoff (and not cured by the Houston basis); the P_top / N_b-convergence / admixture criteria and the runtime monitor.
 
 ### Conventions
 - **Units:** EPM structural block in Rydberg (kinetic |k+G|², lengths in Bohr); SBE dynamics in Hartree atomic units (ħ=mₑ=|e|=1). 1 Ry = ½ Hartree. User-facing `&sbe` knobs are in named units (eV, s⁻¹, K, cm⁻³) and converted to a.u. internally.

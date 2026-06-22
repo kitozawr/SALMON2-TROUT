@@ -37,7 +37,8 @@ module sbe_superres_ssbe
               eps_thomas_fermi, tf_kappa2_degenerate, debye_kappa2, &
               lindhard_F, eps_lindhard_static, plasmon_freq2, lopc_branches, &
               energy_partner_weights, fermi_dirac, fit_fermi_dirac, &
-              carrier_carrier_relax
+              carrier_carrier_relax, &
+              vg_eta_admixture, vg_trunc_shift2, vg_conv_error, vg_ptop_exceeds
 
     ! =====================================================================
     ! Silicon intervalley deformation potentials -- Pop "new" set (default).
@@ -530,5 +531,77 @@ contains
             end do
         end do
     end subroutine carrier_carrier_relax
+
+    ! =====================================================================
+    ! Velocity-gauge basis sufficiency / N_b convergence primitives.
+    ! These quantify whether the band count N_b carried into the dynamics is
+    ! large enough -- a correctness axis SEPARATE from the plane-wave cutoff,
+    ! and NOT fixed by rotating into the Houston basis (which only diagonalizes
+    ! the already-truncated H_VG^(N_b) = P_Nb H_VG P_Nb). See the wiki page
+    ! "VG Basis Sufficiency & N_b Convergence".
+    ! [Hylleraas-Undheim Z.Phys.65,759(1930); MacDonald PR 43,830(1933);
+    !  Wismer-Yakovlev PRB 97,144302(2018)]
+    ! =====================================================================
+
+    ! Criterion (c): dimensionless adiabatic admixture of band c into band a
+    !   eta_ac = A_max |pi_ac| / |eps_a - eps_c|.
+    ! The basis is safe for level a when eta to the FIRST DISCARDED band << 1;
+    ! eta >~ 1 means the admixture is nonperturbative and c cannot be dropped.
+    pure function vg_eta_admixture(A_max, pi_ac, gap_ac) result(eta)
+        real(8), intent(in) :: A_max, pi_ac, gap_ac
+        real(8) :: eta
+        if (abs(gap_ac) <= 0d0) then
+            eta = huge(1d0)
+        else
+            eta = A_max * abs(pi_ac) / abs(gap_ac)
+        end if
+    end function vg_eta_admixture
+
+    ! Second-order (Rayleigh-Schrodinger) truncation shift of a retained level a
+    ! from the n DISCARDED bands c > N_b:
+    !   delta eps_a = sum_c A^2 |pi_ac|^2 / (eps_a - eps_c).
+    ! This is exactly the error the Houston basis inherits (it diagonalizes the
+    ! projected operator, so this shift is NOT recovered). Valid for eta << 1.
+    pure function vg_trunc_shift2(A, pi_ac, eps_a, eps_disc, n) result(dshift)
+        integer, intent(in) :: n
+        real(8), intent(in) :: A, pi_ac(n), eps_a, eps_disc(n)
+        real(8) :: dshift
+        integer :: c
+        real(8) :: denom
+        dshift = 0d0
+        do c = 1, n
+            denom = eps_a - eps_disc(c)
+            if (abs(denom) > 0d0) dshift = dshift + A*A*pi_ac(c)*pi_ac(c) / denom
+        end do
+    end function vg_trunc_shift2
+
+    ! Criterion (b): relative L2 convergence error between an observable computed
+    ! with N_b and with N_b+Delta bands (current, HHG spectrum, carrier number):
+    !   eps_conv = ||O_large - O_small|| / ||O_large||.
+    pure function vg_conv_error(o_small, o_large, n) result(eps_conv)
+        integer, intent(in) :: n
+        real(8), intent(in) :: o_small(n), o_large(n)
+        real(8) :: eps_conv, num, den
+        integer :: i
+        num = 0d0; den = 0d0
+        do i = 1, n
+            num = num + (o_large(i) - o_small(i))**2
+            den = den + o_large(i)**2
+        end do
+        if (den <= 0d0) then
+            eps_conv = 0d0
+        else
+            eps_conv = sqrt(num / den)
+        end if
+    end function vg_conv_error
+
+    ! Criterion (a): does the top retained adiabatic band's peak occupation
+    ! P_top = max_k rho~_{Nb,Nb}(k) exceed the tolerance (default 1e-3)? A .true.
+    ! means population reached the basis edge -> enlarge N_b.
+    pure function vg_ptop_exceeds(ptop, thr) result(over)
+        real(8), intent(in) :: ptop, thr
+        logical :: over
+        over = (ptop > thr)
+    end function vg_ptop_exceeds
 
 end module sbe_superres_ssbe

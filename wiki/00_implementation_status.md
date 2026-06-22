@@ -36,7 +36,8 @@ Roadmap source: the Si + nonlocal-super-compute task (Parts A–F) plus future c
 | **G** | Screening primitives (TF/Debye, Lindhard/RPA, LOPC) | ✅ | #44 | pure functions + GaAs/Si dielectric constants; unit-tested |
 | **F** | Carrier-carrier (e-e/e-h) CPTP thermalization (`yn_sbe_eeh`) | ✅ | #44 | intra-k FD relaxation: conserves number AND energy exactly, EID coherence damping, CPTP; unit-tested + end-to-end. Inter-k momentum-resolved on ring = refinement |
 | **MS** | Maxwell-SBE multiscale adaptation (`theory='multiscale_experiment'`) | ✅ | #44 | all A–G channels usable per-macropoint via the shared `init_sbe_bloch_solver`/`dt_evolve_bloch_cf4`; `sbe%icomm` set unconditionally (was Coulomb-only → MPI_COMM_NULL for BGR/nl-II-only); banner-print gated to one macropoint (`verbose`) |
-| doc | Wiki pages 01–05 committed as long-term memory | ✅ | #44 | maintained per increment |
+| **VG** | Band budget: VG basis sufficiency & N_b convergence | ✅ | #44 | separate axis from PW cutoff, NOT cured by Houston basis; primitives + test (interlacing/shift formula) + runtime P_top monitor (warns on error channel, continues) |
+| doc | Wiki pages 01–06 committed as long-term memory | ✅ | #44 | maintained per increment |
 
 ---
 
@@ -53,6 +54,7 @@ Roadmap source: the Si + nonlocal-super-compute task (Parts A–F) plus future c
 - **Carrier-carrier invariants:** conserves Σf_k (number) AND ΣE_k f_k (energy) within the carrier subsystem (it thermalizes to a hot Fermi-Dirac, does NOT relax energy to the lattice). Use both as machine-precision validation invariants.
 - **e-e/e-h rate scale:** 1e13–1e14 s⁻¹ at n=1e17–1e19 cm⁻³ (thermalization ~10–200 fs). Static screening under-estimates; dynamic (LOPC) needed for sub-100-fs.
 - **Maxwell-SBE multiscale:** the multiscale driver runs ONE independent SBE cell per macropoint, driven by that point's macroscopic Maxwell A(t). It calls the SAME `init_sbe_bloch_solver`/`dt_evolve_bloch_cf4` as the single-cell solver, so every A–G channel flows through the `&sbe` namelist automatically — no per-channel wiring in `multiscale_ssbe`. The nonlocal collectives (Coulomb all-gather/ring, BGR + nl-II global reductions) reduce over the **per-macropoint** group `icomm_macro`, so momentum exchange is correctly confined to each cell's own k-grid. `sbe%icomm` MUST be set for every run (not only Coulomb) — it is now set unconditionally in init.
+- **VG band budget ≠ PW cutoff:** the band count N_b carried into the dynamics is a correctness axis SEPARATE from the EPM plane-wave cutoff, and the Houston/adiabatic basis does NOT fix an insufficient N_b — it diagonalizes the already-truncated H_VG^(N_b), inheriting the truncation error (Hylleraas-Undheim-MacDonald). Monitor `P_top = max_k ρ̃_{N_b,N_b}` (criterion a): the real-time solver warns on the **error channel** and **continues** when P_top > 1e-3 (it does not stop — the user re-runs with more bands + an N_b convergence study). Re-verify N_b for every new material / driver wavelength; the converged value does not transfer. See wiki/06.
 - **a.u. conversion audit (verified):** rates s⁻¹→a.u.⁻¹ via `×(au_fs·1e-15)`; energies eV→Ha via `/au_ev`; `mev_to_ha=E·1e-3/au_ev`; deformation potentials `d_evcm_to_au=D·BOHR_CM/au_ev`, `d_evang_to_au=D·BOHR_ANG/au_ev`; mass density `rho_gcm3_to_au=ρ·BOHR_CM³/ME_G`; carrier density a.u.⁻³→cm⁻³ via `1e24/BOHR_ANG³`. The e-ph `eph_wrel=D²/ħω` is normalized to a dimensionless per-mode weight, so GaAs (eV/Å) vs Si (1e8 eV/cm) deformation-potential units only need within-material consistency (the absolute scale is `ν_sat`).
 
 ## CPTP invariants (must hold for every new dissipator)
@@ -73,6 +75,7 @@ Roadmap source: the Si + nonlocal-super-compute task (Parts A–F) plus future c
 | `test_superres_rates.f90` (extended) | Part C5 | + unit conversions (meV/eV·cm/eV·Å/g·cm⁻³→a.u.), golden_rule_prefactor, eph_thermal_split (fe+fa=1, fe/fa=(N+1)/N) |
 | `test_screening.f90` | Part G | eps_TF limits, Lindhard F(0)=1/F(1)=½/monotone, eps_Lindhard→TF at small q, plasmon ω_p², LOPC Vieta sum/product + anticrossing |
 | `test_carrier_carrier.f90` | Part F | carrier_carrier_relax conserves number+energy, CPTP positivity, EID damping, converges to FD, inversion no-op; fit_fermi_dirac self-consistency |
+| `test_vg_basis_nb.f90` | VG basis sufficiency | eta admixture + threshold, conv-error metric, P_top gate; Hylleraas-Undheim-MacDonald interlacing/upper-bound + 2nd-order truncation-shift formula (self-contained Jacobi solver, no LAPACK) |
 | _(add per increment)_ | | |
 
 End-to-end smoke (manual): scalar GaAs 4³, `yn_sbe_superres='y'` + `yn_sbe_eph='y'`
