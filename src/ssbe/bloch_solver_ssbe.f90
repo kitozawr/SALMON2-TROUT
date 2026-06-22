@@ -70,6 +70,14 @@ module bloch_solver_ssbe
         logical :: flag_eeh   = .false.
         real(8) :: eeh_nu_au  = 0d0     ! carrier-carrier rate [1/a.u.time]
 
+        ! Nonlocal impact ionization (Part C4): the hot electron ionizes a
+        ! valence partner drawn from the WHOLE BZ (momentum exchange), so the
+        ! partner-population / Pauli factors use the global BZ-averaged active-
+        ! band occupations gathered once per step (rides the ring/all-gather).
+        ! The full momentum-resolved final-state version is the refinement.
+        logical :: flag_nl_ii = .false.
+        real(8), allocatable :: glob_occ(:)   ! (nba) BZ-averaged active-band occupation
+
         ! Sublattice (band-unfolding) awareness of the impact-ionization
         ! channel. When the unfolding weights gs%unfold_w are available
         ! (non-zero), the k-local two-particle event is resolved per FCC
@@ -401,6 +409,12 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
             if (sbe%nv_act < 1 .or. sbe%nv_act >= sbe%n_active_bands) &
                 write(*, '(a)') '#   WARNING: no valence or no conduction branches active -- channel is inert'
         end if
+        ! Nonlocal impact ionization (Part C4): partner sourced from the whole BZ
+        sbe%flag_nl_ii = (yn_sbe_superres == 'y')
+        if (sbe%n_active_bands > 0) allocate(sbe%glob_occ(sbe%n_active_bands))
+        if (sbe%flag_nl_ii) sbe%glob_occ = 0d0
+        if (sbe%flag_nl_ii .and. irank == 0) &
+            write(*, '(a)') '#   nonlocal mode: valence partner drawn from the whole BZ (momentum exchange)'
     end if
 
     ! =========================================================================
@@ -751,6 +765,10 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     ! running excited-carrier density (global reduction; once per step).
     if (sbe%flag_bgr) call update_bgr_threshold(sbe, gs)
 
+    ! Nonlocal impact ionization (Part C4): gather the BZ-averaged active-band
+    ! occupations once per step (the valence partner is sourced from anywhere).
+    if (sbe%flag_nl_ii .and. nba > 0) call gather_global_occupation(sbe, gs)
+
     !$omp parallel default(shared) &
     !$omp    private(ik, i, j, idir, in, im, isub, s) &
     !$omp    private(p_active, rho_a, H1, H2, HVG, eigen_active, V_begin, V_end, X_a, w_act_sub) &
@@ -897,6 +915,30 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     !$omp end parallel
 
 end subroutine dt_evolve_bloch_cf4
+
+
+! Part C4: BZ-averaged occupation of each active band (global reduction), used
+! by the nonlocal impact ionization so the valence partner / Pauli factors are
+! sourced from the whole BZ rather than the local k-point (momentum exchange).
+subroutine gather_global_occupation(sbe, gs)
+    use communication, only: comm_summation
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info),      intent(in)    :: gs
+    integer :: nba, ik, a
+    real(8), allocatable :: loc(:), glob(:)
+    nba = sbe%n_active_bands
+    allocate(loc(nba), glob(nba))
+    loc = 0d0
+    do ik = sbe%ik_min, sbe%ik_max
+        do a = 1, nba
+            loc(a) = loc(a) + real(sbe%rho(sbe%active_idx(a), sbe%active_idx(a), ik)) * gs%kweight(ik)
+        end do
+    end do
+    call comm_summation(loc, glob, nba, sbe%icomm)
+    sbe%glob_occ(1:nba) = glob(1:nba) / sum(gs%kweight)
+    deallocate(loc, glob)
+end subroutine gather_global_occupation
 
 
 ! Part C7: update the impact-ionization threshold from the running excited
@@ -1424,9 +1466,16 @@ subroutine apply_impact_ionization(sbe, nba, rho_ad, evals, Ac, tau, wsub, use_u
                 if (abs(evals(a) - etgt) < abs(evals(ihp) - etgt)) ihp = a
             end do
             if (ihp == ih) cycle
-            pv1 = min(max(real(rho_ad(iv1, iv1)) / f, 0d0), 1d0)
+            ! valence partner + conduction blocker: global BZ average in the
+            ! nonlocal mode (Part C4, momentum exchange), else local-k.
+            if (sbe%flag_nl_ii) then
+                pv1 = min(max(sbe%glob_occ(iv1) / f, 0d0), 1d0)
+                bc1 = min(max(1d0 - sbe%glob_occ(ic1) / f, 0d0), 1d0)
+            else
+                pv1 = min(max(real(rho_ad(iv1, iv1)) / f, 0d0), 1d0)
+                bc1 = min(max(1d0 - real(rho_ad(ic1, ic1)) / f, 0d0), 1d0)
+            end if
             phh = min(max(real(rho_ad(ih,  ih )) / f, 0d0), 1d0)
-            bc1 = min(max(1d0 - real(rho_ad(ic1, ic1)) / f, 0d0), 1d0)
             bhp = min(max(1d0 - real(rho_ad(ihp, ihp)) / f, 0d0), 1d0)
             g_rel  = gam * pv1 * bc1 * bhp
             g_pair = gam * phh * bc1 * bhp
@@ -1493,9 +1542,14 @@ subroutine apply_impact_ionization(sbe, nba, rho_ad, evals, Ac, tau, wsub, use_u
             ! Frozen scalar factors at the s-resolved branches, clamped to
             ! [0,1]; the leading w_s(h) splits the primary across sublattices
             ! (sum_s w_s(h) = 1 => total primary relaxation preserved)
-            pv1 = min(max(real(rho_ad(iv1_sub(s), iv1_sub(s))) / f, 0d0), 1d0)
+            if (sbe%flag_nl_ii) then
+                pv1 = min(max(sbe%glob_occ(iv1_sub(s)) / f, 0d0), 1d0)
+                bc1 = min(max(1d0 - sbe%glob_occ(ic1_sub(s)) / f, 0d0), 1d0)
+            else
+                pv1 = min(max(real(rho_ad(iv1_sub(s), iv1_sub(s))) / f, 0d0), 1d0)
+                bc1 = min(max(1d0 - real(rho_ad(ic1_sub(s), ic1_sub(s))) / f, 0d0), 1d0)
+            end if
             phh = min(max(real(rho_ad(ih,         ih        )) / f, 0d0), 1d0)
-            bc1 = min(max(1d0 - real(rho_ad(ic1_sub(s), ic1_sub(s))) / f, 0d0), 1d0)
             bhp = min(max(1d0 - real(rho_ad(ihp_s,      ihp_s     )) / f, 0d0), 1d0)
             g_rel  = gam * ws * pv1 * bc1 * bhp
             g_pair = gam * ws * phh * bc1 * bhp

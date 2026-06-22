@@ -27,20 +27,22 @@
 | sbe_ii_form | — | 'stobbe_quartic' | II fit form: 'stobbe_quartic' (GaAs, a=4) or 'keldysh_quadratic' (Si, a=2). |
 | sbe_ii_exponent | — | 4.0 | Fit exponent a (operative; 2 for Si soft, 4.6 for Si full-band). |
 
-### Super-compute / Part C–E (🚧 planned — flags reserved)
+### Super-compute / Parts C–G (✅ implemented; all default OFF)
 | Parameter | Units | Default | Description |
 |---|---|---|---|
-| yn_sbe_superres | — | 'n' | 🚧 nonlocal super-compute mode (nonlocal II + e-ph, ring MPI). |
-| yn_sbe_eph | — | 'n' | 🚧 electron-phonon Lindblad (relaxes populations). Toggle Zurek off. |
-| sbe_eph_temperature_k | K | 300.0 | 🚧 phonon bath T_ph for N_B. |
-| sbe_eph_nu_sat | s⁻¹ | material | 🚧 saturation rate (Si 1.3e14, GaAs 1e14). |
-| sbe_eph_eps0_ev | eV | 0.8 | 🚧 saturation onset ε₀. |
-| sbe_eph_n | — | 2 | 🚧 saturation shape exponent n. |
-| yn_sbe_bgr_threshold | — | 'n' | 🚧 density-dependent II threshold. |
-| sbe_bgr_n_gate | cm⁻³ | 5.0e18 | 🚧 apply BGR shift only above this density. |
-| sbe_bgr_coeff | eV·cm | 1.9e-8 | 🚧 BGR coefficient K (tunable [1.9,3.8]e-8). |
-| yn_sbe_hf_sublattice_proj | — | 'y' | 🚧 (Part E) project Σ^HF block-diagonally onto 4 FCC sublattices. |
-| sbe_search_sigma_e_ev | eV | grid-matched | 🚧 energy-bin width σ_E for the final-state search. |
+| yn_sbe_superres | — | 'n' | nonlocal super-compute master switch: ring-MPI Σ^HF (D) + nonlocal-partner II (C4). |
+| yn_sbe_eph | — | 'n' | electron-phonon population-relaxing Lindblad (C5; full phonon table). Toggle Zurek off. |
+| sbe_eph_temperature_k | K | 300.0 | phonon bath T_ph for N_B. |
+| sbe_eph_nu_sat | s⁻¹ | material | saturation rate (Si 1.3e14, GaAs 1e14). |
+| sbe_eph_eps0_ev | eV | 0.8 | saturation onset ε₀ in ν(ε)=ν_sat[1−exp(−(ε/ε₀)^n)]. |
+| sbe_eph_n | — | 2 | saturation shape exponent n. |
+| yn_sbe_eeh | — | 'n' | carrier-carrier (e-e/e-h) CPTP thermalization to a Fermi-Dirac (F). |
+| sbe_eeh_nu_sat | s⁻¹ | 1e14 | carrier-carrier rate scale. |
+| yn_sbe_bgr_threshold | — | 'n' | density-dependent II threshold E_th(t)=E_th0−|ΔE_BGR(n)| (C7). |
+| sbe_bgr_n_gate | cm⁻³ | 5.0e18 | apply BGR shift only above this density. |
+| sbe_bgr_coeff | eV·cm | 1.9e-8 | BGR coefficient K (tunable [1.9,3.8]e-8). |
+| yn_sbe_hf_sublattice_proj | — | 'y' | project Σ^HF block-diagonally onto 4 FCC sublattices (folding fix, E). |
+| sbe_search_sigma_e_ev | eV | grid-matched | energy-bin width σ_E for the final-state search (C3). |
 
 ## &epm parameters ✅
 | Parameter | Units | Default | Description |
@@ -108,8 +110,22 @@ Then `theory='sbe'` reading the generated files (sysname, lattice, num_kgrid, ns
 /
 ```
 
-## Example: Silicon super-compute mode 🚧 (Part C — not yet implemented)
-Target (Chefonov THz bleaching): `yn_sbe_superres='y'`, `yn_sbe_eph='y'`, `sbe_eph_nu_sat=1.3d14`, Zurek off, `yn_sbe_bgr_threshold='y'`. Validation staging: (1) ~8.5% bleaching plateau at ~5 MV/cm with e-ph alone; (2) enable II, ~2× transmission drop at >10–15 MV/cm. [Chefonov et al., PRB 98, 165206 (2018)]
+## Example: Silicon super-compute mode ✅ (Parts C–G implemented; physical validation pending)
+```fortran
+&sbe
+  yn_sbe_superres          = 'y'   ! ring-MPI Sigma^HF + nonlocal-partner II
+  yn_sbe_eph               = 'y'   ! e-ph cooling (drives bleaching)
+  sbe_eph_nu_sat           = 1.3d14
+  yn_sbe_eeh               = 'y'   ! carrier-carrier thermalization
+  yn_sbe_impact_ionization = 'y'
+  sbe_ii_form              = 'keldysh_quadratic'
+  sbe_ii_exponent          = 2
+  sbe_ii_threshold_ev      = 1.1d0
+  yn_sbe_bgr_threshold     = 'y'
+  sbe_decoh_temperature_k  = -1.0d0   ! Zurek off (e-ph provides decoherence)
+/
+```
+All channels are CPTP and gated OFF by default. Validation staging (Chefonov Si THz bleaching, not yet run here): (1) ~8.5% bleaching plateau at ~5 MV/cm with e-ph alone; (2) enable II, ~2× transmission drop at >10–15 MV/cm. [Chefonov et al., PRB 98, 165206 (2018)]
 
 ## Building ✅
 ```sh

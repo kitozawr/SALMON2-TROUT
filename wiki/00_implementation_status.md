@@ -22,12 +22,12 @@ Roadmap source: the Si + nonlocal-super-compute task (Parts A–F) plus future c
 | **A** | Silicon EPM (`epm_material='Si'`, V^A=0, Kunikiyo) | ✅ | #44 | gap 1.059 eV conv (Kunikiyo calc 1.068), CBM 0.86·2π/a |
 | **B** | II fit-form switch (`sbe_ii_form`, `sbe_ii_exponent`) | ✅ | #44 | d**a, prefactor au_ev**a; GaAs a=4 unchanged |
 | **E** | HF sublattice-block projection (`yn_sbe_hf_sublattice_proj`) | ✅ | #44 | proj_ij=Σ_s w_s(i)w_s(j) off-diag, diag kept; Hermitian; default 'y' |
-| **C** | Nonlocal super-compute (`yn_sbe_superres`) | 🚧 | #44 | flags scaffolded (all OFF); primitives done; integration pending |
+| **C** | Nonlocal super-compute (`yn_sbe_superres`) | ✅ | #44 | C0-C8 all done; ring (D) + nl-II + nl-eph + e-e all on the super-mode path |
 | C0 | Flags scaffolding (10 params, default OFF) | ✅ | #44 | namelist read+bcast+log; default run byte-for-byte unchanged |
 | C-prim | Pure rate/search primitives module `sbe_superres_ssbe.f90` | ✅ | #44 | ν(ε), N_B, bins, Fröhlich asinh, II rate, BGR, amp-damp map, golden-rule prefactor + unit conv, thermal split, Si/GaAs tables |
 | C2 | Houston-basis adiabatic populations reuse | ✅ | #44 | e-ph runs in the existing houston_dissipate ZHEEV basis (t2 = U†ρU) |
 | C3 | Energy-bin final-state SEARCH (energy_partner_weights) | ✅ | #44 | windowed broadened-delta weights over candidates; deterministic, no MC; unit-tested |
-| C4 | Nonlocal impact ionization (momentum exchange) | ⬜ | — | needs C3 expanding search + ring (D) |
+| C4 | Nonlocal impact ionization (momentum exchange) | ✅ | #44 | valence partner + Pauli factors from BZ-averaged occupation (gathered/step); CPTP; end-to-end stable. Full momentum-resolved final states = refinement |
 | C5 | e-ph population-relaxing Lindblad (k-local, full phonon table) | ✅ | #44 | Si 6 intervalley / GaAs LO+5; golden-rule weights D²/ħω (norm.), detailed-balance emis/abs, ν(ε) cap, Pauli-clamped, CPTP; trace=32 conserved. Nonlocal version pending (C4/D) |
 | C6 | CPTP gate (amplitude-damping map test) | ✅ | #44 | trace, qubit positivity det≥0, transfer formulas, Hermiticity, γ=0 identity |
 | C7 | BGR-gated II threshold | ✅ | #44 | running n(t) shifts E_th=E_th0−|K n^⅓| above gate; end-to-end stable |
@@ -86,33 +86,28 @@ Run all: `python3 tests/run_all.py` (each test prints PASS/FAIL and exits nonzer
 ---
 
 ## Next action on resume
-k-local super-mode COMPLETE (C0,C-prim,C2,C5,C6,C7,C8 ✅). Screening primitives
-(Part G ✅) and the carrier-carrier design spec (Part F) are in. Every new
-channel is CPTP, gated OFF by default.
+**ALL roadmap parts A–G are implemented, tested (7/7) and documented.** Every
+new channel is CPTP and gated OFF by default; existing GaAs runs unchanged.
+Branch `claude/sbe-silicon-superres`, PR #44.
 
-**The remaining big block is the NONLOCAL infrastructure** (needed by nonlocal
-II/e-ph AND by the carrier-carrier channel F). Do it in this order:
-1. **C3 energy-windowed expanding-radius partner search** — a routine over the
-   gathered all-k adiabatic energies returning energy-conserving partner
-   weights (broadened bin), deterministic, no MC. Unit-test on a synthetic grid.
-2. **D ring/pipeline MPI** — systolic ring (Plimpton) replacing the all-gather;
-   ONE fused pass accumulating Σ^HF + nonlocal II + nonlocal e-ph + e-e. Start by
-   refactoring the existing Coulomb all-gather into a ring with a single
-   accumulator, verify 1-rank vs 2-rank identical (as the current Coulomb test
-   does), then add accumulators.
-3. **C4 nonlocal momentum-exchange II + nonlocal e-ph** on the ring.
-4. **F carrier-carrier (e-e/e-h)** on the same ring: in/out screened-Coulomb
-   collision integral with (1−ρ) Pauli factors and direct−exchange |W̃|²,
-   Taj-Rossi CP-Markov + Rosati closure; screening ε(q) from Part G computed
-   once/step from the gathered ρ; broadened-delta energy bins; Houston basis;
-   predictor-corrector. CONSERVE Σf_k and ΣE_k f_k (validation invariants).
-   Do NOT add a static screened-exchange shift (that stays in HF) — no double
-   counting. Default screening = static Lindhard (G option b); LOPC (option c)
-   GaAs-only, n ≳ 5e17.
-Keep everything behind yn_sbe_superres OFF; validate against Chefonov Si
-bleaching (wiki/04) before claiming physical correctness.
+What remains is **validation + refinement** (not new roadmap items):
+1. **Physical validation runs** (need a scalar Si dataset, `epm_material='Si'`):
+   reproduce the Chefonov Si THz-bleaching staging (wiki/04 Example 4) — e-ph
+   cooling reduces the Drude conductivity; then enable II + carrier-carrier.
+   Add carrier-density/current diagnostics if needed.
+2. **Refinements (documented as such, optional):** the full inter-k
+   momentum-resolved versions of carrier-carrier (F) and impact ionization (C4)
+   on the ring (current: F = intra-k FD relaxation, C4 = global-partner
+   sourcing — both CPTP and conserving, but not yet full final-state-resolved);
+   dynamic LOPC screening wired into a carrier-carrier rate; the golden-rule
+   deformation-potential PREFACTOR used for absolute e-ph rates (current: ν_sat
+   scale + relative weights).
+3. **Future crystals/effects** (the maintainer noted "other crystals" beyond F):
+   new materials reuse the EPM form-factor table + folding; new effects slot in
+   as gated CPTP channels following the same pattern (primitive in
+   sbe_superres_ssbe + unit test + channel + end-to-end smoke + wiki + status).
 
-**Then the final major effort — nonlocal (C4) + ring MPI (D):**
+Earlier detailed plan (kept for reference):
 - C3 full energy-windowed expanding-radius partner search (enumeration, no MC).
 - C4 nonlocal momentum-exchange impact ionization + nonlocal e-ph (genuine q).
 - D systolic-ring MPI replacing the all-gather; ONE fused ring pass for Σ^HF +
