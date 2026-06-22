@@ -1,0 +1,39 @@
+!########################################################################################!
+! Silicon EPM ground state (self-contained local Empirical Pseudopotential Method).      !
+!----------------------------------------------------------------------------------------!
+! Step 1 of 2. Generates Si_epm_k.data / _eigen.data / _tm.data (and the unfold map)     !
+! read by the SBE step. No pseudopotential file and no atomic coordinates are needed --   !
+! the diamond structure (V^A = 0, Kunikiyo form factors) is built in from the lattice     !
+! constant alone. See wiki/04_configuration_examples.md and wiki/00 (Part A).             !
+!----------------------------------------------------------------------------------------!
+! Units a.u.:  Length 1 [a.u.] = 0.52917721067 [Angstrom];  Energy 1 [a.u.] = 27.2114 eV  !
+!########################################################################################!
+
+&calculation
+    theory = 'epm'
+/
+
+&control
+    sysname = 'Si_epm'
+/
+
+&units
+    unit_system = 'au'
+/
+
+&system
+    yn_periodic = 'y'
+    al(1:3) = 10.26d0, 10.26d0, 10.26d0   ! Si lattice constant a = 5.431 Angstrom
+    nelec  = 32                            ! 8-atom cubic cell, 4 valence e/atom
+    nstate = 32
+/
+
+&kgrid
+    num_kgrid(1:3) = 4, 4, 4               ! scalar 4x4x4 validation grid
+/
+
+&epm
+    epm_material            = 'Si'         ! diamond, V^A = 0, Kunikiyo form factors
+    epm_lattice_constant_au = 10.26d0      ! must match al(1:3) above
+    epm_pw_cutoff_ry        = 11.1d0       ! |k+G|^2 cutoff [Ry] (Cohen-Bergstresser shells)
+/

@@ -135,6 +135,13 @@ them on reproduces the byte-for-byte legacy GaAs run. The `&sbe` block can be
 combined freely — the recipes just bundle the physically-sensible defaults.
 Constants and their primary-source citations: [Constants](02_constants.md).
 
+> **Important:** when `yn_sbe_eph='y'`, the SBE-step input must ALSO carry an
+> `&epm` block with the right `epm_material` — the electron-phonon channel
+> selects its phonon table (Si: 6 intervalley g/f modes; GaAs: Fröhlich LO + 5
+> intervalley) from `epm_material`, which **defaults to `'GaAs'`** if absent.
+> A runnable two-step example lives in
+> [`../samples/exercise_x3_bulkSi_epm_bloch_superres/`](../samples/exercise_x3_bulkSi_epm_bloch_superres/).
+
 ### GaAs — per-channel quick reference
 | Mode | Minimal `&sbe` | Material defaults (auto if unset) |
 |---|---|---|
