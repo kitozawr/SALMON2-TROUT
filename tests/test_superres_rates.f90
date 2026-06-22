@@ -92,6 +92,20 @@ program test_superres_rates
         call check("split N=0: fa=0", fa, 0d0, TOL)
     end block
 
+    ! --- energy_partner_weights (C3): window gate + peak at match ------------
+    block
+        real(8) :: ec(5), wts(5), wsum
+        ec = (/ -0.30d0, -0.05d0, 0.0d0, 0.05d0, 0.40d0 /)
+        ! target 0, sigma 0.1, window 0.2: candidates at +-0.30/+-0.40 excluded
+        call energy_partner_weights(0d0, ec, 5, 0.1d0, 0.2d0, wts, wsum)
+        if (wts(1) /= 0d0 .or. wts(5) /= 0d0) call fail("partner window not enforced")
+        if (.not. (wts(3) > wts(2) .and. wts(3) > wts(4))) &
+            call fail("partner weight not peaked at energy match")
+        call check("partner wsum = sum(w)", wsum, wts(2)+wts(3)+wts(4), 1d-12)
+        ! exact-match weight equals gaussian_bin(0,sigma)
+        call check("partner peak = gaussian_bin(0,sigma)", wts(3), gaussian_bin(0d0,0.1d0), TOL)
+    end block
+
     if (nfail == 0) then
         write(*,'(a)') 'PASS'
         call exit(0)

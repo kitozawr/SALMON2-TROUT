@@ -35,7 +35,8 @@ module sbe_superres_ssbe
               mev_to_ha, d_evcm_to_au, d_evang_to_au, rho_gcm3_to_au, &
               golden_rule_prefactor, eph_thermal_split, &
               eps_thomas_fermi, tf_kappa2_degenerate, debye_kappa2, &
-              lindhard_F, eps_lindhard_static, plasmon_freq2, lopc_branches
+              lindhard_F, eps_lindhard_static, plasmon_freq2, lopc_branches, &
+              energy_partner_weights
 
     ! =====================================================================
     ! Silicon intervalley deformation potentials -- Pop "new" set (default).
@@ -391,5 +392,32 @@ contains
         wLp2 = 0.5d0 * (b + disc)
         wLm2 = 0.5d0 * (b - disc)
     end subroutine lopc_branches
+
+    ! Part C3: energy-conserving final-state weights (broadened-delta energy
+    ! bins; NO tetrahedra, NO Monte-Carlo). For each candidate energy e_cand(i),
+    !   w(i) = gaussian_bin(e_cand(i) - e_target, sigma)   if |dE| <= max_window
+    !        = 0                                           otherwise,
+    ! and wsum = sum(w). max_window realizes the energy-windowed expanding-radius
+    ! search (the caller grows it with the hot-carrier excess energy). The caller
+    ! normalizes the chosen transitions by wsum. Deterministic (CPTP-safe).
+    ! [Stobbe PRB 49, 4494 (1994); Kunikiyo JAP 75, 297 (1994)]
+    pure subroutine energy_partner_weights(e_target, e_cand, n_cand, sigma, &
+                                           max_window, w, wsum)
+        integer, intent(in)  :: n_cand
+        real(8), intent(in)  :: e_target, e_cand(n_cand), sigma, max_window
+        real(8), intent(out) :: w(n_cand), wsum
+        integer :: i
+        real(8) :: dE
+        wsum = 0d0
+        do i = 1, n_cand
+            dE = e_cand(i) - e_target
+            if (abs(dE) <= max_window) then
+                w(i) = gaussian_bin(dE, sigma)
+            else
+                w(i) = 0d0
+            end if
+            wsum = wsum + w(i)
+        end do
+    end subroutine energy_partner_weights
 
 end module sbe_superres_ssbe
