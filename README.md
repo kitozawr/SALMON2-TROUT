@@ -426,17 +426,30 @@ The `-fallow-argument-mismatch -fallow-invalid-boz` flags are needed for the bun
 
 ## Documentation & Project Wiki
 
-In-depth documentation — physics models, every default constant with its primary-source citation, numerical methods, configuration examples, and band folding/unfolding — lives in the [`wiki/`](wiki/) directory, which doubles as the project's persistent design memory:
+In-depth documentation — physics models, every default constant with its primary-source citation, numerical methods, configuration recipes, and band folding/unfolding — lives in the [`wiki/`](wiki/) directory, which doubles as the project's **persistent design memory** (the single source of truth that survives context resets). On resume, read [`wiki/00_implementation_status.md`](wiki/00_implementation_status.md) first to recover exactly where the work stands.
 
-- **[Wiki home](wiki/README.md)** — index, unit/basis conventions, working conventions.
-- **[Implementation Status](wiki/00_implementation_status.md)** — live progress tracker, decisions log, test inventory.
-- **[Physics Models & Approximations](wiki/01_physics_models.md)** — master equation and dissipation channels (Kuhn-Zurek dephasing, impact ionization, electron-phonon, carrier-carrier), cited.
+The wiki also covers the **Silicon EPM** ground state (`epm_material='Si'`, diamond V^A=0) and the optional nonlocal **"super-compute" mode** (`yn_sbe_superres`): ring-pipeline-MPI Hartree-Fock, electron-phonon and carrier-carrier CPTP Lindblad channels, density-dependent (band-gap-renormalized) impact-ionization thresholds, and the Maxwell-SBE multiscale adaptation — all gated OFF by default so existing GaAs runs are byte-for-byte unchanged.
+
+### Pages
+- **[Implementation Status](wiki/00_implementation_status.md)** — live progress tracker, decisions log, test inventory, next steps. **Read first on resume.**
+- **[Physics Models & Approximations](wiki/01_physics_models.md)** — master equation and dissipation channels (Kuhn-Zurek dephasing, impact ionization, electron-phonon, carrier-carrier), assumptions. Cited.
 - **[Constants & Coefficients](wiki/02_constants.md)** — every default value with its primary source.
 - **[Numerical Methods](wiki/03_numerical_methods.md)** — CF4 Magnus, Yoshida, Strang, Houston basis, energy-bin search, ring-pipeline MPI, sublattice-block HF projection, CPTP proofs.
-- **[Configuration & Examples](wiki/04_configuration_examples.md)** — all namelist parameters and runnable pipelines (GaAs and Silicon).
-- **[Band Folding & Unfolding](wiki/05_folding_unfolding.md)** — cubic-cell 4-fold FCC folding, exact-folding proof, unfold/refold pipeline.
+- **[Configuration & Examples](wiki/04_configuration_examples.md)** — all namelist parameters and runnable pipelines, with **per-material recipes** (GaAs / Si) for every new mode and the Maxwell-SBE multiscale run.
+- **[Band Folding & Unfolding](wiki/05_folding_unfolding.md)** — cubic-cell 4-fold FCC folding, exact-folding proof, unfold/refold pipeline, why it matters for Hartree-Fock.
 
-These pages also cover the **Silicon EPM** ground state (`epm_material='Si'`, diamond V^A=0) and the optional nonlocal **"super-compute" mode** (`yn_sbe_superres`): ring-pipeline-MPI Hartree-Fock, electron-phonon and carrier-carrier CPTP Lindblad channels, and density-dependent (band-gap-renormalized) impact-ionization thresholds — all gated OFF by default so existing GaAs runs are unchanged.
+### Conventions
+- **Units:** EPM structural block in Rydberg (kinetic |k+G|², lengths in Bohr); SBE dynamics in Hartree atomic units (ħ=mₑ=|e|=1). 1 Ry = ½ Hartree. User-facing `&sbe` knobs are in named units (eV, s⁻¹, K, cm⁻³) and converted to a.u. internally.
+- **Basis:** dissipative channels operate in the instantaneous **Houston/adiabatic basis** U(t) (eigenbasis of H_VG(t)), NOT the field-free Bloch basis. Adiabatic populations ρ̃ = U†ρU are physical; Bloch populations are virtual during the pulse in the velocity gauge.
+- **CPTP:** every dissipator is a genuine GKLS Lindblad generator; finite-step maps exp(τD) are completely positive and trace-preserving for any τ ≥ 0.
+- **Provenance:** every default constant carries a primary-source citation in **both** the code comment and the wiki. Do not introduce a number without a source.
+
+### Working conventions (agreed with maintainer)
+- Develop **step by step**, one bounded increment per session; never cram.
+- **Test grid:** 4×4×4 (or 5×5×5), **scalar (no spinor)** — sufficient for all validation here.
+- Every increment: **working code + clean code + detailed docs (the wiki) + a test**. Commit signed-off, push.
+- All new capability behind flags defaulting OFF (or Si-only) so existing GaAs runs stay byte-for-byte unchanged.
+- Tests live in [`tests/`](tests/); each is self-contained and documented. Run all: `python3 tests/run_all.py`.
 
 ---
 

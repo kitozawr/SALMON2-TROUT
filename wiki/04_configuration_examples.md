@@ -127,6 +127,127 @@ Then `theory='sbe'` reading the generated files (sysname, lattice, num_kgrid, ns
 ```
 All channels are CPTP and gated OFF by default. Validation staging (Chefonov Si THz bleaching, not yet run here): (1) ~8.5% bleaching plateau at ~5 MV/cm with e-ph alone; (2) enable II, ~2× transmission drop at >10–15 MV/cm. [Chefonov et al., PRB 98, 165206 (2018)]
 
+## Recipes by material & mode ✅
+
+All recipes assume the matching EPM ground state was generated first (see the
+GaAs / Si EPM examples above). Every flag below defaults OFF; turning none of
+them on reproduces the byte-for-byte legacy GaAs run. The `&sbe` block can be
+combined freely — the recipes just bundle the physically-sensible defaults.
+Constants and their primary-source citations: [Constants](02_constants.md).
+
+### GaAs — per-channel quick reference
+| Mode | Minimal `&sbe` | Material defaults (auto if unset) |
+|---|---|---|
+| Coulomb TDHF only | `yn_sbe_coulomb='y'` | `sbe_coulomb_epsilon=12.9` (ε∞ GaAs) |
+| Impact ionization (quartic) | `yn_sbe_impact_ionization='y'`, `sbe_ii_form='stobbe_quartic'`, `sbe_ii_exponent=4`, `sbe_ii_threshold_ev=2.1` | hard threshold ~1.5·E_g |
+| e-ph cooling | `yn_sbe_eph='y'` | Fröhlich LO 36 meV + 5 intervalley; `ν_sat=1e14 s⁻¹` |
+| carrier-carrier | `yn_sbe_eeh='y'` | `ν_cc=1e14 s⁻¹`; ε for screening = 12.9 |
+
+### GaAs — full super-compute recipe
+```fortran
+&epm
+  epm_material            = 'GaAs'    ! zincblende, V^A≠0
+  epm_lattice_constant_au = 10.68d0
+/
+&sbe
+  yn_sbe_superres          = 'y'   ! ring-MPI Sigma^HF + nonlocal-partner II
+  yn_sbe_coulomb           = 'y'   ! TDHF exchange (extreme-THz regime)
+  sbe_coulomb_epsilon      = 12.9d0
+  yn_sbe_eph               = 'y'   ! Fröhlich-LO-dominated cooling
+  sbe_eph_nu_sat           = 1.0d14
+  sbe_eph_temperature_k    = 300.0d0
+  yn_sbe_eeh               = 'y'   ! carrier-carrier thermalization
+  sbe_eeh_nu_sat           = 1.0d14
+  yn_sbe_impact_ionization = 'y'
+  sbe_ii_form              = 'stobbe_quartic'   ! GaAs hard threshold, a=4
+  sbe_ii_exponent          = 4
+  sbe_ii_threshold_ev      = 2.1d0
+  yn_sbe_bgr_threshold     = 'y'   ! density-dependent gap shrinkage
+  sbe_decoh_temperature_k  = -1.0d0   ! Zurek off (e-ph provides decoherence)
+/
+```
+
+### Si — per-channel quick reference
+| Mode | Minimal `&sbe` | Material defaults (auto if unset) |
+|---|---|---|
+| Impact ionization (soft) | `yn_sbe_impact_ionization='y'`, `sbe_ii_form='keldysh_quadratic'`, `sbe_ii_exponent=2`, `sbe_ii_threshold_ev=1.1` | soft near-gap threshold |
+| Impact ionization (full-band) | as above but `sbe_ii_exponent=4.6` | Kamakura full-band fit |
+| e-ph cooling | `yn_sbe_eph='y'` | 6 intervalley g/f phonons; `ν_sat=1.3e14 s⁻¹` |
+| carrier-carrier | `yn_sbe_eeh='y'` | `ν_cc=1e14 s⁻¹`; ε for screening = 11.7 |
+
+### Si — full super-compute recipe
+```fortran
+&epm
+  epm_material            = 'Si'     ! diamond, V^A=0, Kunikiyo form factors
+  epm_lattice_constant_au = 10.26d0
+/
+&sbe
+  yn_sbe_superres          = 'y'
+  yn_sbe_eph               = 'y'   ! intervalley-dominated cooling
+  sbe_eph_nu_sat           = 1.3d14
+  sbe_eph_temperature_k    = 300.0d0
+  yn_sbe_eeh               = 'y'
+  yn_sbe_impact_ionization = 'y'
+  sbe_ii_form              = 'keldysh_quadratic'   ! Si soft threshold, a=2
+  sbe_ii_exponent          = 2
+  sbe_ii_threshold_ev      = 1.1d0
+  yn_sbe_bgr_threshold     = 'y'
+  sbe_decoh_temperature_k  = -1.0d0
+/
+```
+
+### Maxwell-SBE multiscale with the new channels ✅
+The multiscale driver (`theory='maxwell_sbe'`, `src/ssbe/multiscale_ssbe.f90`)
+runs one independent SBE cell per macropoint, driven by that point's
+macroscopic Maxwell (Weyl-gauge FDTD) field. Every `&sbe` channel above works
+unchanged — just add the multiscale grid / media blocks and the `&sbe`
+material-pointer parameters (`num_sbe`, `sysname_sbe(:)`, `nk_sbe(:)`,
+`nstate_sbe(:)`, `nelec_sbe(:)`, `al_vec*_sbe`). The nonlocal reductions
+(Coulomb ring, BGR, nonlocal-II) are confined to each macropoint's own k-grid,
+so momentum exchange stays local to the cell. Banner diagnostics print once
+(global rank 0, first macropoint).
+```fortran
+&calculation
+  theory = 'maxwell_sbe'
+/
+&control
+  sysname = 'Si_ms'
+/
+&multiscale
+  fdtddim     = '1d'
+  nx_m        = 2000      ! Maxwell propagation cells
+  ny_m        = 1
+  nz_m        = 1
+  hx_m        = 250.0d0   ! [a.u.] coarse Maxwell grid spacing
+  hy_m        = 250.0d0
+  hz_m        = 250.0d0
+/
+&sbe
+  num_sbe        = 1               ! one SBE material in this run
+  sysname_sbe(1) = 'Si_cubic'      ! reads the Si_cubic EPM output as the cell
+  nk_sbe(1)      = 64              ! must match the EPM ground state (4x4x4)
+  nstate_sbe(1)  = 32
+  nelec_sbe(1)   = 32
+  ! --- new dissipation channels, applied per macropoint ---
+  yn_sbe_eph               = 'y'   ! e-ph cooling -> Drude-conductivity bleaching
+  sbe_eph_nu_sat           = 1.3d14
+  yn_sbe_impact_ionization = 'y'   ! enable for the high-field transmission drop
+  sbe_ii_form              = 'keldysh_quadratic'
+  sbe_ii_exponent          = 2
+  sbe_ii_threshold_ev      = 1.1d0
+  sbe_decoh_temperature_k  = -1.0d0
+/
+```
+Run on ≥ nmacro MPI ranks for one-macropoint-per-rank; with fewer ranks the
+k-points of each macropoint are split across the ranks sharing it (the ring
+and reductions then run over that per-macropoint group `icomm_macro`).
+
+### Unit conventions for the new parameters
+Inputs are in the named units; the solver converts to atomic units internally
+(audited): rates `s⁻¹ → a.u.⁻¹` (`×au_fs·1e-15`), energies `eV → Ha` (`/au_ev`),
+densities `cm⁻³` (gate), deformation potentials from the cited tables. You
+never pass a.u. directly for these knobs. See [Constants](02_constants.md).
+
 ## Building ✅
 ```sh
 cmake -B build -S . -D CMAKE_BUILD_TYPE=Release -D USE_MPI=OFF \
