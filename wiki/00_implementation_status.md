@@ -34,7 +34,7 @@ Roadmap source: the Si + nonlocal-super-compute task (Parts A–F) plus future c
 | C8 | Dissipator sub-cycling | ✅ | #44 | m_sub from eph_numax·τ; II+e-ph split into m CPTP sub-steps; trace conserved at ν_sat=1e18. m=1 (unchanged) when e-ph off |
 | **D** | Ring/pipeline MPI (systolic ring, one fused pass) | ✅ | #44 | Σ^HF via ring in super-mode; O(Nk/P) mem; ring==all-gather (6e-21), MPI 1==2 ranks (per-k 0.0). nl-II/eph/e-e accumulators slot in |
 | **G** | Screening primitives (TF/Debye, Lindhard/RPA, LOPC) | ✅ | #44 | pure functions + GaAs/Si dielectric constants; unit-tested |
-| **F** | Carrier-carrier (e-e/e-h) nonlocal CPTP Lindblad channel | 🚧 | #44 | design spec done; uses G screening; collision integral rides the ring (D) — pending |
+| **F** | Carrier-carrier (e-e/e-h) CPTP thermalization (`yn_sbe_eeh`) | ✅ | #44 | intra-k FD relaxation: conserves number AND energy exactly, EID coherence damping, CPTP; unit-tested + end-to-end. Inter-k momentum-resolved on ring = refinement |
 | doc | Wiki pages 01–05 committed as long-term memory | ✅ | #44 | maintained per increment |
 
 ---
@@ -69,6 +69,7 @@ Roadmap source: the Si + nonlocal-super-compute task (Parts A–F) plus future c
 | `test_eph_cptp.f90` | Part C5/C6 | amplitude-damping map: trace, qubit positivity (det≥0), transfer formulas, coherence damping, Hermiticity, γ=0 identity |
 | `test_superres_rates.f90` (extended) | Part C5 | + unit conversions (meV/eV·cm/eV·Å/g·cm⁻³→a.u.), golden_rule_prefactor, eph_thermal_split (fe+fa=1, fe/fa=(N+1)/N) |
 | `test_screening.f90` | Part G | eps_TF limits, Lindhard F(0)=1/F(1)=½/monotone, eps_Lindhard→TF at small q, plasmon ω_p², LOPC Vieta sum/product + anticrossing |
+| `test_carrier_carrier.f90` | Part F | carrier_carrier_relax conserves number+energy, CPTP positivity, EID damping, converges to FD, inversion no-op; fit_fermi_dirac self-consistency |
 | _(add per increment)_ | | |
 
 End-to-end smoke (manual): scalar GaAs 4³, `yn_sbe_superres='y'` + `yn_sbe_eph='y'`

@@ -482,6 +482,11 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: sbe_bgr_n_gate         ! apply BGR shift only above n [cm^-3]
   real(8)        :: sbe_bgr_coeff          ! BGR coefficient K [eV cm] (cube-root law)
   real(8)        :: sbe_search_sigma_e_ev  ! energy-bin width sigma_E [eV] (<=0: grid-matched)
+  ! Carrier-carrier (e-e/e-h) scattering (Part F): CPTP relaxation of the
+  ! adiabatic populations toward a Fermi-Dirac with the same number AND energy
+  ! (intraband thermalization + EID), at a screened-Coulomb rate.
+  character(1)   :: yn_sbe_eeh             ! enable carrier-carrier channel
+  real(8)        :: sbe_eeh_nu_sat         ! carrier-carrier rate scale [s^-1]
 
   !! &epm (local empirical pseudopotential method, Cohen-Bergstresser)
   character(32)  :: epm_material

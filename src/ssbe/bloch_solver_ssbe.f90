@@ -64,6 +64,12 @@ module bloch_solver_ssbe
         ! diss_subcycle CPTP sub-steps when the collision rate is fast vs dt.
         real(8) :: eph_numax_au = 0d0   ! estimated peak e-ph rate [1/a.u.time]
 
+        ! Carrier-carrier (e-e/e-h) thermalization (Part F): CPTP relaxation of
+        ! the adiabatic populations toward a Fermi-Dirac with the SAME number
+        ! and energy, plus coherence damping (EID). Off unless yn_sbe_eeh='y'.
+        logical :: flag_eeh   = .false.
+        real(8) :: eeh_nu_au  = 0d0     ! carrier-carrier rate [1/a.u.time]
+
         ! Sublattice (band-unfolding) awareness of the impact-ionization
         ! channel. When the unfolding weights gs%unfold_w are available
         ! (non-zero), the k-local two-particle event is resolved per FCC
@@ -198,7 +204,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
                              yn_sbe_eph, sbe_eph_temperature_k, sbe_eph_nu_sat, &
                              sbe_eph_eps0_ev, sbe_eph_n, sbe_search_sigma_e_ev, &
                              yn_sbe_bgr_threshold, sbe_bgr_n_gate, sbe_bgr_coeff, &
-                             yn_sbe_superres, epm_material
+                             yn_sbe_superres, yn_sbe_eeh, sbe_eeh_nu_sat, epm_material
     use sbe_superres_ssbe, only: bose_factor
     use math_constants, only: pi
     use phys_constants, only: au_fs, kB_au, au_ev
@@ -485,6 +491,25 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
                     ', weight = ', sbe%eph_wrel(ib)
             end do
             write(*, '(a)') '#   k-local skeleton; CPTP amplitude damping; toggle Kuhn-Zurek off'
+        end if
+    end if
+
+    ! =========================================================================
+    ! Carrier-carrier (e-e/e-h) thermalization channel (Part F). Rate scale only;
+    ! the per-step (mu,T) Fermi-Dirac fit is done inside the channel.
+    ! [rate scale: Goodnick-Lugli PRB 37, 2578; Fischetti-Laux PRB 38, 9721]
+    ! =========================================================================
+    sbe%flag_eeh = (yn_sbe_eeh == 'y')
+    if (sbe%flag_eeh) then
+        if (sbe_eeh_nu_sat > 0d0) then
+            sbe%eeh_nu_au = sbe_eeh_nu_sat * (au_fs * 1d-15)
+        else
+            sbe%eeh_nu_au = 1.0d14 * (au_fs * 1d-15)   ! 1e13-1e14 s^-1 scale
+        end if
+        if (irank == 0) then
+            write(*, '(a)') '# carrier-carrier (e-e/e-h) thermalization (Part F) enabled:'
+            write(*, '(a,ES12.5,a)') '#   nu_cc = ', sbe%eeh_nu_au, &
+                ' 1/a.u.t; CPTP relax to Fermi-Dirac (conserves number+energy)'
         end if
     end if
 
@@ -1248,7 +1273,7 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
     ! the Pauli factors (a built-in predictor-corrector). Each sub-step is CPTP,
     ! so positivity is never threatened. m_sub = 1 unless e-ph is active, so
     ! impact-ionization-only runs are byte-for-byte unchanged.
-    if (sbe%flag_impact .or. sbe%flag_eph) then
+    if (sbe%flag_impact .or. sbe%flag_eph .or. sbe%flag_eeh) then
         ! field-aware Houston-branch sublattice weights for the unfolding-aware
         ! impact ionization (computed once; field-frozen over the half-step)
         if (sbe%flag_impact .and. sbe%flag_unfold_ii) then
@@ -1267,7 +1292,9 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
 
         m_sub = 1
         if (sbe%flag_eph) &
-            m_sub = min(20, max(1, ceiling(10d0 * sbe%eph_numax_au * tau)))
+            m_sub = max(m_sub, min(20, max(1, ceiling(10d0 * sbe%eph_numax_au * tau))))
+        if (sbe%flag_eeh) &
+            m_sub = max(m_sub, min(20, max(1, ceiling(10d0 * sbe%eeh_nu_au * tau))))
         tau_sub_d = tau / dble(m_sub)
         do isub_d = 1, m_sub
             if (sbe%flag_impact) &
@@ -1275,6 +1302,8 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
                                              wsub_branch, sbe%flag_unfold_ii)
             if (sbe%flag_eph) &
                 call apply_eph_relaxation(sbe, nba, t2, evals, Ac, tau_sub_d)
+            if (sbe%flag_eeh) &
+                call apply_carrier_carrier(sbe, nba, t2, evals, tau_sub_d)
         end do
     end if
 
@@ -1562,6 +1591,36 @@ subroutine apply_eph_relaxation(sbe, nba, rho_ad, evals, Ac, tau)
         end do
     end do
 end subroutine apply_eph_relaxation
+
+
+!=============================================================================
+! Part F: carrier-carrier (e-e/e-h) thermalization as a CPTP channel in the
+! Houston/adiabatic basis. Carrier-carrier scattering conserves total carrier
+! NUMBER and ENERGY (it thermalizes the distribution to a hot Fermi-Dirac and
+! produces excitation-induced dephasing, but does NOT relax energy to the
+! lattice). We realize this by relaxing the adiabatic populations toward the
+! Fermi-Dirac with the SAME number and energy, with coherence damping (EID):
+!
+!   rho~ -> (1 - alpha) rho~ + alpha * diag(occ * f_FD),  alpha = 1 - exp(-nu_cc tau),
+!
+! a convex combination of the identity and the constant-state channel
+! diag(occ f_FD) -> EXACTLY CPTP. Because f_FD is fitted to the current (N,E),
+! both Tr rho~ (number) and sum_a eps_a rho~_aa (energy) are conserved exactly.
+! This is the intra-k thermalization model (the standard relaxation-time /
+! BGK carrier-carrier closure); the full inter-k momentum-resolved collision
+! integral rides the ring (Part D) and is the documented refinement.
+! [Taj-Rossi PRA 78, 052113; Rosati et al. PRB 90, 125140; Goodnick-Lugli
+!  PRB 37, 2578; conserves N and E -- validation invariants]
+!=============================================================================
+subroutine apply_carrier_carrier(sbe, nba, rho_ad, evals, tau)
+    use sbe_superres_ssbe, only: carrier_carrier_relax
+    implicit none
+    type(s_sbe_bloch_solver), intent(in)    :: sbe
+    integer,                  intent(in)    :: nba
+    complex(8),               intent(inout) :: rho_ad(nba, nba)
+    real(8),                  intent(in)    :: evals(nba), tau
+    call carrier_carrier_relax(nba, rho_ad, evals, sbe%occ_max, sbe%eeh_nu_au, tau)
+end subroutine apply_carrier_carrier
 
 
 ! Exact finite-time map of a single Lindblad jump channel L = sqrt(Gamma)|f><i|

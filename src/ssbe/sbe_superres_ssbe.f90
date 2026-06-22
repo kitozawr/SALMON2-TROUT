@@ -36,7 +36,8 @@ module sbe_superres_ssbe
               golden_rule_prefactor, eph_thermal_split, &
               eps_thomas_fermi, tf_kappa2_degenerate, debye_kappa2, &
               lindhard_F, eps_lindhard_static, plasmon_freq2, lopc_branches, &
-              energy_partner_weights
+              energy_partner_weights, fermi_dirac, fit_fermi_dirac, &
+              carrier_carrier_relax
 
     ! =====================================================================
     ! Silicon intervalley deformation potentials -- Pop "new" set (default).
@@ -419,5 +420,115 @@ contains
             wsum = wsum + w(i)
         end do
     end subroutine energy_partner_weights
+
+    ! =====================================================================
+    ! Part F -- carrier-carrier (e-e/e-h) thermalization map and the
+    ! number-and-energy-conserving Fermi-Dirac fit it relaxes toward.
+    ! =====================================================================
+
+    pure function fermi_dirac(beta, e, mu) result(f)
+        real(8), intent(in) :: beta, e, mu
+        real(8) :: f, x
+        x = beta * (e - mu)
+        if (x > 7d2) then
+            f = 0d0
+        else if (x < -7d2) then
+            f = 1d0
+        else
+            f = 1d0 / (exp(x) + 1d0)
+        end if
+    end function fermi_dirac
+
+    ! For fixed beta, bisect mu so sum_a f_FD(eps_a) = ntot; return E and ftgt.
+    subroutine e_at_beta(nlev, eps, ntot, beta, Eout, mu, ftgt)
+        integer, intent(in)  :: nlev
+        real(8), intent(in)  :: eps(nlev), ntot, beta
+        real(8), intent(out) :: Eout, mu, ftgt(nlev)
+        real(8) :: mlo, mhi, mmid, nsum
+        integer :: it, a
+        mlo = minval(eps) - 1d0; mhi = maxval(eps) + 1d0
+        do it = 1, 100
+            mmid = 0.5d0 * (mlo + mhi)
+            nsum = 0d0
+            do a = 1, nlev
+                nsum = nsum + fermi_dirac(beta, eps(a), mmid)
+            end do
+            if (nsum < ntot) then
+                mlo = mmid
+            else
+                mhi = mmid
+            end if
+        end do
+        mu = 0.5d0 * (mlo + mhi)
+        Eout = 0d0
+        do a = 1, nlev
+            ftgt(a) = fermi_dirac(beta, eps(a), mu)
+            Eout = Eout + eps(a) * ftgt(a)
+        end do
+    end subroutine e_at_beta
+
+    ! Fit (beta, mu) so sum_a f_FD = ntot and sum_a eps_a f_FD = etot, by nested
+    ! bisection (outer beta log-scale, inner mu). ok=.false. if etot is outside
+    ! [E(T=0), E(T=inf)] (not Fermi-Dirac representable, e.g. population inversion).
+    subroutine fit_fermi_dirac(nlev, eps, ntot, etot, beta, mu, ftgt, ok)
+        integer, intent(in)  :: nlev
+        real(8), intent(in)  :: eps(nlev), ntot, etot
+        real(8), intent(out) :: beta, mu, ftgt(nlev)
+        logical, intent(out) :: ok
+        real(8) :: blo, bhi, bmid, Elo, Ehi, Emid, mtmp
+        integer :: it
+        ok = .false.
+        blo = 1d-4; bhi = 1d4
+        call e_at_beta(nlev, eps, ntot, blo, Elo, mtmp, ftgt)
+        call e_at_beta(nlev, eps, ntot, bhi, Ehi, mtmp, ftgt)
+        if (etot > Elo + 1d-12 .or. etot < Ehi - 1d-12) return
+        mu = mtmp; bmid = sqrt(blo * bhi)
+        do it = 1, 100
+            bmid = sqrt(blo * bhi)
+            call e_at_beta(nlev, eps, ntot, bmid, Emid, mu, ftgt)
+            if (Emid > etot) then
+                blo = bmid
+            else
+                bhi = bmid
+            end if
+            if (abs(Emid - etot) < 1d-13 * max(1d0, abs(etot))) exit
+        end do
+        beta = bmid
+        ok = .true.
+    end subroutine fit_fermi_dirac
+
+    ! Carrier-carrier CPTP relaxation map (Part F): relax the adiabatic
+    ! populations toward the number- and energy-matched Fermi-Dirac and damp the
+    ! coherences (EID):  rho -> (1-a) rho + a diag(occ f_FD), a = 1-exp(-nu tau),
+    ! a convex combination of identity and a constant-state channel -> CPTP.
+    ! Conserves Tr rho (number) and sum_a eps_a rho_aa (energy) exactly. A no-op
+    ! when the population set is empty/full or not Fermi-Dirac representable.
+    subroutine carrier_carrier_relax(nlev, rho, eps, occ, nu, tau)
+        integer,    intent(in)    :: nlev
+        complex(8), intent(inout) :: rho(nlev, nlev)
+        real(8),    intent(in)    :: eps(nlev), occ, nu, tau
+        real(8) :: f(nlev), ftgt(nlev), ntot, etot, alpha, beta, mu
+        integer :: a, b
+        logical :: ok
+        ntot = 0d0; etot = 0d0
+        do a = 1, nlev
+            f(a) = min(max(real(rho(a, a)) / occ, 0d0), 1d0)
+            ntot = ntot + f(a)
+            etot = etot + eps(a) * f(a)
+        end do
+        if (ntot < 1d-9 .or. (dble(nlev) - ntot) < 1d-9) return
+        call fit_fermi_dirac(nlev, eps, ntot, etot, beta, mu, ftgt, ok)
+        if (.not. ok) return
+        alpha = 1d0 - exp(-nu * tau)
+        do b = 1, nlev
+            do a = 1, nlev
+                if (a == b) then
+                    rho(a, a) = (1d0 - alpha) * rho(a, a) + dcmplx(alpha * occ * ftgt(a), 0d0)
+                else
+                    rho(a, b) = (1d0 - alpha) * rho(a, b)
+                end if
+            end do
+        end do
+    end subroutine carrier_carrier_relax
 
 end module sbe_superres_ssbe
