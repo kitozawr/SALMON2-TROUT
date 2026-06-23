@@ -137,18 +137,52 @@ _SI_FORM_FACTORS_CB_RY = {
     11: (+0.08, 0.0),
 }
 
+# DFT-fitted form factors (material='file'): a table {G2: (VS_ry, VA_ry)} loaded
+# from a 'tools/dft_to_epm' *_epm_formfactors.data file. This is how the Python
+# EPM (the primary EPM in this repo) consumes coefficients extracted from a
+# SALMON DFT band structure for crystals with no tabulated set.
+FORM_FACTOR_FILE = ''         # set to a *_epm_formfactors.data path to use it
+_EXTERNAL_FORM_FACTORS_RY = None
+
+
+def load_form_factor_file(path):
+    """Load a tools/dft_to_epm '*_epm_formfactors.data' table (G2 VS_ry VA_ry,
+    '#'/'!' comments) so form_factors(material='file', G2) uses it. Returns the
+    dict it loaded."""
+    global _EXTERNAL_FORM_FACTORS_RY
+    table = {}
+    with open(path) as fh:
+        for line in fh:
+            s = line.strip()
+            if not s or s[0] in '#!':
+                continue
+            tok = s.split()
+            table[int(tok[0])] = (float(tok[1]), float(tok[2]))
+    _EXTERNAL_FORM_FACTORS_RY = table
+    return table
+
+
 def form_factors(material, G2):
     """Local-EPM symmetric/antisymmetric form factors (Hartree) for shell |G|^2.
     GaAs (zincblende): Cohen-Bergstresser V^S, V^A. Si (diamond): V^A == 0
-    identically (two identical atoms), Kunikiyo V^S by default."""
-    if material == 'GaAs':
+    identically (two identical atoms), Kunikiyo V^S by default. 'file': a
+    DFT-fitted table loaded by load_form_factor_file()/FORM_FACTOR_FILE."""
+    if material == 'file':
+        if _EXTERNAL_FORM_FACTORS_RY is None:
+            if not FORM_FACTOR_FILE:
+                raise ValueError("material='file' needs FORM_FACTOR_FILE or "
+                                 "load_form_factor_file(path)")
+            load_form_factor_file(FORM_FACTOR_FILE)
+        table = _EXTERNAL_FORM_FACTORS_RY
+    elif material == 'GaAs':
         table = _CB_FORM_FACTORS_RY
     elif material in ('Si', 'Si_kunikiyo'):
         table = _SI_FORM_FACTORS_KUNIKIYO_RY
     elif material == 'Si_cb':
         table = _SI_FORM_FACTORS_CB_RY
     else:
-        raise ValueError("material must be 'GaAs', 'Si' (Kunikiyo) or 'Si_cb'")
+        raise ValueError("material must be 'GaAs', 'Si' (Kunikiyo), 'Si_cb' "
+                         "or 'file'")
     vs_ry, va_ry = table.get(G2, (0.0, 0.0))
     return vs_ry * RY_TO_HA, va_ry * RY_TO_HA
 

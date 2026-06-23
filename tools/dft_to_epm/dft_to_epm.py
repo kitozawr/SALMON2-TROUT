@@ -67,8 +67,16 @@ import numpy as np
 from scipy.linalg import eigvalsh
 from scipy.optimize import least_squares
 
+try:
+    from deep_pp_adapter import zunger_form_factor, backend_name
+except ImportError:  # allow `python3 tools/dft_to_epm/dft_to_epm.py` from repo root
+    import os as _os
+    sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+    from deep_pp_adapter import zunger_form_factor, backend_name
+
 RY_TO_HA = 0.5
 HARTREE_EV = 27.211386245988
+TWO_PI = 2.0 * np.pi
 
 
 # =============================================================================
@@ -337,6 +345,64 @@ def run_fit(model, kpoints, e_dft_ha, shells_s, shells_a, nb_fit,
     return vs, va, delta, res, sol
 
 
+def _zunger_factors(model, params_by_species, shells_s, shells_a):
+    """Sample the Zunger local form V(|G|) at the EPM integer shells and turn it
+    into symmetric / antisymmetric form factors.
+
+    Monoatomic basis (diamond): one species -> V^S(s) = V(|G_s|), V^A = 0.
+    Two-species basis (zincblende): V^S = (V_cat + V_an)/2, V^A = (V_cat - V_an)/2.
+    ``params_by_species`` is a list of 4-vectors [a0,a1,a2,a3] (1 or 2 entries).
+    """
+    twopi_over_a = TWO_PI / model.a
+    shells = sorted(set(shells_s) | set(shells_a))
+    vs, va = {}, {}
+    for s in shells:
+        q = np.sqrt(s) * twopi_over_a  # |G_s| in Bohr^-1
+        vals = [zunger_form_factor(q, p) for p in params_by_species]
+        if len(vals) == 1:
+            vs[s] = vals[0]
+            va[s] = 0.0
+        else:
+            vs[s] = 0.5 * (vals[0] + vals[1])
+            va[s] = 0.5 * (vals[0] - vals[1])
+    return vs, va
+
+
+def run_fit_zunger(model, kpoints, e_dft_ha, shells_s, shells_a, nb_fit,
+                   band_weights=None, nspecies=1):
+    """Fit the DeePseudopot analytic Zunger local form (a0..a3 per species) to
+    the DFT bands, then sample it at the EPM shells. Smoother / more constrained
+    than the per-shell least squares, so it extrapolates sensibly to shells that
+    were not independently free."""
+    e_dft = e_dft_ha[:, :nb_fit]
+    if band_weights is None:
+        band_weights = np.ones(nb_fit)
+    w2d = np.broadcast_to(band_weights[None, :nb_fit], e_dft.shape)
+
+    # p = [a0,a1,a2,a3] (* nspecies). a2 > 1 guarantees no real-q pole.
+    p0_single = [0.2, 2.2, 2.0, 0.25]
+    p0 = np.array(p0_single * nspecies, dtype=float)
+    lo = np.array([-5.0, -10.0, 1.001, 1e-3] * nspecies)
+    hi = np.array([5.0, 10.0, 50.0, 5.0] * nspecies)
+
+    def split(p):
+        return [p[4 * i:4 * i + 4] for i in range(nspecies)]
+
+    def residuals(p):
+        vs, va = _zunger_factors(model, split(p), shells_s, shells_a)
+        e_epm = model.bands(kpoints, vs, va, nb_fit)
+        delta = _optimal_delta(e_epm, e_dft, w2d)
+        return (np.sqrt(w2d) * ((e_epm + delta) - e_dft)).ravel()
+
+    sol = least_squares(residuals, p0, bounds=(lo, hi), method='trf',
+                        xtol=1e-13, ftol=1e-13, gtol=1e-13, max_nfev=8000)
+    vs, va = _zunger_factors(model, split(sol.x), shells_s, shells_a)
+    e_epm = model.bands(kpoints, vs, va, nb_fit)
+    delta = _optimal_delta(e_epm, e_dft, w2d)
+    res = (e_epm + delta) - e_dft
+    return vs, va, delta, res, sol, split(sol.x)
+
+
 def residuals_unweighted(model, kpoints, e_dft_ha, vs, va, delta, nb_fit):
     e_epm = model.bands(kpoints, vs, va, nb_fit)
     return (e_epm + delta) - e_dft_ha[:, :nb_fit]
@@ -416,6 +482,12 @@ def main(argv=None):
                          "(default: nval+4 if --nval given, else all available).")
     ap.add_argument('--weight-valence', type=float, default=1.0,
                     help="Extra least-squares weight on the valence bands.")
+    ap.add_argument('--method', choices=['lsq', 'zunger'], default='lsq',
+                    help="Fitting model. 'lsq': free per-shell form factors "
+                         "(fast, exact for an EPM-generated reference). 'zunger': "
+                         "fit the vendored DeePseudopot analytic Zunger local "
+                         "form a0..a3 (per species) and sample it at the shells -- "
+                         "smoother / more physically constrained.")
     ap.add_argument('--out-prefix', default='dft_epm')
     args = ap.parse_args(argv)
 
@@ -457,11 +529,19 @@ def main(argv=None):
     print("# dft_to_epm: cell=%s  a=%.4f Bohr  cutoff=%.3f  npw=%d  "
           "nk=%d  nb_fit=%d" % (args.cell, args.a_lattice_au, args.cutoff_ry,
                                 model.npw, len(kpoints), nb_fit))
-    print("# symmetric shells V^S: %s   antisymmetric shells V^A: %s"
-          % (shells_s, shells_a or '(none)'))
+    print("# method=%s   symmetric shells V^S: %s   antisymmetric shells V^A: %s"
+          % (args.method, shells_s, shells_a or '(none)'))
 
-    vs, va, delta, res, sol = run_fit(model, kpoints, e_dft_ha, shells_s,
-                                      shells_a, nb_fit, band_weights)
+    zunger_params = None
+    if args.method == 'zunger':
+        nspecies = 2 if shells_a else 1
+        print("# zunger backend: %s   species=%d" % (backend_name(), nspecies))
+        vs, va, delta, res, sol, zunger_params = run_fit_zunger(
+            model, kpoints, e_dft_ha, shells_s, shells_a, nb_fit,
+            band_weights, nspecies)
+    else:
+        vs, va, delta, res, sol = run_fit(model, kpoints, e_dft_ha, shells_s,
+                                          shells_a, nb_fit, band_weights)
 
     rms = np.sqrt(np.mean(res ** 2)) * HARTREE_EV
     maxerr = np.max(np.abs(res)) * HARTREE_EV
@@ -478,6 +558,12 @@ def main(argv=None):
     report.append("plane waves (npw)    : %d" % model.npw)
     report.append("k-points fitted      : %d" % len(kpoints))
     report.append("bands fitted         : %d" % nb_fit)
+    report.append("method               : %s" % args.method)
+    if zunger_params is not None:
+        report.append("zunger backend       : %s" % backend_name())
+        for i, p in enumerate(zunger_params):
+            report.append("  species %d a0..a3   : %12.6f %12.6f %12.6f %12.6f"
+                          % (i, p[0], p[1], p[2], p[3]))
     report.append("global shift delta   : %.6f Ha (%.4f eV)"
                   % (delta, delta * HARTREE_EV))
     report.append("converged            : %s (nfev=%d, cost=%.3e)"
@@ -509,11 +595,19 @@ def main(argv=None):
     print(report_txt)
     print("\n# wrote %s" % ff_path)
     print("# wrote %s" % rep_path)
-    print("\n# --- ready-to-paste Fortran case block for cb_get_form_factors ---")
+
+    # Primary consumer: the Python EPM (epm_gaas_reference.py). It can load the
+    # table directly via load_form_factor_file('%s').
+    print("\n# --- Python EPM (epm_gaas_reference.py, primary) ---")
+    print("#   set MATERIAL='file' and FORM_FACTOR_FILE='%s', or paste:" % ff_path)
+    print("_FITTED_FORM_FACTORS_RY = {")
+    for s in sorted(set(shells_s) | set(shells_a)):
+        print("    %2d: (%.6f, %.6f)," % (s, vs.get(s, 0.0), va.get(s, 0.0)))
+    print("}")
+
+    print("\n# --- legacy Fortran theory='epm' (deprecated) ---")
+    print("#   &epm: epm_material='file', epm_formfactor_file='%s'" % ff_path)
     print(fortran_case_block(args.material_name, shells_s, shells_a, vs, va))
-    print("\n# To run theory='epm' directly with these factors, set in &epm:")
-    print("#     epm_material        = 'file'")
-    print("#     epm_formfactor_file = '%s'" % ff_path)
     return 0
 
 

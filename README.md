@@ -50,7 +50,7 @@ For systems with many deep bands (e.g., 80 bands where 60 lie below -20 eV), eva
 Computes the total current as $J = \text{Tr}[(\mathbf{p} + \mathbf{A}) \rho]$ (in atomic units) without relying on perturbative expansions, ensuring proper inter/intra-band compensation in the Velocity Gauge. Hermiticity stabilization (`ρ = ρ†`) is enforced at each step to maintain real-valued currents and FFT stability.
 
 ### 5. Local Empirical Pseudopotential Method (EPM) ground states
-A self-contained local-EPM ground-state solver (`theory='epm'`, `src/epm`) that computes the Cohen-Bergstresser band structure and momentum matrix elements for zincblende GaAs directly in SALMON, and writes `SYSNAME_k.data`/`SYSNAME_eigen.data`/`SYSNAME_tm.data` in exactly the format read by `gs_info_ssbe` — closing the EPM → SBE pipeline end-to-end without external scripts (`rvnl_tm` is written as identically zero, since a local pseudopotential has no nonlocal velocity correction). For crystals with **no tabulated form factors**, `epm_material='file'` reads a table fitted to a SALMON DFT band structure by [`tools/dft_to_epm`](tools/dft_to_epm) — a **DFT → EPM → SBE** route for arbitrary materials.
+A local-EPM ground-state solver that computes the Cohen-Bergstresser band structure and momentum matrix elements and writes `SYSNAME_k.data`/`SYSNAME_eigen.data`/`SYSNAME_tm.data` in exactly the format read by `gs_info_ssbe` — closing the EPM → SBE pipeline end-to-end (`rvnl_tm` is identically zero, since a local pseudopotential has no nonlocal velocity correction). The **primary, maintained** implementation is the Python [`epm_gaas_reference.py`](epm_gaas_reference.py); the Fortran `theory='epm'` (`src/epm`) is **deprecated** but kept for backward compatibility. For crystals with **no tabulated form factors**, [`tools/dft_to_epm`](tools/dft_to_epm) fits the local form factors to a SALMON DFT band structure (plain least squares **or** the vendored DeePseudopot Zunger form) — a **DFT → EPM → SBE** route for arbitrary materials.
 
 ### 6. Spinor (spin-orbit split) EPM input + `yn_sbe_spinor`
 The Python EPM reference (`epm_gaas_reference.py`, hardcoded flag `INCLUDE_SPIN_ORBIT = True`) promotes the scalar $N_{PW}$ problem to the **spinor $2N_{PW}$ problem**: the plane-wave basis is doubled to $|G,s\rangle$, and
@@ -203,9 +203,17 @@ python3 plot_sbe_results.py --spectral    # unfolded + folded k-maps + per-frame
 
 In short: rerun `unfoldmap` (and `bandpath`) only, **rebuild the Fortran**, rerun the dynamics, then plot — the ground state is reused as-is.
 
-### EPM ground-state solver (`&epm`)
+### EPM ground-state solver (`&epm`) — *Fortran path deprecated*
 
-The `&epm` namelist configures the local-EPM ground-state solver (`theory='epm'`):
+> **Deprecated.** The maintained EPM in this repository is now the **Python**
+> implementation [`epm_gaas_reference.py`](epm_gaas_reference.py): it is more
+> flexible (continuous $q$-space potentials, the DeePseudopot Zunger / NN local
+> forms, and DFT-fitted form factors via `tools/dft_to_epm`). The Fortran
+> `theory='epm'` path below is kept for backward compatibility only and prints a
+> deprecation warning at run time.
+
+The `&epm` namelist configures the (legacy) Fortran local-EPM ground-state solver
+(`theory='epm'`):
 
 | Parameter | Units | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -218,28 +226,36 @@ The `&epm` namelist configures the local-EPM ground-state solver (`theory='epm'`
 
 The built-in form factors exist only for a handful of diamond/zincblende
 semiconductors. For **any other crystal**, run a normal SALMON DFT band structure
-and let `tools/dft_to_epm/dft_to_epm.py` **fit** the EPM local form factors to it
-(least squares against the DFT bands, eliminating the rigid energy-zero offset
-analytically). The fitted table loads straight back into `theory='epm'` via
-`epm_material='file'` — no recompilation — closing a **DFT → EPM → SBE** pipeline
-for arbitrary materials. This is the standard semi-empirical (band-fitting) route
-to EPM form factors, in the spirit of the machine-learned pseudopotentials of the
-vendored [`external/DeePseudopot`](external/DeePseudopot) project.
+and let `tools/dft_to_epm/dft_to_epm.py` **fit** the EPM local form factors to it,
+closing a **DFT → EPM → SBE** pipeline for arbitrary materials. Two fitting modes
+(`--method`) share the same EPM forward model:
+
+* **`lsq`** (default) — free per-shell `V^S`/`V^A` (classic Cohen-Bergstresser
+  picture; exact when the reference is itself an EPM band structure).
+* **`zunger`** — fits the analytic Zunger local form
+  $V(q)=a_0(q^2-a_1)/(a_2 e^{a_3 q^2}-1)$ and samples it at the shells; this
+  **pulls in the vendored [`external/DeePseudopot`](external/DeePseudopot) code as
+  a module** (`utils/pp_func.py::pot_func` when `torch` is installed, NumPy
+  fallback otherwise) — a smooth, physically constrained, transferable potential.
+
+The result feeds the **Python EPM** (primary) via `load_form_factor_file(...)`,
+and the legacy Fortran path via `epm_material='file'`.
 
 ```bash
 # DFT ground state + bands (low precision is fine), then fit:
 $SALMON < Si_gs.inp ;  ln -sfn data_for_restart restart ;  $SALMON < Si_band.inp
 python3 tools/dft_to_epm/dft_to_epm.py --dft band.dat --format band_dat \
-    --cell cubic --a-lattice-au 10.2626 --shells-s 3,8,11 \
+    --cell cubic --a-lattice-au 10.2626 --shells-s 3,8,11 --method zunger \
     --nval 16 --nbands-fit 18 --weight-valence 3.0 --out-prefix Si_fromDFT
-# -> Si_fromDFT_epm_formfactors.data  (use with epm_material='file')
+# -> Si_fromDFT_epm_formfactors.data
 ```
 
 A runnable end-to-end example is in `samples/exercise_x4_Si_dft_to_epm/`; full
-documentation (cubic vs primitive cell, zincblende $V^A$, choosing shells) is in
-[`tools/dft_to_epm/README.md`](tools/dft_to_epm/README.md). The fitter ships a
-SALMON-free regression test (`tools/dft_to_epm/tests/test_recovery.py`) that
-recovers known Si factors to ~$10^{-14}$.
+documentation (the two methods, cubic vs primitive cell, zincblende $V^A$,
+choosing shells) is in [`tools/dft_to_epm/README.md`](tools/dft_to_epm/README.md).
+The fitter ships a SALMON-free regression test
+(`tools/dft_to_epm/tests/test_recovery.py`) that recovers known Si factors to
+~$10^{-14}$ in both `lsq` and `zunger` modes.
 
 ---
 

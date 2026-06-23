@@ -16,6 +16,31 @@ and is in the same spirit as the machine-learned pseudopotentials of the vendore
 [`external/DeePseudopot`](../../external/DeePseudopot) project
 (Lin, Coley-O'Rourke & Rabani, *npj Comput. Mater.* **11**, 381 (2025)).
 
+## Two extraction methods (`--method`)
+
+Both methods fit the **same** EPM plane-wave Hamiltonian to the DFT bands; they
+differ in how the local potential is parametrised:
+
+| `--method` | Free parameters | When to use |
+| :--- | :--- | :--- |
+| `lsq` (default) | the form factors `V^S`/`V^A` at each requested shell, independently | fast; **exact** when the reference is itself an EPM band structure; the classic Cohen-Bergstresser picture. |
+| `zunger` | the **DeePseudopot analytic Zunger form** `V(q)=a0(q²−a1)/(a2·exp(a3 q²)−1)`, `a0..a3` per species, then sampled at the shells | a *smooth, physically constrained, transferable* local potential — same functional form DeePseudopot fits to ab-initio bands; regularises sparse/noisy data and extrapolates sensibly to shells that were not independently free. |
+
+`--method zunger` **pulls in the vendored DeePseudopot code as a module**: when
+`torch` is installed it calls `external/DeePseudopot/utils/pp_func.py::pot_func`
+directly (the run reports `zunger backend: deepseudopot(vendored)`); otherwise it
+falls back to a NumPy evaluation of the identical closed form. Install the
+upstream stack with `pip install -r external/DeePseudopot/requirements.txt` to use
+the real module path.
+
+> Note on accuracy: with only the 3–4 classic shells free, both methods reach the
+> same band RMS (a 4-parameter Zunger curve can hit 3 shell values exactly). The
+> Zunger advantage shows up as a smooth `V(q)` over *all* `|G|` (so you can emit
+> extra shells), physical regularisation, and a direct bridge to the full
+> DeePseudopot NN model — DeePseudopot itself is more accurate still because it
+> additionally fits a continuous NN `v(q)` plus nonlocal / SOC / strain channels
+> and richer targets (gaps, masses, deformation potentials).
+
 ## What it does
 
 1. Reads a SALMON DFT band structure:
@@ -35,10 +60,23 @@ and is in the same spirit as the machine-learned pseudopotentials of the vendore
 3. Fits `V^S` (and `V^A` for zincblende, via `--shells-a`) at the requested
    shells, eliminating the rigid DFT↔EPM energy-zero offset analytically.
 4. Writes:
-   * `<prefix>_epm_formfactors.data` — load it with `epm_material='file'`,
-     `epm_formfactor_file='<prefix>_epm_formfactors.data'`.
+   * `<prefix>_epm_formfactors.data` — the form-factor table.
    * `<prefix>_fit_report.txt` — fit quality + factors in Ry and Ha.
-   * a ready-to-paste Fortran `case` block for `cb_get_form_factors` (stdout).
+   * stdout snippets for both EPMs.
+
+### Consuming the result
+
+* **Python EPM — `epm_gaas_reference.py` (primary, maintained):**
+  ```python
+  import epm_gaas_reference as epm
+  epm.load_form_factor_file('Si_fromDFT_epm_formfactors.data')
+  # then run with MATERIAL = 'file'
+  ```
+  (or set `epm.FORM_FACTOR_FILE = '...'` / paste the printed
+  `_FITTED_FORM_FACTORS_RY` dict).
+* **Fortran `theory='epm'` (deprecated):** `&epm` with `epm_material='file'`,
+  `epm_formfactor_file='Si_fromDFT_epm_formfactors.data'`. The tool also prints a
+  ready-to-paste Fortran `case` block for `cb_get_form_factors`.
 
 ## Quick start (Silicon, cubic cell)
 

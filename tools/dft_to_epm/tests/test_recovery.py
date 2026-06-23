@@ -16,7 +16,8 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from dft_to_epm import EPMModel, run_fit  # noqa: E402
+from dft_to_epm import EPMModel, run_fit, run_fit_zunger  # noqa: E402
+from deep_pp_adapter import backend_name  # noqa: E402
 
 RY = 0.5  # Ry -> Ha
 SI_VS_RY = {3: -0.2258, 8: 0.05698, 11: 0.070709}  # Kunikiyo
@@ -59,9 +60,31 @@ def check_cell(cell, tol=1e-6):
     assert rms < tol, "%s: band RMS %.2e too large" % (cell, rms)
 
 
+def check_zunger(cell, tol=1e-5):
+    """Method 'zunger' (vendored DeePseudopot analytic form) must also reproduce
+    the known Si shell factors via the band fit."""
+    model = EPMModel(cell, A_LATTICE, CUTOFF, SHELLS, [])
+    kpts = random_kpath(model, nk=12, seed=7)
+    nb_fit = 16
+    e_dft = model.bands(kpts, SI_VS_RY, {}, nb_fit)
+
+    vs, va, delta, res, sol, zp = run_fit_zunger(
+        model, kpts, e_dft, SHELLS, [], nb_fit, nspecies=1)
+    rms = float(np.sqrt(np.mean(res ** 2)))
+    max_ff_err = max(abs(vs[s] - SI_VS_RY[s]) for s in SHELLS)
+    print("[%s/zunger backend=%s] V^S(Ry): %s" % (
+        cell, backend_name(),
+        ", ".join("%d:%.6f" % (s, vs[s]) for s in SHELLS)))
+    print("[%s/zunger] form-factor max error = %.2e Ry, band RMS = %.2e Ha"
+          % (cell, max_ff_err, rms))
+    assert max_ff_err < tol, "%s/zunger: ff error %.2e" % (cell, max_ff_err)
+    assert rms < tol, "%s/zunger: band RMS %.2e" % (cell, rms)
+
+
 def main():
     for cell in ('cubic', 'primitive'):
         check_cell(cell)
+    check_zunger('cubic')
     print("\nALL TESTS PASSED")
     return 0
 
