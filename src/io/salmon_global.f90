@@ -492,6 +492,7 @@ character(256),allocatable :: atom_name(:)
   character(32)  :: epm_material
   real(8)        :: epm_lattice_constant_au
   real(8)        :: epm_pw_cutoff_ry
+  character(256) :: epm_formfactor_file     ! used when epm_material=='file': table of DFT-fitted local form factors
 
   !! &dc
   integer        :: num_fragment(3)

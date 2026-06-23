@@ -1,0 +1,70 @@
+Testing epc calculations on H2 with analytic vs finite-difference derivatives.
+Assumes no electronic degeneracy and Gamma-only k grids & q grids.
+Sections:
+1) Analytic dV/dR using eigenvectors from this script
+2) One-sided finite difference via ham.calcCouplings_diag_fd()
+3) calcCouplings() magnitude output
+
+All settings: 
+	Using separateKptGrad. This can decrease the peak memory load during the fitting code.
+	Not doing multiprocessing.
+
+
+########################################
+Initializing the NN with file /Users/tommylin/Desktop/DeePseudopot_eph/test_ham/eph_diag_fd_test_inputs/init_PPmodel.pth.
+Done with NN initialization to the file /Users/tommylin/Desktop/DeePseudopot_eph/test_ham/eph_diag_fd_test_inputs/init_PPmodel.pth.
+NOTE: SOC is off. idxVB and idxCB are zero-indexed band indices without 2x interleaving for spin. Please double check to ensure your inputs of idxVB and idxCB correspond to your intended bands. 
+
+
+Initial energies VBM: -16.261992 eV, CBM: 4.549248 eV
+All eigenvalues (eV): [-16.261991852584956, 4.549248062920451, 8.114579234631504, 8.217843508167968, 8.21784350816824, 8.658429400409965, 8.815549829079412, 8.815549829079739, 8.84612989205951, 8.957187187971565]
+Test script assumes no degeneracy! 
+
+
+Analytic epc calculated from e-vecs extracted within this test script (eV/Bohr):
+H, d/dR_x, vb-vb: 0.000e+00 (|Re|,|Im|<1e-12)
+H, d/dR_x, cb-cb: 0.000e+00 (|Re|,|Im|<1e-12)
+H, d/dR_y, vb-vb: 0.000e+00 (|Re|,|Im|<1e-12)
+H, d/dR_y, cb-cb: 0.000e+00 (|Re|,|Im|<1e-12)
+H, d/dR_z, vb-vb: -7.881e+00 (Re; |Im|<1e-12)
+H, d/dR_z, cb-cb: -1.041e-01 (Re; |Im|<1e-12)
+H, d/dR_x, vb-vb: 0.000e+00 (|Re|,|Im|<1e-12)
+H, d/dR_x, cb-cb: 0.000e+00 (|Re|,|Im|<1e-12)
+H, d/dR_y, vb-vb: 0.000e+00 (|Re|,|Im|<1e-12)
+H, d/dR_y, cb-cb: 0.000e+00 (|Re|,|Im|<1e-12)
+H, d/dR_z, vb-vb: 7.881e+00 (Re; |Im|<1e-12)
+H, d/dR_z, cb-cb: 1.041e-01 (Re; |Im|<1e-12)
+
+Analytic summary (H, d/dz, eV/Bohr):
+               dy             fd_vb             fd_cb           |an_vb|           |an_cb|
+                /                 /                 /     7.8813363e+00     1.0412455e-01
+
+
+Finite difference by calling calcCouplings_diag_fd() (focusing only on H0, |d/dz|, eV/Bohr)
+               dz    ham_fd_auto_vb    ham_fd_auto_cb
+    1.0000000e-04     7.8810308e+00     1.0412118e-01
+    1.0000000e-05     7.8813058e+00     1.0412422e-01
+    1.0000000e-06     7.8813322e+00     1.0412461e-01
+    1.0000000e-07     7.8813332e+00     1.0412401e-01
+
+
+Analytical epc calculated using calcCouplings() function (eV/Bohr):
+
+WARNING: This feature is no longer necessary for atomic derivs.
+Degeneracy of electronic bands is now handled automatically.
+This feature should only be necessary for explicit phonons.
+
+calcCouplings comparison (subset vs full). |cpl| in eV/Bohr
+atom  dir band calcCouplings() <x,y,z> averaged (wrong!)
+  H0    x   vb    0.00000e+00    2.62711e+00
+  H0    x   cb    0.00000e+00    3.47082e-02
+  H0    y   vb    0.00000e+00    2.62711e+00
+  H0    y   cb    0.00000e+00    3.47082e-02
+  H0    z   vb    7.88134e+00    2.62711e+00
+  H0    z   cb    1.04125e-01    3.47082e-02
+  H1    x   vb    0.00000e+00    2.62711e+00
+  H1    x   cb    0.00000e+00    3.47082e-02
+  H1    y   vb    0.00000e+00    2.62711e+00
+  H1    y   cb    0.00000e+00    3.47082e-02
+  H1    z   vb    7.88134e+00    2.62711e+00
+  H1    z   cb    1.04125e-01    3.47082e-02

@@ -1,0 +1,31 @@
+site_name: DeepPseudopot Documentation
+site_description: Reference manual and usage guides for DeepPseudopot.
+nav:
+  - Introduction: index.md
+  - Installation & Quick Start: install.md
+  - Workflow Modes: workflows.md
+  - Input Data Description:
+    - Summary: inputs.md
+    - Global Calculations Settings: configuration.md
+    - System-specific Data Files: system-data.md
+  - Output Data Description: outputs.md
+  - Troubleshooting Guide: troubleshooting.md
+theme:
+  name: material
+plugins:
+  - search
+markdown_extensions:
+  - admonition
+  - codehilite
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.tasklist:
+      custom_checkbox: true      # nice Material-style boxes
+      clickable_checkbox: true   # (optional) let users click them in the browser
+extra_javascript:
+    - https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-chtml.js
+extra_css:
+  - css/custom.css

@@ -50,7 +50,7 @@ For systems with many deep bands (e.g., 80 bands where 60 lie below -20 eV), eva
 Computes the total current as $J = \text{Tr}[(\mathbf{p} + \mathbf{A}) \rho]$ (in atomic units) without relying on perturbative expansions, ensuring proper inter/intra-band compensation in the Velocity Gauge. Hermiticity stabilization (`ρ = ρ†`) is enforced at each step to maintain real-valued currents and FFT stability.
 
 ### 5. Local Empirical Pseudopotential Method (EPM) ground states
-A self-contained local-EPM ground-state solver (`theory='epm'`, `src/epm`) that computes the Cohen-Bergstresser band structure and momentum matrix elements for zincblende GaAs directly in SALMON, and writes `SYSNAME_k.data`/`SYSNAME_eigen.data`/`SYSNAME_tm.data` in exactly the format read by `gs_info_ssbe` — closing the EPM → SBE pipeline end-to-end without external scripts (`rvnl_tm` is written as identically zero, since a local pseudopotential has no nonlocal velocity correction).
+A self-contained local-EPM ground-state solver (`theory='epm'`, `src/epm`) that computes the Cohen-Bergstresser band structure and momentum matrix elements for zincblende GaAs directly in SALMON, and writes `SYSNAME_k.data`/`SYSNAME_eigen.data`/`SYSNAME_tm.data` in exactly the format read by `gs_info_ssbe` — closing the EPM → SBE pipeline end-to-end without external scripts (`rvnl_tm` is written as identically zero, since a local pseudopotential has no nonlocal velocity correction). For crystals with **no tabulated form factors**, `epm_material='file'` reads a table fitted to a SALMON DFT band structure by [`tools/dft_to_epm`](tools/dft_to_epm) — a **DFT → EPM → SBE** route for arbitrary materials.
 
 ### 6. Spinor (spin-orbit split) EPM input + `yn_sbe_spinor`
 The Python EPM reference (`epm_gaas_reference.py`, hardcoded flag `INCLUDE_SPIN_ORBIT = True`) promotes the scalar $N_{PW}$ problem to the **spinor $2N_{PW}$ problem**: the plane-wave basis is doubled to $|G,s\rangle$, and
@@ -209,9 +209,37 @@ The `&epm` namelist configures the local-EPM ground-state solver (`theory='epm'`
 
 | Parameter | Units | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `epm_material` | — | `'GaAs'` | Material whose tabulated Cohen-Bergstresser local form factors are used (currently `'GaAs'`). |
-| `epm_lattice_constant_au` | Bohr | `10.68d0` | Zincblende lattice constant $a$. |
+| `epm_material` | — | `'GaAs'` | Material whose tabulated local form factors are used: `'GaAs'` (Cohen-Bergstresser), `'Si'`/`'Si_cb'` (diamond), or **`'file'`** to read a DFT-fitted table (see below). |
+| `epm_lattice_constant_au` | Bohr | `10.68d0` | Zincblende/diamond lattice constant $a$. |
 | `epm_pw_cutoff_ry` | Ry | `11.1d0` | Plane-wave cutoff $|\mathbf{k}+\mathbf{G}|^2$ for the basis set. |
+| `epm_formfactor_file` | — | `''` | Path to a local form-factor table, used **only** when `epm_material='file'`. Lines are `G2  V^S[Ry]  V^A[Ry]` (`#`/`!` comments allowed); shells absent from the table contribute zero. Produced by `tools/dft_to_epm` (see next section). |
+
+#### DFT → EPM: form factors for any crystal (`tools/dft_to_epm`)
+
+The built-in form factors exist only for a handful of diamond/zincblende
+semiconductors. For **any other crystal**, run a normal SALMON DFT band structure
+and let `tools/dft_to_epm/dft_to_epm.py` **fit** the EPM local form factors to it
+(least squares against the DFT bands, eliminating the rigid energy-zero offset
+analytically). The fitted table loads straight back into `theory='epm'` via
+`epm_material='file'` — no recompilation — closing a **DFT → EPM → SBE** pipeline
+for arbitrary materials. This is the standard semi-empirical (band-fitting) route
+to EPM form factors, in the spirit of the machine-learned pseudopotentials of the
+vendored [`external/DeePseudopot`](external/DeePseudopot) project.
+
+```bash
+# DFT ground state + bands (low precision is fine), then fit:
+$SALMON < Si_gs.inp ;  ln -sfn data_for_restart restart ;  $SALMON < Si_band.inp
+python3 tools/dft_to_epm/dft_to_epm.py --dft band.dat --format band_dat \
+    --cell cubic --a-lattice-au 10.2626 --shells-s 3,8,11 \
+    --nval 16 --nbands-fit 18 --weight-valence 3.0 --out-prefix Si_fromDFT
+# -> Si_fromDFT_epm_formfactors.data  (use with epm_material='file')
+```
+
+A runnable end-to-end example is in `samples/exercise_x4_Si_dft_to_epm/`; full
+documentation (cubic vs primitive cell, zincblende $V^A$, choosing shells) is in
+[`tools/dft_to_epm/README.md`](tools/dft_to_epm/README.md). The fitter ships a
+SALMON-free regression test (`tools/dft_to_epm/tests/test_recovery.py`) that
+recovers known Si factors to ~$10^{-14}$.
 
 ---
 
@@ -465,6 +493,7 @@ The wiki also covers the **Silicon EPM** ground state (`epm_material='Si'`, diam
 6. **Spin-Orbit in EPM:** Weisz, G. "Band Structure and Fermi Surface of White Tin." *Phys. Rev.* 149, 504 (1966); Bloom, S., & Bergstresser, T. K. "Band structure of α-Sn, InSb and CdTe including spin-orbit effects." *Solid State Commun.* 6, 465 (1968); Chelikowsky, J. R., & Cohen, M. L. "Nonlocal pseudopotential calculations for the electronic structure of eleven diamond and zinc-blende semiconductors." *Phys. Rev. B* 14, 556 (1976).
 7. **Velocity-Gauge SBE / Houston Basis:** Wismer, M. S., & Yakovlev, V. S. "Gauge-independent decoherence models for solids in external fields." *Phys. Rev. B* 97, 144302 (2018).
 8. **Original SALMON SBE:** Sato, S. A. et al. "Multiscale computational approach for light-matter interactions." *Phys. Rev. B* 92, 115145 (2015).
+9. **DFT → EPM form factors / ML pseudopotentials (DeePseudopot):** Lin, K., Coley-O'Rourke, M. J., & Rabani, E. "Deep-learning atomistic semi-empirical pseudopotential model for nanomaterials." *npj Comput. Mater.* **11**, 381 (2025). Upstream code vendored as a reference snapshot under [`external/DeePseudopot`](external/DeePseudopot) (see its [`VENDORED.md`](external/DeePseudopot/VENDORED.md) for provenance/licensing); the `theory='dft'` → EPM extractor lives in [`tools/dft_to_epm`](tools/dft_to_epm).
 
 ## License
 

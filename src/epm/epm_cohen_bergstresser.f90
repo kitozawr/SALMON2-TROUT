@@ -13,8 +13,75 @@ module epm_cohen_bergstresser
 
     private
     public :: cb_get_form_factors, cb_tau_zincblende, cb_lattice_vectors_fcc
+    public :: cb_load_formfactor_file
+
+    ! --- DFT-fitted form-factor table (epm_material=='file') -----------------
+    ! Loaded once (on rank 0, then used everywhere after the standard init-time
+    ! broadcast of the lattice/basis is irrelevant here because every rank calls
+    ! cb_load_formfactor_file independently from init_epm_info). Shells absent
+    ! from the table return (0,0), exactly like the built-in tables.
+    integer, parameter :: cb_max_shells = 64
+    logical, save      :: cb_file_loaded = .false.
+    integer, save      :: cb_file_nff = 0
+    integer, save      :: cb_file_g2(cb_max_shells) = 0
+    real(8), save      :: cb_file_vs_ry(cb_max_shells) = 0d0
+    real(8), save      :: cb_file_va_ry(cb_max_shells) = 0d0
 
 contains
+
+    ! Load a DFT-fitted local form-factor table written by
+    ! tools/dft_to_epm/dft_to_epm.py. Lines beginning with '#' are comments; data
+    ! lines are "G2  VS_ry  VA_ry" (G2 = |G|^2 in (2*pi/a)^2 units, integer; the
+    ! form factors are in Rydberg, converted to Hartree by cb_get_form_factors
+    ! exactly like the built-in tables). Called once from init_epm_info when
+    ! epm_material=='file'.
+    subroutine cb_load_formfactor_file(path)
+        use filesystem, only: get_filehandle
+        implicit none
+        character(*), intent(in) :: path
+        integer :: fh, ios, g2
+        real(8) :: vs_ry, va_ry
+        character(256) :: line
+
+        if (cb_file_loaded) return
+        if (len_trim(path) == 0) then
+            stop 'epm_cohen_bergstresser: epm_material=="file" requires epm_formfactor_file'
+        end if
+
+        cb_file_nff = 0
+        fh = get_filehandle()
+        open(unit=fh, file=trim(path), action='read', status='old', iostat=ios)
+        if (ios /= 0) then
+            write(*,'(a,a)') '# EPM: cannot open form-factor file: ', trim(path)
+            stop 'epm_cohen_bergstresser: failed to open epm_formfactor_file'
+        end if
+
+        do
+            read(fh, '(a)', iostat=ios) line
+            if (ios /= 0) exit
+            line = adjustl(line)
+            if (len_trim(line) == 0) cycle
+            if (line(1:1) == '#' .or. line(1:1) == '!') cycle
+            read(line, *, iostat=ios) g2, vs_ry, va_ry
+            if (ios /= 0) cycle
+            if (cb_file_nff >= cb_max_shells) then
+                stop 'epm_cohen_bergstresser: too many form-factor shells (raise cb_max_shells)'
+            end if
+            cb_file_nff = cb_file_nff + 1
+            cb_file_g2(cb_file_nff)    = g2
+            cb_file_vs_ry(cb_file_nff) = vs_ry
+            cb_file_va_ry(cb_file_nff) = va_ry
+        end do
+        close(fh)
+
+        if (cb_file_nff == 0) then
+            stop 'epm_cohen_bergstresser: form-factor file contained no usable shells'
+        end if
+        cb_file_loaded = .true.
+
+        write(*,'(a,i0,a,a)') '# EPM: loaded ', cb_file_nff, &
+            & ' DFT-fitted form-factor shells from ', trim(path)
+    end subroutine cb_load_formfactor_file
 
     ! Symmetric/antisymmetric local pseudopotential form factors V^S(G^2), V^A(G^2)
     ! in Hartree atomic units. G2 is the squared length of the reciprocal lattice
@@ -75,8 +142,25 @@ contains
             case (11)
                 VS_ry =  0.08d0;  VA_ry = 0.0d0
             end select
+        case ('file')
+            ! DFT-fitted local form factors loaded by cb_load_formfactor_file
+            ! (tools/dft_to_epm). Shells absent from the table give (0,0), as for
+            ! the built-in materials.
+            block
+                integer :: ish
+                if (.not. cb_file_loaded) then
+                    stop 'epm_cohen_bergstresser: epm_material=="file" but no table loaded'
+                end if
+                do ish = 1, cb_file_nff
+                    if (cb_file_g2(ish) == G2) then
+                        VS_ry = cb_file_vs_ry(ish)
+                        VA_ry = cb_file_va_ry(ish)
+                        exit
+                    end if
+                end do
+            end block
         case default
-            stop 'epm_cohen_bergstresser: unsupported epm_material (use "GaAs", "Si" or "Si_cb")'
+            stop 'epm_cohen_bergstresser: unsupported epm_material (use "GaAs", "Si", "Si_cb" or "file")'
         end select
 
         VS_ha = VS_ry * ry_to_ha

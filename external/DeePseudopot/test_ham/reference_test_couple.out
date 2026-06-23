@@ -1,0 +1,59 @@
+Testing epc calculations on zbCdSe.
+Normal 0.01 meV criteria would label CBM/VBM as non-degenerate.
+Here we pick two states to act as 'CB' and 'VB' for a degeneracy test.
+These are NOT the true band edges of the material.
+Indices (0-based): 'VB' = 7; 'CB' = 8,9.
+Degeneracy: 'CB' is 2-fold; 'VB' is non-degenerate.
+
+Sections:
+  1) calcCouplings() with symm_equiv=avg_dirs
+  2) calcCouplings() without symm_equiv
+  3) Same as (2) after random unitary rotation of the CB subspace
+  4) Manual average CB wavefunction: cb = (v8+v9)/sqrt(2) (not invariant)
+  5) Same as (4) but with a random unitary before averaging (not invariant)
+  6) Finite-difference epc from calcCouplings_diag_fd()
+
+initial atom positions:
+Cd: tensor([1.43106598, 1.43106598, 1.43106598])
+Se: tensor([-1.43106598, -1.43106598, -1.43106598])
+All settings: 
+	Using separateKptGrad. This can decrease the peak memory load during the fitting code.
+	Not doing multiprocessing.
+
+NOTE: SOC is off. idxVB and idxCB are zero-indexed band indices without 2x interleaving for spin. Please double check to ensure your inputs of idxVB and idxCB correspond to your intended bands. 
+All energies: [-20.179894367137674, -6.309525669377425, -6.3095256693773525, -6.302433039842864, -4.414887598710237, 1.3233415397785837, 1.3233415397786195, 1.323507563855518, 4.469075812504449, 4.469075812504593, 6.6509894436163846, 8.150689457906797, 8.150689457906868, 8.151315937893964, 11.846596395197235, 18.769509089867668, 18.769509089867704]
+The real VB and CB band edges are -6.302433 eV and -4.414888 eV respectively.
+
+In our test script, we consider the 'fake' VB and CB as: VBM = 1.323508, CBM = 4.469076 eV
+vb-1 degen? False, E_diff = 1.660e-04 eV
+vb-2 degen? False, E_diff = 1.660e-04 eV
+cb+1 degen? True, E_diff = 1.435e-13 eV
+cb+2 degen? False, E_diff = 2.182e+00 eV
+
+WARNING: This feature is no longer necessary for atomic derivs.
+Degeneracy of electronic bands is now handled automatically.
+This feature should only be necessary for explicit phonons.
+
+
+
+Section list:
+Section 1: calcCouplings() with symm_equiv=avg_dirs
+Section 2: calcCouplings() without symm_equiv
+Section 3: calcCouplings() after random unitary rotation (no symm_equiv)
+Section 4: Manual dV/dR using averaged degenerate CB wavefunctions
+Section 5: Manual dV/dR using averaged, unitary-rotated CB wavefunctions
+Section 6: calcCouplings_diag_fd() one-sided finite differences at Gamma, delta=1.0e-06 Bohr
+[Unit = eV/Bohr]
+atom  dir band     S1 |cpl|     S2 |cpl|     S3 |cpl|     S4 |cpl|     S5 |cpl|     S6 |cpl|
+  Cd   dx   vb 1.701418e-01 1.701418e-01 1.701418e-01 1.701418e-01 1.701418e-01 1.700548e-01
+  Cd   dx   cb 5.598881e-05 5.598881e-05 5.598881e-05 3.619333e-05 8.217436e-05 5.676432e-05
+  Cd   dy   vb 1.701418e-01 1.701418e-01 1.701418e-01 1.701418e-01 1.701418e-01 1.700548e-01
+  Cd   dy   cb 5.598881e-05 5.598881e-05 5.598881e-05 9.128052e-05 3.070927e-05 5.678711e-05
+  Cd   dz   vb 1.701418e-01 1.701418e-01 1.701418e-01 1.701418e-01 1.701418e-01 1.700548e-01
+  Cd   dz   cb 5.598881e-05 5.598881e-05 5.598881e-05 3.205861e-05 2.573784e-05 5.676293e-05
+  Se   dx   vb 1.701418e-01 1.701418e-01 1.701418e-01 1.701418e-01 1.701418e-01 1.702289e-01
+  Se   dx   cb 5.598881e-05 5.598881e-05 5.598881e-05 3.619333e-05 8.217436e-05 5.514544e-05
+  Se   dy   vb 1.701418e-01 1.701418e-01 1.701418e-01 1.701418e-01 1.701418e-01 1.702287e-01
+  Se   dy   cb 5.598881e-05 5.598881e-05 5.598881e-05 9.128052e-05 3.070927e-05 5.512092e-05
+  Se   dz   vb 1.701418e-01 1.701418e-01 1.701418e-01 1.701418e-01 1.701418e-01 1.702289e-01
+  Se   dz   cb 5.598881e-05 5.598881e-05 5.598881e-05 3.205861e-05 2.573784e-05 5.519632e-05

@@ -66,7 +66,7 @@ contains
     !=========================================================================
     subroutine init_epm_info(epm, icomm)
         use salmon_global, only: epm_material, epm_lattice_constant_au, epm_pw_cutoff_ry, &
-                                 num_kgrid, nstate, nelec
+                                 epm_formfactor_file, num_kgrid, nstate, nelec
         implicit none
         type(s_epm_info), intent(out) :: epm
         integer, intent(in) :: icomm
@@ -76,6 +76,12 @@ contains
 
         epm%material   = epm_material
         epm%a_lattice  = epm_lattice_constant_au
+
+        ! DFT-fitted form factors (epm_material=='file'): load the table on every
+        ! rank before any Hamiltonian build calls cb_get_form_factors.
+        if (trim(epm_material) == 'file') then
+            call cb_load_formfactor_file(epm_formfactor_file)
+        end if
 
         call cb_lattice_vectors_fcc(epm%a_lattice, epm%a_matrix(1:3,1), epm%a_matrix(1:3,2), epm%a_matrix(1:3,3))
         epm%tau(1:3) = cb_tau_zincblende(epm%a_lattice)
