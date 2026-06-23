@@ -23,12 +23,21 @@ is deliberately modest; the point is the extraction workflow.
 SALMON=/path/to/build/salmon
 
 # 1) DFT -> band.dat -> fitted form factors  (in ./work)
-SALMON="$SALMON" bash run_dft_to_epm.sh
+SALMON="$SALMON" bash run_dft_to_epm.sh                 # default: --method lsq
+SALMON="$SALMON" METHOD=zunger bash run_dft_to_epm.sh   # vendored DeePseudopot form
 
 # 2) build the EPM ground state from the fitted factors
 cp work/Si_fromDFT_epm_formfactors.data .
 "$SALMON" < Si_epm_fromdft.inp        # -> Si_epm_fromdft_{k,eigen,tm}.data
 ```
+
+`METHOD=zunger` fits the analytic Wang-Zunger local form and uses the vendored
+[`external/DeePseudopot`](../../external/DeePseudopot) `pot_func` as a module
+(`pip install -r external/DeePseudopot/requirements.txt` to get the real torch
+path; a NumPy fallback runs otherwise). For the minimal 3-shell Si fit both
+methods return the same factors — see the
+**[DFT → EPM wiki page](../../wiki/07_dft_to_epm.md)** for when they differ and an
+evidence-backed accuracy comparison.
 
 ## What to expect
 

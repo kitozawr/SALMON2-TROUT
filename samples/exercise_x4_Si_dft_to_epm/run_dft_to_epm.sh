@@ -9,6 +9,7 @@
 set -euo pipefail
 
 SALMON="${SALMON:-salmon}"
+METHOD="${METHOD:-lsq}"     # 'lsq' or 'zunger' (vendored DeePseudopot form)
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 GS_SAMPLE="$REPO/samples/exercise_04_bulkSi_gs"
@@ -25,15 +26,18 @@ ln -sfn data_for_restart restart
 echo "==> [2/3] Band structure (theory='dft_band') -> band.dat"
 "$SALMON" < Si_band.inp > dft_band.out 2>&1
 
-echo "==> [3/3] Fit EPM local form factors from band.dat"
+echo "==> [3/3] Fit EPM local form factors from band.dat (method=$METHOD)"
 # a = 5.43 Angstrom = 10.2626 Bohr; diamond => V^A = 0 (no --shells-a);
 # nval = 32 electrons / 2 = 16 valence bands.
+# METHOD=lsq    : free per-shell least squares (default)
+# METHOD=zunger : vendored DeePseudopot analytic Zunger form (needs torch for the
+#                 real module path; NumPy fallback otherwise)
 python3 "$TOOL" \
     --dft band.dat --format band_dat --cell cubic \
     --a-lattice-au 10.2626 --cutoff-ry 11.1 \
     --material-name Si_fromDFT --shells-s 3,8,11 \
     --nval 16 --nbands-fit 18 --weight-valence 3.0 \
-    --out-prefix Si_fromDFT
+    --method "$METHOD" --out-prefix Si_fromDFT
 
 echo
 echo "==> done. Form factors written to:"

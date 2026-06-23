@@ -250,9 +250,11 @@ python3 tools/dft_to_epm/dft_to_epm.py --dft band.dat --format band_dat \
 # -> Si_fromDFT_epm_formfactors.data
 ```
 
-A runnable end-to-end example is in `samples/exercise_x4_Si_dft_to_epm/`; full
-documentation (the two methods, cubic vs primitive cell, zincblende $V^A$,
-choosing shells) is in [`tools/dft_to_epm/README.md`](tools/dft_to_epm/README.md).
+A runnable end-to-end example is in `samples/exercise_x4_Si_dft_to_epm/`; the
+**[DFT → EPM wiki page](wiki/07_dft_to_epm.md)** covers the physics, the two
+methods, an evidence-backed accuracy comparison (is `zunger` more accurate *for
+the discrete shells*? — measured), and a worked Silicon example. Tool reference:
+[`tools/dft_to_epm/README.md`](tools/dft_to_epm/README.md).
 The fitter ships a SALMON-free regression test
 (`tools/dft_to_epm/tests/test_recovery.py`) that recovers known Si factors to
 ~$10^{-14}$ in both `lsq` and `zunger` modes.
@@ -483,6 +485,7 @@ The wiki also covers the **Silicon EPM** ground state (`epm_material='Si'`, diam
 - **[Configuration & Examples](wiki/04_configuration_examples.md)** — all namelist parameters and runnable pipelines, with **per-material recipes** (GaAs / Si) for every new mode and the Maxwell-SBE multiscale run.
 - **[Band Folding & Unfolding](wiki/05_folding_unfolding.md)** — cubic-cell 4-fold FCC folding, exact-folding proof, unfold/refold pipeline, why it matters for Hartree-Fock.
 - **[VG Basis Sufficiency & N_b Convergence](wiki/06_vg_basis_nb_convergence.md)** — why the dynamics band count is a correctness axis separate from the plane-wave cutoff (and not cured by the Houston basis); the P_top / N_b-convergence / admixture criteria and the runtime monitor.
+- **[DFT → EPM form factors](wiki/07_dft_to_epm.md)** — extracting EPM local form factors for any crystal from a SALMON DFT band structure; the two fitting methods (`lsq` and the vendored DeePseudopot `zunger` form), an evidence-backed accuracy comparison for the discrete shells, and a worked Silicon example.
 
 ### Conventions
 - **Units:** EPM structural block in Rydberg (kinetic |k+G|², lengths in Bohr); SBE dynamics in Hartree atomic units (ħ=mₑ=|e|=1). 1 Ry = ½ Hartree. User-facing `&sbe` knobs are in named units (eV, s⁻¹, K, cm⁻³) and converted to a.u. internally.
