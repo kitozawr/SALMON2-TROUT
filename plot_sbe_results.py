@@ -12,6 +12,12 @@ Drop into a calculation directory and run:
 What is plotted
 ---------------
   *_sbe_rt.data          : fields + current vs time  (downsampled if requested)
+                           + optical conductivity sigma(w) = J(w)/E(w) along the
+                             driven axis: a global spectrum (Re and Im on two
+                             Y-axes, 0-4 THz) and a strongly-overlapped STFT
+                             Re-sigma(w,t) 2-D map (--no-conductivity to skip;
+                             --fmax-thz / --stft-window-fs / --stft-hop to tune).
+                             True THz resolution needs a ps-scale run.
   *_sbe_rt_energy.data   : total energy vs time
   *_sbe_nex.data         : excited electron count vs time
   *_sbe_nex_k.data       : per-k Houston-basis LCB population:
@@ -71,6 +77,7 @@ plt.switch_backend('Agg')
 # Constants
 # ---------------------------------------------------------------------------
 HA_TO_EV = 27.211386245988     # Hartree → eV
+AU_TIME_FS = 0.02418884326505  # 1 atomic unit of time in fs
 CMAP_POP = 'turbo'             # population heat maps
 
 # ---- Hardcoded default for 2-D colormap scaling ----
@@ -193,6 +200,220 @@ def plot_rt_file(filepath, output_dir, downsample=1, dpi=150):
     time_name, time = cols[0], data[:, 0]
     for j in range(1, min(len(cols), data.shape[1])):
         _plot_xy(time, data[:, j], time_name, cols[j], output_dir, dpi=dpi)
+
+
+# ===========================================================================
+# Optical conductivity  sigma(omega) = J(omega)/E(omega)   (*_sbe_rt.data)
+# ===========================================================================
+
+def _parse_header_units(header_line):
+    """Return [(name, unit), ...] from a numbered '# 1:Time[fs] 2:...' header."""
+    return re.findall(r'\d+:([^\[\s]+)\[([^\]]*)\]', header_line)
+
+
+def _time_unit_fs(filepath):
+    """fs per time-step-unit of column 1 of an rt file: AU_TIME_FS for an a.u.
+    file, 1.0 for an fs file. Detected from the column-1 unit string; defaults
+    to a.u. (the SBE solver's native unit)."""
+    try:
+        nu = _parse_header_units(find_header(filepath))
+        if nu:
+            u = nu[0][1].lower()
+            if 'fs' in u:
+                return 1.0
+            if 'au' in u or 'a.u' in u:
+                return AU_TIME_FS
+    except Exception:
+        pass
+    return AU_TIME_FS
+
+
+def _rt_drive_axis(cols, data):
+    """Pick the Cartesian axis the field drives (largest peak |E_tot|) and return
+    (axis_label, t, E_tot[axis], Jm[axis]). Falls back to E_ext if E_tot absent."""
+    name_to_col = {n: i for i, n in enumerate(cols)}
+    etag = 'E_tot' if 'E_tot_x' in name_to_col else 'E_ext'
+    t = data[:, 0]
+    best, best_amp, E, J = 'z', -1.0, None, None
+    for ax in ('x', 'y', 'z'):
+        ecol = name_to_col.get(f'{etag}_{ax}')
+        jcol = name_to_col.get(f'Jm_{ax}')
+        if ecol is None or jcol is None:
+            continue
+        amp = float(np.nanmax(np.abs(data[:, ecol])))
+        if amp > best_amp:
+            best, best_amp, E, J = ax, amp, data[:, ecol], data[:, jcol]
+    return best, t, E, J
+
+
+def _sigma_ratio(Jw, Ew, eta=1e-3):
+    """Regularised spectral ratio sigma = J conj(E) / (|E|^2 + (eta*max|E|)^2).
+    Avoids blow-ups where the drive spectrum E(omega) has nulls; reduces to
+    J/E where |E| is appreciable."""
+    floor = (eta * np.nanmax(np.abs(Ew)))**2
+    return Jw * np.conj(Ew) / (np.abs(Ew)**2 + floor)
+
+
+def plot_conductivity(filepath, output_dir, fmax_thz=4.0, dpi=150):
+    """Global optical conductivity sigma(omega) = J(omega)/E(omega) along the
+    driven axis, from *_sbe_rt.data. Re and Im are drawn on two Y-axes; the
+    frequency axis is in THz, restricted to [0, fmax_thz]. A Hann window is
+    applied to both J(t) and E(t) before the FFT (it largely cancels in the
+    ratio while suppressing spectral leakage)."""
+    print(f"Processing {filepath.name}  (optical conductivity sigma(w)=J/E) ...")
+    cols, data = load_columns_streaming(filepath, downsample=1)
+    if data.shape[0] < 8:
+        print("  (skip) too few time samples")
+        return
+    tu_fs = _time_unit_fs(filepath)
+    axis, t, E, J = _rt_drive_axis(cols, data)
+    if E is None:
+        print("  (skip) no E/Jm columns found")
+        return
+    n = len(t)
+    dt = float(np.mean(np.diff(t)))
+    if dt <= 0:
+        print("  (skip) non-monotonic time column")
+        return
+    w = np.hanning(n)
+    f = np.fft.rfftfreq(n, d=dt)                 # 1/time-unit
+    f_thz = f * 1000.0 / tu_fs                   # -> THz
+    Ew = np.fft.rfft(E * w)
+    Jw = np.fft.rfft(J * w)
+    sigma = _sigma_ratio(Jw, Ew)
+
+    mask = f_thz <= fmax_thz
+    if np.count_nonzero(mask) < 3:
+        # trace too short to resolve the requested band -> show the lowest bins
+        keep = min(max(8, 3), len(f_thz))
+        mask = np.zeros_like(f_thz, dtype=bool); mask[:keep] = True
+        print(f"  NOTE: trace too short for 0-{fmax_thz:g} THz "
+              f"(df = {f_thz[1]-f_thz[0]:.3g} THz); showing the lowest {keep} bins. "
+              f"Use a longer run (ps-scale) for true THz resolution.")
+    fx = f_thz[mask]
+    re = np.real(sigma[mask])
+    im = np.imag(sigma[mask])
+
+    fig, ax_re = plt.subplots(figsize=(10, 5))
+    c_re, c_im = 'tab:blue', 'tab:red'
+    l1, = ax_re.plot(fx, re, '-', color=c_re, lw=1.3, label=r'Re $\sigma$')
+    ax_re.set_xlabel('Frequency [THz]')
+    ax_re.set_ylabel(r'Re $\sigma(\omega)$  [a.u.]', color=c_re)
+    ax_re.tick_params(axis='y', labelcolor=c_re)
+    ax_re.axhline(0.0, color='0.7', lw=0.6)
+    ax_re.set_xlim(0.0, fmax_thz if np.count_nonzero(mask) >= 3 else fx[-1])
+    ax_re.grid(True, alpha=0.3, linestyle='--')
+
+    ax_im = ax_re.twinx()
+    l2, = ax_im.plot(fx, im, '-', color=c_im, lw=1.3, label=r'Im $\sigma$')
+    ax_im.set_ylabel(r'Im $\sigma(\omega)$  [a.u.]', color=c_im)
+    ax_im.tick_params(axis='y', labelcolor=c_im)
+
+    ax_re.set_title(f'Optical conductivity  $\\sigma(\\omega)=J_{axis}(\\omega)/E_{axis}(\\omega)$'
+                    f'  —  {filepath.stem}')
+    ax_re.legend(handles=[l1, l2], loc='upper right', fontsize=9)
+    fig.tight_layout()
+    out = output_dir / f'{filepath.stem}_conductivity.png'
+    fig.savefig(out, dpi=dpi, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  saved {out.name}  (driven axis: {axis})")
+
+
+def plot_conductivity_stft(filepath, output_dir, fmax_thz=4.0,
+                           window_fs=None, hop=1, dpi=150, max_cols=1000):
+    """Short-time-Fourier 2-D map of Re sigma(omega, t) along the driven axis.
+    Strong overlap: hop defaults to 1 sample (N-1 of N overlap). The window
+    length defaults to a quarter of the trace (override with --stft-window-fs).
+    The number of rendered time columns is capped (the effective hop is raised
+    if a 1-sample hop would exceed it) so the PNG stays reasonable while the
+    overlap remains as strong as practical. Frequency axis restricted to
+    [0, fmax_thz]; only the real part is mapped (the dissipative conductivity)."""
+    print(f"Processing {filepath.name}  (STFT Re sigma(w,t) 2-D map) ...")
+    cols, data = load_columns_streaming(filepath, downsample=1)
+    if data.shape[0] < 16:
+        print("  (skip) too few time samples for an STFT")
+        return
+    tu_fs = _time_unit_fs(filepath)
+    axis, t, E, J = _rt_drive_axis(cols, data)
+    if E is None:
+        print("  (skip) no E/Jm columns found")
+        return
+    n = len(t)
+    dt = float(np.mean(np.diff(t)))
+    if dt <= 0:
+        print("  (skip) non-monotonic time column")
+        return
+
+    if window_fs is not None and window_fs > 0:
+        N = int(round(window_fs / (dt * tu_fs)))
+    else:
+        N = n // 4
+    N = max(8, min(N, n))
+    if N >= n:
+        print("  (skip) window not shorter than the trace")
+        return
+
+    hop = max(1, int(hop))
+    n_full = (n - N) // hop + 1
+    # cap the rendered columns: raise the effective hop if hop=1 over-resolves.
+    eff_hop = hop
+    if n_full > max_cols:
+        eff_hop = hop * int(np.ceil(n_full / max_cols))
+        print(f"  NOTE: {n_full} windows at hop={hop} exceeds {max_cols}; "
+              f"rendering with effective hop={eff_hop} (overlap still "
+              f"{100*(1-eff_hop/N):.1f}%).")
+    starts = list(range(0, n - N + 1, eff_hop))
+
+    f = np.fft.rfftfreq(N, d=dt)
+    f_thz = f * 1000.0 / tu_fs
+    fmask = f_thz <= fmax_thz
+    if np.count_nonzero(fmask) < 2:
+        keep = min(8, len(f_thz)); fmask = np.zeros_like(f_thz, dtype=bool)
+        fmask[:keep] = True
+        print(f"  NOTE: window too short for 0-{fmax_thz:g} THz "
+              f"(df = {f_thz[1]-f_thz[0]:.3g} THz); showing the lowest {keep} bins. "
+              f"Use a longer --stft-window-fs (ps-scale).")
+    f_keep = f_thz[fmask]
+
+    w = np.hanning(N)
+    centers_fs = np.empty(len(starts))
+    nfk = np.count_nonzero(fmask)
+    Smap = np.empty((nfk, len(starts)))
+    Emag = np.empty((nfk, len(starts)))    # local drive power per (f, t) pixel
+    for i, s in enumerate(starts):
+        seg = slice(s, s + N)
+        Ew = np.fft.rfft(E[seg] * w)
+        Jw = np.fft.rfft(J[seg] * w)
+        Smap[:, i] = np.real(_sigma_ratio(Jw, Ew))[fmask]
+        Emag[:, i] = np.abs(Ew)[fmask]
+        centers_fs[i] = (t[s] + 0.5 * N * dt) * tu_fs
+
+    # sigma = J/E is only meaningful where the local drive has power. Blank the
+    # pixels whose |E(omega,t)| is a tiny fraction of the global peak -- this is
+    # where the regularised ratio would otherwise produce meaningless spikes.
+    emax = float(np.nanmax(Emag)) if Emag.size else 0.0
+    if emax > 0:
+        Smap[Emag < 1e-2 * emax] = np.nan
+    # robust symmetric scale (99th percentile, not the max) so a few residual
+    # edge spikes don't wash out the real conductivity.
+    finite = Smap[np.isfinite(Smap)]
+    vmax = float(np.nanpercentile(np.abs(finite), 99)) if finite.size else 1.0
+    vmax = max(vmax, 1e-30)
+    fig, ax = plt.subplots(figsize=(max(8, len(starts) * 0.02 + 3), 5))
+    im = ax.pcolormesh(_bin_edges(centers_fs), _bin_edges(f_keep), Smap,
+                       cmap='RdBu_r', vmin=-vmax, vmax=vmax, shading='flat')
+    plt.colorbar(im, ax=ax, label=r'Re $\sigma(\omega, t)$  [a.u.]')
+    ax.set_xlabel('time [fs]')
+    ax.set_ylabel('Frequency [THz]')
+    ax.set_ylim(0.0, fmax_thz if np.count_nonzero(fmask) >= 2 else f_keep[-1])
+    win_fs = N * dt * tu_fs
+    ax.set_title(f'STFT Re $\\sigma(\\omega,t)$ (axis {axis}, window {win_fs:.1f} fs, '
+                 f'{len(starts)} cols)  —  {filepath.stem}')
+    fig.tight_layout()
+    out = output_dir / f'{filepath.stem}_conductivity_stft.png'
+    fig.savefig(out, dpi=dpi, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  saved {out.name}")
 
 
 # ===========================================================================
@@ -1337,6 +1558,20 @@ def main():
                         help='Also write an A(kx,E)-style spectral map of the '
                              'unfolded CB1 population (needs the 7-column '
                              '*_sbe_nex_k_unfold.data with the e_cb1 column).')
+    parser.add_argument('--no-conductivity', action='store_true',
+                        help='Skip the optical-conductivity sigma(w)=J/E plots '
+                             '(global Re/Im spectrum + STFT Re-sigma map) from '
+                             '*_sbe_rt.data.')
+    parser.add_argument('--fmax-thz', type=float, default=4.0, metavar='F',
+                        help='Upper frequency [THz] for the conductivity plots.')
+    parser.add_argument('--stft-window-fs', type=float, default=None, metavar='T',
+                        help='STFT window length [fs] for the Re-sigma(w,t) map. '
+                             'Default: a quarter of the trace. Use a ps-scale '
+                             'window to resolve the 0-4 THz band.')
+    parser.add_argument('--stft-hop', type=int, default=1, metavar='H',
+                        help='STFT hop in samples (1 = maximal N-1 overlap). The '
+                             'effective hop is raised automatically if a 1-sample '
+                             'hop would render too many columns.')
     args = parser.parse_args()
 
     # Resolve mode shortcuts
@@ -1357,6 +1592,19 @@ def main():
             for f in sorted(input_dir.glob(pattern)):
                 found_any = True
                 plot_rt_file(f, output_dir, downsample=args.downsample, dpi=args.dpi)
+
+        # Optical conductivity sigma(w)=J(w)/E(w) from the current/field columns
+        if not args.no_conductivity:
+            for f in sorted(input_dir.glob('*_sbe_rt.data')):
+                found_any = True
+                try:
+                    plot_conductivity(f, output_dir, fmax_thz=args.fmax_thz,
+                                      dpi=args.dpi)
+                    plot_conductivity_stft(f, output_dir, fmax_thz=args.fmax_thz,
+                                           window_fs=args.stft_window_fs,
+                                           hop=args.stft_hop, dpi=args.dpi)
+                except Exception as exc:
+                    print(f"  ERROR in conductivity for {f.name}: {exc}")
 
         for f in sorted(input_dir.glob('*_sbe_nex_k.data')):
             found_any = True
