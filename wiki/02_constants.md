@@ -15,13 +15,44 @@ All per-material constants that the SBE **dissipation channels** consume are ass
 
 No channel code changes — every dissipation channel reads the struct. A material-dependent channel requested for a name not in the registry stops with `error stop` and the supported list.
 
-### Registry values (live) ✅
-| Material | ε₀ | ε∞ | II form / a / E_th[eV] | e-ph ν_sat[s⁻¹] | phonons | a[Bohr] |
-|---|---|---|---|---|---|---|
-| GaAs | 12.9 | 10.89 | stobbe_quartic / 4 / 2.1 | 1.0e14 | Fröhlich-LO 36 meV + 5 IV | 10.68 |
-| Si / Si_cb | 11.7 | 11.7 | keldysh_quadratic / 2 / 1.1 | 1.3e14 | 6 intervalley g/f | 10.26 |
+### What the code selects per material (the complete `s_material_params`) ✅
 
-Sources for these numbers are in the per-material sections below (dielectric, intervalley deformation potentials, impact-ionization fits).
+These are **exactly** the fields `get_material_params(name)` fills — i.e. every constant a channel uses when you set `epm_material` and leave the `&sbe` knobs at their `'auto'`/sentinel defaults. Deeper provenance for each number is in the per-effect sections below.
+
+**`epm_material = 'GaAs'`** (zincblende, polar)
+| Struct field | Value | Used by | Source |
+|---|---|---|---|
+| `a_lattice_au` | 10.68 Bohr (5.65 Å) | reference | std GaAs |
+| `is_diamond` | `.false.` (V^A≠0) | EPM structure factor | — |
+| `eps0` / `eps_inf` | 12.9 / 10.89 | Coulomb HF, screening | std GaAs; NSM/Ioffe |
+| `ii_form` | `stobbe_quartic` | impact ionization | Stobbe-Redmer-Schattke, PRB 49, 4494 (1994) |
+| `ii_exponent` | 4 | impact ionization | same |
+| `ii_prefactor` | 2×10¹² s⁻¹eV⁻⁴ | impact ionization | same (Eq. 11) |
+| `ii_threshold_ev` | 2.1 | impact ionization | same |
+| `eph_nu_sat_si` | 1.0×10¹⁴ s⁻¹ | e-ph rate cap | Fischetti, IEEE TED 38, 634 (1991) |
+| `eph_polar` | `.true.` (Fröhlich LO) | e-ph | — |
+| `eph_nph` | 6 | e-ph | — |
+| `eph_hw_mev(1:6)` | 36 (LO), 27.8, 29.9, 29.0, 29.3, 29.9 | e-ph phonon energies | LO: std GaAs/Adachi; IV: Fischetti-Laux, PRB 38, 9721 (1988) |
+| `eph_wraw(1)` | Σ of the 5 IV weights (polar-LO dominant ≈50% after norm) | e-ph weight | project convention |
+| `eph_wraw(2:6)` | D²/ħω with D[eV/Å]=10,10,10,5,7 (Γ→L,Γ→X,L→L,L→X,X→X) | e-ph weight | Fischetti-Laux 1988 |
+
+**`epm_material = 'Si'` or `'Si_cb'`** (diamond, non-polar)
+| Struct field | Value | Used by | Source |
+|---|---|---|---|
+| `a_lattice_au` | 10.26 Bohr (5.431 Å) | reference | std Si; Kunikiyo JAP 75, 297 (1994) |
+| `is_diamond` | `.true.` (V^A≡0) | EPM structure factor | diamond symmetry |
+| `eps0` / `eps_inf` | 11.7 / 11.7 (non-polar ⇒ equal) | Coulomb HF, screening | std Si |
+| `ii_form` | `keldysh_quadratic` | impact ionization | Keldysh, JETP 21, 1135 (1965); Cartier, APL 62, 3339 (1993) |
+| `ii_exponent` | 2 (set 4.6 for full-band) | impact ionization | Cartier 1993; full-band Kamakura, JAP 75, 3500 (1994) |
+| `ii_prefactor` | 2×10¹² s⁻¹eV⁻² | impact ionization | project (same scale as GaAs; tune to 1e13–1e14 @ 3–4 eV) |
+| `ii_threshold_ev` | 1.1 | impact ionization | near the 1.12 eV gap (NOT 3/2·E_g); Cartier 1993 |
+| `eph_nu_sat_si` | 1.3×10¹⁴ s⁻¹ | e-ph rate cap | Meng, PRB 91, 075201 (2015); Fischetti-Laux 1988 |
+| `eph_polar` | `.false.` (no Fröhlich LO) | e-ph | — |
+| `eph_nph` | 6 (intervalley g/f) | e-ph | — |
+| `eph_hw_mev(1:6)` | 10, 19, 63, 19, 51, 57 (g-TA,g-LA,g-LO,f-TA,f-LA,f-TO) | e-ph phonon energies | Jacoboni-Reggiani, RMP 55, 645 (1983); Pop set |
+| `eph_wraw(1:6)` | D²/ħω with D[10⁸eV/cm]=0.3,1.5,6.0,0.5,3.5,1.5 | e-ph weight | Pop set (Jacoboni-Lugli); Canali, PRB 15, 3994 (1977) |
+
+Notes: `eph_wraw` is the **un-normalized** D²/ħω weight; the channel normalizes Σ=1 at runtime, so the GaAs (eV/Å) vs Si (10⁸ eV/cm) deformation-potential units only need within-material consistency. The absolute e-ph magnitude is set by `eph_nu_sat_si`. `ii_prefactor`/`ii_exponent` carry matching units (s⁻¹eV⁻ᵃ).
 
 ## 1. EPM form factors (local pseudopotential)
 
@@ -63,7 +94,7 @@ Sources for these numbers are in the per-material sections below (dielectric, in
 
 Si e⁻ threshold 1.14 eV, hole 1.37 eV; near the 1.12 eV gap, NOT 3/2·Eg. Ramp σ_E smooths Θ.
 
-## 4. Silicon electron-phonon deformation potentials 🚧 (Part C5)
+## 4. Silicon electron-phonon deformation potentials ✅ (Part C5)
 Six intervalley phonons (Pop "new" set default; D in 1e8 eV/cm, E in meV). [Jacoboni & Reggiani, RMP 55, 645 (1983); Pop set in Jacoboni-Lugli; anchor Canali et al., PRB 15, 3994 (1977)]
 | Phonon | type | E (meV) | D (Pop, default) | D (J-R alt) |
 |---|---|---|---|---|
@@ -86,7 +117,7 @@ g-type couple same-⟨100⟩-axis valleys; f-type orthogonal-axis. **Project dec
 | Δ-valley position | 0.85·2π/a along ⟨100⟩ | Kunikiyo 1994 |
 | m_l / m_t | 0.916 / 0.19 mₑ | std Si |
 
-## 5. GaAs electron-phonon (polar: Fröhlich + intervalley) 🚧 (Part C5)
+## 5. GaAs electron-phonon (polar: Fröhlich + intervalley) ✅ (Part C5)
 ### Fröhlich polar-optical
 | Quantity | Value | Source |
 |---|---|---|
@@ -114,7 +145,7 @@ g-type couple same-⟨100⟩-axis valleys; f-type orthogonal-axis. **Project dec
 | Equivalent L / X valleys | 4 / 3 | std |
 | L-valley DOS mass (per valley, in Lindblad) | 0.22 mₑ | Adachi; project decision (per-valley, not 0.55 averaged) |
 
-## 6. Collision-rate saturation ν(ε) = ν_sat[1 − exp(−(ε/ε₀)^n)] 🚧
+## 6. Collision-rate saturation ν(ε) = ν_sat[1 − exp(−(ε/ε₀)^n)] ✅
 | Quantity | Value | Source |
 |---|---|---|
 | ν_sat (Si) | 1.3e14 s⁻¹ | project (Fischetti priority); Meng et al., PRB 91, 075201 (2015); Fischetti-Laux 1988 |
@@ -124,7 +155,7 @@ g-type couple same-⟨100⟩-axis valleys; f-type orthogonal-axis. **Project dec
 
 **Never a hard min(ν, ν_sat)** — derivative discontinuity destabilizes the stiff solver.
 
-## 7. Bandgap renormalization (II threshold) 🚧 (Part C7)
+## 7. Bandgap renormalization (II threshold) ✅ (Part C7)
 | Quantity | Value | Source |
 |---|---|---|
 | EHP cube-root law | ΔE_gap[eV] = −1.9e-8 (n[cm⁻³])^(1/3) | Vashishta & Kalia, PRB 25, 6492 (1982) |
@@ -150,7 +181,7 @@ g-type couple same-⟨100⟩-axis valleys; f-type orthogonal-axis. **Project dec
 | Yoshida p1 | 1/(2−2^(1/3)) ≈ 1.35120719196 | Yoshida, PLA 150, 262 (1990) |
 | Yoshida p2 | −2^(1/3)/(2−2^(1/3)) ≈ −1.70241438392 | Yoshida 1990 |
 
-## 10. Energy bins / search (super-mode) 🚧 (Part C3)
+## 10. Energy bins / search (super-mode) ✅ (Part C3)
 | Quantity | Value/rule | Source |
 |---|---|---|
 | δ(ΔE) replacement | normalized Gaussian or unit-area rectangle | Stobbe 1994 (0.2 eV rect); Kunikiyo 1994 (5 meV bins) |
@@ -158,7 +189,7 @@ g-type couple same-⟨100⟩-axis valleys; f-type orthogonal-axis. **Project dec
 | pair search | deterministic / energy-windowed; NO Monte-Carlo | project (MC breaks CPTP) |
 | sub-cycling trigger | ν_max(h/2) ≳ 0.2 → m sub-steps, (τ/2m)ν_max ≲ 0.1 | Lindblad 1976 |
 
-## 11. Ring/pipeline MPI (super-mode) 🚧 (Part D)
+## 11. Ring/pipeline MPI (super-mode) ✅ (Part D)
 | Quantity | Value | Source |
 |---|---|---|
 | memory per rank | O(N_k/P + one transit block) | Plimpton, JCP 117, 1 (1995) |
