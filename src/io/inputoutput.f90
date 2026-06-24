@@ -1058,13 +1058,13 @@ contains
     sbe_decoh_tau_m_fs      = -1.0d0     ! Momentum relaxation time tau_m [fs]; both must be > 0 to enable decoherence
     yn_sbe_spinor           = 'n'        ! 'y': GS input files from a spinor (spin-orbit split) system
     yn_sbe_impact_ionization = 'n'       ! 'y': enable the k-local impact-ionization Lindblad channel (optional, may be slow)
-    sbe_ii_prefactor        = 2.0d12     ! Stobbe fit prefactor P [s^-1 eV^-4] (GaAs, PRB 49, 4494)
-    sbe_ii_threshold_ev     = 2.1d0      ! Stobbe fit threshold E_th [eV] above the CBM
+    sbe_ii_prefactor        = -1.0d0     ! Stobbe/Keldysh prefactor P [s^-1 eV^-a]; <=0: material registry default
+    sbe_ii_threshold_ev     = -1.0d0     ! II threshold E_th [eV] above the CBM; <0: material registry default
     sbe_ii_ramp_ev          = 0.2d0      ! linear Theta-smoothing width [eV] (fit resolution); <=0: hard step
-    sbe_ii_form             = 'stobbe_quartic'  ! 'stobbe_quartic'(GaAs,a=4) | 'keldysh_quadratic'(Si,a=2)
-    sbe_ii_exponent         = 4.0d0      ! fit exponent a (operative; set 2 for Si soft threshold, 4.6 for Si full-band)
+    sbe_ii_form             = 'auto'     ! 'auto'(material registry) | 'stobbe_quartic'(a=4) | 'keldysh_quadratic'(a=2)
+    sbe_ii_exponent         = -1.0d0     ! fit exponent a; <=0: material default (GaAs 4, Si 2; set 4.6 for Si full-band)
     yn_sbe_coulomb          = 'n'        ! 'y': enable Coulomb HF (exchange) renormalization (non-k-local, may be slow)
-    sbe_coulomb_epsilon     = 12.9d0     ! background dielectric constant eps (GaAs)
+    sbe_coulomb_epsilon     = -1.0d0     ! background dielectric eps; <=0: material registry default (GaAs 12.9, Si 11.7)
     sbe_coulomb_strength    = 1.0d0      ! overall scaling of the exchange kernel (tuning)
     sbe_coulomb_screen_au   = 0.0d0      ! Yukawa screening kappa [1/Bohr]; 0 = bare (q=0 excluded)
     yn_sbe_hf_sublattice_proj = 'y'      ! project Sigma^HF block-diagonal over 4 FCC sublattices (folding fix)

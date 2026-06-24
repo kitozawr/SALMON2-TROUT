@@ -27,6 +27,7 @@ FORTRAN_DEPS = {
     "test_screening.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
     "test_carrier_carrier.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
     "test_vg_basis_nb.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
+    "test_material_registry.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
 }
 
 

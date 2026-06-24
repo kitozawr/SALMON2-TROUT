@@ -123,12 +123,12 @@ The `&sbe` namelist now accepts the following parameters:
 | `frozen_core_threshold_ev` | eV | `0.0d0` | Freeze bands below $E_F + \text{threshold}$. (Use negative values, e.g., `-15.0`). |
 | `frozen_free_threshold_ev` | eV | `0.0d0` | Freeze bands above $E_F + \text{threshold}$. (Use positive values, e.g., `+20.0`). |
 | `yn_sbe_spinor` | — | `'n'` | `'y'`: ground-state input files come from a **spinor (spin-orbit split)** system — occupation 1 per spinor band, `nelec` valence bands instead of `nelec/2`. Combine with `yn_vnl_correction='y'` when the dataset carries the $\hat v_{SO}=\nabla_k\hat H_{SO}$ correction in `rvnl_tm`. |
-| `yn_sbe_impact_ionization` | — | `'n'` | `'y'`: enable the **k-local impact-ionization** Lindblad channel (Stobbe rate fit, GaAs). Fully optional; threshold-gated, so it costs ~nothing while no populated branch exceeds $E_{\rm th}$. |
-| `sbe_ii_prefactor` | s⁻¹eV⁻⁴ | `2.0d12` | Stobbe fit prefactor $P$ in $\gamma_{\rm St}=P(\varepsilon^{\rm kin}-E_{\rm th})^4$. |
-| `sbe_ii_threshold_ev` | eV | `2.1d0` | Ionization threshold $E_{\rm th}$ above the field-free CBM. |
+| `yn_sbe_impact_ionization` | — | `'n'` | `'y'`: enable the **k-local impact-ionization** Lindblad channel. Fully optional; threshold-gated, so it costs ~nothing while no populated branch exceeds $E_{\rm th}$. The fit (form, exponent, prefactor, threshold) auto-selects from the material registry — see below. |
+| `sbe_ii_prefactor` | s⁻¹eV⁻ᵃ | `-1.0d0` | Fit prefactor $P$ in $\gamma=P(\varepsilon^{\rm kin}-E_{\rm th})^a$. `≤ 0` ⇒ material default. |
+| `sbe_ii_threshold_ev` | eV | `-1.0d0` | Ionization threshold $E_{\rm th}$ above the field-free CBM. `< 0` ⇒ material default (GaAs `2.1`, Si `1.1`). |
 | `sbe_ii_ramp_ev` | eV | `0.2d0` | Linear $\Theta$-smoothing width (the fit's energy resolution); `<= 0` gives a hard step. |
 | `yn_sbe_coulomb` | — | `'n'` | `'y'`: enable the **Coulomb (time-dependent Hartree–Fock / exchange) renormalization** (§8, Golde–Kira–Meier–Koch). Non-k-local mean field, $O(N_k^2)$ per step — off by default, best on modest grids. |
-| `sbe_coulomb_epsilon` | — | `12.9d0` | Background dielectric constant $\varepsilon$ screening the exchange kernel (GaAs default). |
+| `sbe_coulomb_epsilon` | — | `-1.0d0` | Background dielectric constant $\varepsilon$ screening the exchange kernel. `≤ 0` ⇒ material default (GaAs `12.9`, Si `11.7`). |
 | `sbe_coulomb_strength` | — | `1.0d0` | Overall scaling of the exchange kernel (set `0` to disable while leaving the flag on; `>1` to enhance). |
 | `sbe_coulomb_screen_au` | Bohr⁻¹ | `0.0d0` | Yukawa screening $\kappa$ regularizing $V(q)\propto1/(q^2+\kappa^2)$; `0` = bare Coulomb with the $q=0$ self-term excluded. |
 
@@ -140,8 +140,8 @@ These `&sbe` parameters add Silicon support and the optional nonlocal CPTP dissi
 
 | Parameter | Units | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `sbe_ii_form` | — | `'stobbe_quartic'` | Impact-ionization fit form: `'stobbe_quartic'` (GaAs, $a=4$, hard threshold) or `'keldysh_quadratic'` (Si, $a=2$, soft threshold). |
-| `sbe_ii_exponent` | — | `4.0d0` | Operative fit exponent $a$ in $\gamma=P(\varepsilon^{\rm kin}-E_{\rm th})^a$. Set `2` for Si soft, `4.6` for Si full-band. |
+| `sbe_ii_form` | — | `'auto'` | Impact-ionization fit form. `'auto'` ⇒ material default; or set `'stobbe_quartic'` (GaAs, $a=4$, hard threshold) / `'keldysh_quadratic'` (Si, $a=2$, soft threshold). |
+| `sbe_ii_exponent` | — | `-1.0d0` | Operative fit exponent $a$ in $\gamma=P(\varepsilon^{\rm kin}-E_{\rm th})^a$. `≤ 0` ⇒ material default (GaAs `4`, Si `2`; set `4.6` for Si full-band). |
 | `yn_sbe_superres` | — | `'n'` | `'y'`: nonlocal **super-compute** master switch — ring-pipeline-MPI $\Sigma^{\rm HF}$ + nonlocal-partner impact ionization + dissipator sub-cycling. |
 | `yn_sbe_eph` | — | `'n'` | `'y'`: **electron–phonon** population-relaxing Lindblad (full phonon table; toggle Kuhn-Zurek off when using it). |
 | `sbe_eph_temperature_k` | K | `300.0d0` | Phonon-bath temperature $T_{\rm ph}$ for the Bose factor $N_B$. |
@@ -156,7 +156,7 @@ These `&sbe` parameters add Silicon support and the optional nonlocal CPTP dissi
 | `yn_sbe_hf_sublattice_proj` | — | `'y'` | Project $\Sigma^{\rm HF}$ block-diagonally onto the 4 FCC sublattices (folding fix). Inert unless Coulomb is on **and** unfold weights are present. |
 | `sbe_search_sigma_e_ev` | eV | grid-matched | Energy-bin width $\sigma_E$ for the final-state partner search (C3). |
 
-The EPM material is chosen in `&epm` (`epm_material = 'GaAs'` | `'Si'` | `'Si_cb'`); see [EPM ground-state solver](#epm-ground-state-solver-epm). **The `&epm` block must also appear in the SBE-step input when `yn_sbe_eph='y'`** — the electron-phonon channel reads `epm_material` to pick its phonon table (Si: 6 intervalley g/f modes; GaAs: Fröhlich-LO + 5 intervalley), and it **defaults to `'GaAs'` if the block is absent**.
+The EPM material is chosen in `&epm` (`epm_material = 'GaAs'` | `'Si'` | `'Si_cb'`); see [EPM ground-state solver](#epm-ground-state-solver-epm). **The `&epm` block must also appear in the SBE-step input** whenever a channel auto-selects per-material constants (electron-phonon, or impact ionization / Coulomb left at their `'auto'`/sentinel defaults): the solver reads `epm_material` from the registry and **`epm_material` itself defaults to `'GaAs'` if the block is absent**, so a Si run without it would silently use GaAs constants.
 
 ### Baseline (clean) run and how to disable each effect
 
@@ -176,15 +176,15 @@ Enable one block at a time and compare against this baseline. The table gives th
 | Effect | Enable | Fully disable (baseline) | GaAs | Si |
 | :--- | :--- | :--- | :--- | :--- |
 | **Kuhn-Zurek decoherence** | `sbe_decoh_temperature_k > 0` **and** `sbe_decoh_tau_m_fs > 0` | either `≤ 0` (default `-1.0` ⇒ $D=0$, exactly the clean run) | $T$, $\tau_m$ user-set | same (material-independent) |
-| **Impact ionization** | `yn_sbe_impact_ionization = 'y'` | `'n'` (default) | `sbe_ii_form='stobbe_quartic'`, `sbe_ii_exponent=4`, `sbe_ii_threshold_ev=2.1` | `sbe_ii_form='keldysh_quadratic'`, `sbe_ii_exponent=2` (`4.6` full-band), `sbe_ii_threshold_ev=1.1` |
+| **Impact ionization** | `yn_sbe_impact_ionization = 'y'` | `'n'` (default) | *auto:* `stobbe_quartic`, $a=4$, $E_{\rm th}=2.1$ | *auto:* `keldysh_quadratic`, $a=2$ ($4.6$ full-band), $E_{\rm th}=1.1$ |
 | **Electron–phonon** | `yn_sbe_eph = 'y'` (+ `&epm epm_material`) | `'n'` (default) | *auto:* Fröhlich-LO 36 meV + 5 intervalley, `ν_sat=1.0e14` | *auto:* 6 intervalley g/f, `ν_sat=1.3e14` |
-| **Carrier–carrier (e-e/e-h)** | `yn_sbe_eeh = 'y'` | `'n'` (default) | `ν_cc=1e14` (default), screening $\varepsilon=12.9$ | `ν_cc=1e14` (default), screening $\varepsilon=11.7$ |
-| **Coulomb HF** | `yn_sbe_coulomb = 'y'` | `'n'` (default) **or** `sbe_coulomb_strength=0` | `sbe_coulomb_epsilon=12.9` | set `sbe_coulomb_epsilon=11.7` |
+| **Carrier–carrier (e-e/e-h)** | `yn_sbe_eeh = 'y'` | `'n'` (default) | `ν_cc=1e14` (default), screening *auto* $\varepsilon=12.9$ | `ν_cc=1e14` (default), screening *auto* $\varepsilon=11.7$ |
+| **Coulomb HF** | `yn_sbe_coulomb = 'y'` | `'n'` (default) **or** `sbe_coulomb_strength=0` | *auto:* $\varepsilon=12.9$ | *auto:* $\varepsilon=11.7$ |
 | **BGR-shifted II threshold** | `yn_sbe_bgr_threshold = 'y'` (needs II on) | `'n'` (default) | `sbe_bgr_n_gate=5e18`, `sbe_bgr_coeff=1.9e-8` | same defaults (tune $K$) |
 | **HF sublattice projection** | `yn_sbe_hf_sublattice_proj = 'y'` (default; needs Coulomb + unfold) | `'n'` | applies to folded cubic cell | applies to folded cubic cell |
 | **Nonlocal super-compute** | `yn_sbe_superres = 'y'` | `'n'` (default) | ring $\Sigma^{\rm HF}$ + nonlocal-partner II | same |
 
-Notes: only the **electron–phonon phonon table and its `ν_sat` default** switch automatically with `epm_material`; the impact-ionization fit and the Coulomb/e-e dielectric are **not** auto-switched — set them per material as above. Runnable per-material recipes (full input decks) are in [`wiki/04_configuration_examples.md`](wiki/04_configuration_examples.md) and the [`samples/exercise_x3_bulkSi_epm_bloch_superres/`](samples/exercise_x3_bulkSi_epm_bloch_superres/) example.
+All per-material constants come from a single **material registry** (`get_material_params` in `src/ssbe/sbe_superres_ssbe.f90`): set `epm_material` and the impact-ionization fit, electron-phonon table, and dielectric **all auto-select** (the *auto* entries above). An explicit namelist value always overrides the registry. Requesting a material-dependent channel for a material not in the registry stops with a message listing the supported names — **adding a material is one cited `case` block** in that function. Runnable per-material recipes (full input decks) are in [`wiki/04_configuration_examples.md`](wiki/04_configuration_examples.md) and the [`samples/exercise_x3_bulkSi_epm_bloch_superres/`](samples/exercise_x3_bulkSi_epm_bloch_superres/) example.
 
 ### Real-time output frequency (`&analysis`)
 

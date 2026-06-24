@@ -155,44 +155,41 @@ contains
 ! 5 intervalley; the polar LO is given the dominant weight (sum of the
 ! intervalley weights) -- a documented skeleton choice (the full Frohlich asinh
 ! energy-dependence is a later refinement). [tables + sources in 02_constants]
-subroutine init_eph_phonon_table(sbe, material, kT_au)
-    use sbe_superres_ssbe, only: bose_factor, mev_to_ha, &
-        SI_N_PHONON, SI_PHONON_E_MEV, SI_PHONON_D_1E8EVCM, &
-        GAAS_N_IV, GAAS_IV_E_MEV, GAAS_IV_D_EVANG, GAAS_HW_LO_MEV
+! Abort with a guiding message when a material-dependent channel is requested
+! for a material that is not in the registry. Lists the supported names so the
+! fix (add a `case` in get_material_params + MAT_SUPPORTED) is obvious.
+subroutine stop_unknown_material(name, channel)
+    use sbe_superres_ssbe, only: MAT_SUPPORTED
+    implicit none
+    character(*), intent(in) :: name, channel
+    write(*, '(a)') '# ERROR: material "'//trim(name)//'" is not in the SBE material registry,'
+    write(*, '(a)') '#        but '//trim(channel)//' needs its constants.'
+    write(*, '(a)') '#        Supported: '//MAT_SUPPORTED
+    write(*, '(a)') '#        Add a case to get_material_params() in sbe_superres_ssbe.f90.'
+    error stop 'unknown epm_material for an SBE channel (see message above)'
+end subroutine stop_unknown_material
+
+
+subroutine init_eph_phonon_table(sbe, mp, kT_au)
+    use sbe_superres_ssbe, only: bose_factor, mev_to_ha, s_material_params
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
-    character(*), intent(in) :: material
-    real(8),      intent(in) :: kT_au
+    type(s_material_params),  intent(in)    :: mp
+    real(8),                  intent(in)    :: kT_au
     integer :: np, p
     real(8) :: wsum
 
-    if (material == 'GaAs') then
-        np = GAAS_N_IV + 1                 ! Frohlich LO + 5 intervalley
-    else
-        np = SI_N_PHONON                   ! Si: 6 intervalley (g/f)
-    end if
+    ! The phonon table (energies, raw D^2/hw weights, mode count, polar-LO flag)
+    ! comes entirely from the material registry; this routine only converts to
+    ! a.u., normalizes the weights and evaluates the Bose factors.
+    np = mp%eph_nph
     sbe%eph_nph = np
     allocate(sbe%eph_hw(np), sbe%eph_nb(np), sbe%eph_wrel(np))
 
-    if (material == 'GaAs') then
-        wsum = 0d0
-        do p = 1, GAAS_N_IV
-            sbe%eph_hw(p + 1)   = mev_to_ha(GAAS_IV_E_MEV(p))
-            sbe%eph_wrel(p + 1) = GAAS_IV_D_EVANG(p)**2 / GAAS_IV_E_MEV(p)
-            wsum = wsum + sbe%eph_wrel(p + 1)
-        end do
-        sbe%eph_hw(1)   = mev_to_ha(GAAS_HW_LO_MEV)
-        sbe%eph_wrel(1) = wsum             ! polar LO ~ dominant (50% after norm)
-    else
-        do p = 1, SI_N_PHONON
-            sbe%eph_hw(p)   = mev_to_ha(SI_PHONON_E_MEV(p))
-            sbe%eph_wrel(p) = SI_PHONON_D_1E8EVCM(p)**2 / SI_PHONON_E_MEV(p)
-        end do
-    end if
-
-    wsum = sum(sbe%eph_wrel(1:np))
+    wsum = sum(mp%eph_wraw(1:np))
     do p = 1, np
-        sbe%eph_wrel(p) = sbe%eph_wrel(p) / max(wsum, 1d-300)
+        sbe%eph_hw(p)   = mev_to_ha(mp%eph_hw_mev(p))
+        sbe%eph_wrel(p) = mp%eph_wraw(p) / max(wsum, 1d-300)
         sbe%eph_nb(p)   = bose_factor(sbe%eph_hw(p), kT_au)
     end do
 end subroutine init_eph_phonon_table
@@ -213,7 +210,8 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
                              sbe_eph_eps0_ev, sbe_eph_n, sbe_search_sigma_e_ev, &
                              yn_sbe_bgr_threshold, sbe_bgr_n_gate, sbe_bgr_coeff, &
                              yn_sbe_superres, yn_sbe_eeh, sbe_eeh_nu_sat, epm_material
-    use sbe_superres_ssbe, only: bose_factor
+    use sbe_superres_ssbe, only: bose_factor, s_material_params, &
+                                 get_material_params, MAT_SUPPORTED
     use math_constants, only: pi
     use phys_constants, only: au_fs, kB_au, au_ev
     implicit none
@@ -231,12 +229,20 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     integer, allocatable :: is_active_buf(:)
     integer :: homo_idx, lumo_idx
     logical :: lprint
+    type(s_material_params) :: mp
+    character(20) :: ii_form_eff
+    real(8) :: ii_exp_eff, ii_pref_eff, ii_thr_eff, coul_eps_eff
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
     ! Banner-print gate: only the group root, and only when verbose (or absent).
     lprint = (irank == 0)
     if (present(verbose)) lprint = lprint .and. verbose
+
+    ! Per-material constants come from the single registry in sbe_superres_ssbe.
+    ! Each channel auto-selects through `mp`; a value the user set explicitly in
+    ! the namelist (non-sentinel) always overrides the material default below.
+    mp = get_material_params(epm_material)
 
     sbe%nk = gs%nk
     sbe%nb = nb_sbe
@@ -381,16 +387,28 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     sbe%occ_max = merge(1d0, 2d0, yn_sbe_spinor == 'y')
     sbe%flag_impact = (yn_sbe_impact_ionization == 'y')
     if (sbe%flag_impact) then
-        ! Fit-form exponent a: GaAs Stobbe quartic (a=4, hard threshold)
-        ! [Stobbe-Redmer-Schattke, PRB 49, 4494 (1994)]; Si Keldysh quadratic
-        ! (a=2, soft near-gap threshold) [Keldysh, JETP 21, 1135 (1965);
-        ! Cartier et al., APL 62, 3339 (1993)]; Si full-band option a=4.6
-        ! [Kamakura et al., JAP 75, 3500 (1994)].
-        sbe%ii_exponent = sbe_ii_exponent
+        ! Fit form/exponent/prefactor/threshold default to the material registry
+        ! ('auto' / negative sentinels); an explicit namelist value overrides it.
+        ! GaAs Stobbe quartic (a=4) [Stobbe-Redmer-Schattke, PRB 49, 4494 (1994)];
+        ! Si Keldysh quadratic (a=2) [Keldysh, JETP 21, 1135 (1965); Cartier APL
+        ! 62, 3339 (1993)]; Si full-band a=4.6 [Kamakura JAP 75, 3500 (1994)].
+        if (trim(sbe_ii_form) == 'auto') then
+            if (.not. mp%found) call stop_unknown_material(epm_material, 'impact ionization (sbe_ii_form=auto)')
+            ii_form_eff = mp%ii_form
+        else
+            ii_form_eff = sbe_ii_form
+        end if
+        ii_exp_eff  = merge(sbe_ii_exponent,     mp%ii_exponent,     sbe_ii_exponent     > 0d0)
+        ii_pref_eff = merge(sbe_ii_prefactor,    mp%ii_prefactor,    sbe_ii_prefactor    > 0d0)
+        ii_thr_eff  = merge(sbe_ii_threshold_ev, mp%ii_threshold_ev, sbe_ii_threshold_ev >= 0d0)
+        if ((sbe_ii_exponent <= 0d0 .or. sbe_ii_prefactor <= 0d0 .or. &
+             sbe_ii_threshold_ev < 0d0) .and. .not. mp%found) &
+            call stop_unknown_material(epm_material, 'impact ionization (sentinel default)')
+        sbe%ii_exponent = ii_exp_eff
         ! Prefactor P [s^-1 eV^-a] -> [1/(Ha^a a.u.time)]:
         ! rate_au = P * t_au[s] * (dE[Ha] * au_ev)^a
-        sbe%ii_pref_au = sbe_ii_prefactor * (au_fs * 1d-15) * au_ev**sbe_ii_exponent
-        sbe%ii_eth_au  = sbe_ii_threshold_ev / au_ev
+        sbe%ii_pref_au = ii_pref_eff * (au_fs * 1d-15) * au_ev**ii_exp_eff
+        sbe%ii_eth_au  = ii_thr_eff / au_ev
         sbe%ii_ramp_au = sbe_ii_ramp_ev / au_ev
         ! Global CBM of the field-free band structure (kinetic-energy zero of
         ! the Stobbe fit) and the gap lost by the primary electron per event.
@@ -444,10 +462,19 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     ! =========================================================================
     sbe%flag_coulomb = (yn_sbe_coulomb == 'y')
     if (sbe%flag_coulomb) then
+        ! Background dielectric defaults to the material registry (sentinel <=0);
+        ! an explicit sbe_coulomb_epsilon overrides it.
+        if (sbe_coulomb_epsilon > 0d0) then
+            coul_eps_eff = sbe_coulomb_epsilon
+        else if (mp%found) then
+            coul_eps_eff = mp%eps0
+        else
+            call stop_unknown_material(epm_material, 'Coulomb HF (sbe_coulomb_epsilon default)')
+        end if
         ! Discrete exchange-sum prefactor: continuum (1/(2pi)^3) int d^3q  ->
         ! (1/(Omega_cell Nk)) sum_grid; V(q) = 4 pi / (eps q^2) in a.u.
         sbe%coul_pref = sbe_coulomb_strength * 4d0 * pi &
-                      / (max(sbe_coulomb_epsilon, 1d-12) * gs%volume * dble(gs%nk))
+                      / (max(coul_eps_eff, 1d-12) * gs%volume * dble(gs%nk))
         sbe%coul_screen2 = sbe_coulomb_screen_au**2
         ! sbe%icomm already set above (used by all collectives, not just Coulomb)
         ! Use the systolic ring (Part D) for the non-local exchange sum in
@@ -471,7 +498,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
         if (lprint) then
             write(*, '(a)') '# Coulomb HF (Golde-Kira-Meier-Koch SBE) enabled:'
             write(*, '(a,ES12.5)') '#   exchange prefactor 4pi*str/(eps*Omega*Nk) = ', sbe%coul_pref
-            write(*, '(a,f8.3,a,ES12.5,a)') '#   eps = ', sbe_coulomb_epsilon, &
+            write(*, '(a,f8.3,a,ES12.5,a)') '#   eps = ', coul_eps_eff, &
                 ', screening kappa^2 = ', sbe%coul_screen2, ' 1/Bohr^2'
             write(*, '(a)') '#   NOTE: non-k-local mean field, O(Nk^2) per step (frozen over dt)'
             if (sbe%flag_hf_subproj) then
@@ -490,14 +517,15 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     ! =========================================================================
     sbe%flag_eph = (yn_sbe_eph == 'y')
     if (sbe%flag_eph) then
-        call init_eph_phonon_table(sbe, trim(epm_material), kB_au * sbe_eph_temperature_k)
+        ! The phonon table and the nu_sat default both come from the material
+        ! registry -- the channel cannot run without one.
+        if (.not. mp%found) call stop_unknown_material(epm_material, 'electron-phonon (yn_sbe_eph)')
+        call init_eph_phonon_table(sbe, mp, kB_au * sbe_eph_temperature_k)
         ! Saturation rate (overall magnitude cap): material default if not set.
         if (sbe_eph_nu_sat > 0d0) then
             sbe%eph_nusat_au = sbe_eph_nu_sat * (au_fs * 1d-15)
-        else if (trim(epm_material) == 'GaAs') then
-            sbe%eph_nusat_au = 1.0d14 * (au_fs * 1d-15)   ! [Fischetti IEEE TED 38, 634]
         else
-            sbe%eph_nusat_au = 1.3d14 * (au_fs * 1d-15)   ! Si [Meng PRB 91, 075201]
+            sbe%eph_nusat_au = mp%eph_nu_sat_si * (au_fs * 1d-15)
         end if
         sbe%eph_eps0_au = sbe_eph_eps0_ev / au_ev
         sbe%eph_n       = sbe_eph_n

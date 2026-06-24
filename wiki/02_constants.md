@@ -2,6 +2,27 @@
 
 > Every default numerical constant with its primary source. If you change a default, update the citation here AND in the code comment. ✅ = value live in code.
 
+## 0. Material registry — the single per-material source
+
+All per-material constants that the SBE **dissipation channels** consume are assembled in one place: `get_material_params(name)` in [`../src/ssbe/sbe_superres_ssbe.f90`](../src/ssbe/sbe_superres_ssbe.f90), returning an `s_material_params` struct (dielectric ε₀/ε∞, impact-ionization fit form/exponent/prefactor/threshold, electron-phonon phonon table + ν_sat, lattice constant, diamond flag). The channels auto-select through it; the `&sbe` namelist defaults are **sentinels** (`sbe_ii_form='auto'`, `sbe_ii_exponent/prefactor/threshold ≤ 0`, `sbe_coulomb_epsilon ≤ 0`) that resolve to the material value, and any explicit value overrides. GaAs resolves to the exact legacy numbers.
+
+**To add a material** (e.g. Ge, GaN, …):
+1. Add the cited raw constants (dielectric, phonon table, II fit) to the parameter block at the top of `sbe_superres_ssbe.f90`, *and a row in this page*.
+2. Add one `case ('<name>')` block to `get_material_params` filling the struct from those constants.
+3. Add the name to `MAT_SUPPORTED`.
+4. (If the material needs EPM bands) add its form factors to `epm_cohen_bergstresser.f90` (also case-based) and to `epm_gaas_reference.py`.
+5. Add the expected struct values to `tests/test_material_registry.f90`.
+
+No channel code changes — every dissipation channel reads the struct. A material-dependent channel requested for a name not in the registry stops with `error stop` and the supported list.
+
+### Registry values (live) ✅
+| Material | ε₀ | ε∞ | II form / a / E_th[eV] | e-ph ν_sat[s⁻¹] | phonons | a[Bohr] |
+|---|---|---|---|---|---|---|
+| GaAs | 12.9 | 10.89 | stobbe_quartic / 4 / 2.1 | 1.0e14 | Fröhlich-LO 36 meV + 5 IV | 10.68 |
+| Si / Si_cb | 11.7 | 11.7 | keldysh_quadratic / 2 / 1.1 | 1.3e14 | 6 intervalley g/f | 10.26 |
+
+Sources for these numbers are in the per-material sections below (dielectric, intervalley deformation potentials, impact-ionization fits).
+
 ## 1. EPM form factors (local pseudopotential)
 
 ### GaAs (zincblende, Rydberg, |G|² in (2π/a)² units) ✅

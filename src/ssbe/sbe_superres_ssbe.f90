@@ -38,7 +38,8 @@ module sbe_superres_ssbe
               lindhard_F, eps_lindhard_static, plasmon_freq2, lopc_branches, &
               energy_partner_weights, fermi_dirac, fit_fermi_dirac, &
               carrier_carrier_relax, &
-              vg_eta_admixture, vg_trunc_shift2, vg_conv_error, vg_ptop_exceeds
+              vg_eta_admixture, vg_trunc_shift2, vg_conv_error, vg_ptop_exceeds, &
+              get_material_params
 
     ! =====================================================================
     ! Silicon intervalley deformation potentials -- Pop "new" set (default).
@@ -89,7 +90,88 @@ module sbe_superres_ssbe
     real(8), parameter, public :: SI_M_HH   = 0.49d0    ! heavy-hole mass [m_e]
     real(8), parameter, public :: SI_M_LH   = 0.16d0    ! light-hole mass [m_e]
 
+    ! =====================================================================
+    ! Material registry -- the SINGLE place that maps a material name to all
+    ! the per-material constants the SBE dissipation channels need (dielectric,
+    ! impact-ionization fit, electron-phonon table). Adding a material is one
+    ! `case` block in get_material_params() plus its name in MAT_SUPPORTED;
+    ! every channel then auto-selects through the same struct. All numbers are
+    ! the cited constants declared above -- the registry only assembles them.
+    ! =====================================================================
+    integer, parameter, public :: MAT_MAXPH = 8         ! capacity of a phonon table
+    character(*), parameter, public :: MAT_SUPPORTED = 'GaAs, Si, Si_cb'
+
+    type, public :: s_material_params
+        logical       :: found        = .false.
+        character(16) :: name         = ''
+        ! crystal structure
+        real(8)       :: a_lattice_au = 0d0       ! lattice constant [Bohr]
+        logical       :: is_diamond   = .false.   ! diamond (V^A=0) vs zincblende
+        ! dielectric (Coulomb HF exchange / carrier screening)
+        real(8)       :: eps0         = 1d0       ! static dielectric
+        real(8)       :: eps_inf      = 1d0       ! high-frequency dielectric
+        ! impact-ionization fit defaults
+        character(20) :: ii_form      = 'stobbe_quartic'
+        real(8)       :: ii_exponent  = 4d0       ! exponent a in P*(eps-Eth)^a
+        real(8)       :: ii_prefactor = 2d12      ! P [s^-1 eV^-a]
+        real(8)       :: ii_threshold_ev = 2.1d0  ! Eth above the CBM [eV]
+        ! electron-phonon population-relaxing Lindblad table
+        real(8)       :: eph_nu_sat_si = 1d14     ! saturation rate [s^-1]
+        logical       :: eph_polar    = .false.   ! has a Frohlich polar-LO branch
+        integer       :: eph_nph      = 0
+        real(8)       :: eph_hw_mev(MAT_MAXPH) = 0d0   ! phonon energies [meV]
+        real(8)       :: eph_wraw(MAT_MAXPH)   = 0d0   ! raw (un-normalized) D^2/hw weights
+    end type s_material_params
+
 contains
+
+    ! Look up all per-material SBE constants by name. mp%found = .false. for an
+    ! unknown material (callers that need a registry value must check it and stop
+    ! with a helpful message). This is the ONLY function to extend when adding a
+    ! material -- add a `case` and update MAT_SUPPORTED above.
+    pure function get_material_params(name) result(mp)
+        character(*), intent(in) :: name
+        type(s_material_params)  :: mp
+        integer :: p
+        mp%name = name
+        select case (trim(name))
+        case ('GaAs')
+            mp%found = .true.
+            mp%a_lattice_au = 10.68d0
+            mp%is_diamond   = .false.
+            mp%eps0 = GAAS_EPS0;  mp%eps_inf = GAAS_EPS_INF
+            mp%ii_form = 'stobbe_quartic'; mp%ii_exponent = 4d0
+            mp%ii_prefactor = 2d12;        mp%ii_threshold_ev = 2.1d0
+            mp%eph_nu_sat_si = 1.0d14      ! [Fischetti IEEE TED 38, 634 (1991)]
+            mp%eph_polar = .true.
+            ! Frohlich polar-LO (mode 1) + 5 intervalley modes
+            mp%eph_nph = GAAS_N_IV + 1
+            mp%eph_hw_mev(1) = GAAS_HW_LO_MEV
+            do p = 1, GAAS_N_IV
+                mp%eph_hw_mev(p + 1) = GAAS_IV_E_MEV(p)
+                mp%eph_wraw(p + 1)   = GAAS_IV_D_EVANG(p)**2 / GAAS_IV_E_MEV(p)
+            end do
+            mp%eph_wraw(1) = sum(mp%eph_wraw(2:GAAS_N_IV + 1))   ! polar LO ~ dominant
+        case ('Si', 'Si_cb')
+            mp%found = .true.
+            mp%a_lattice_au = 10.26d0
+            mp%is_diamond   = .true.
+            mp%eps0 = SI_EPS;  mp%eps_inf = SI_EPS     ! non-polar: eps_inf = eps0
+            mp%ii_form = 'keldysh_quadratic'; mp%ii_exponent = 2d0
+            mp%ii_prefactor = 2d12;           mp%ii_threshold_ev = 1.1d0
+            mp%eph_nu_sat_si = 1.3d14      ! [Meng PRB 91, 075201 (2015)]
+            mp%eph_polar = .false.
+            mp%eph_nph = SI_N_PHONON       ! 6 intervalley g/f modes
+            do p = 1, SI_N_PHONON
+                mp%eph_hw_mev(p) = SI_PHONON_E_MEV(p)
+                mp%eph_wraw(p)   = SI_PHONON_D_1E8EVCM(p)**2 / SI_PHONON_E_MEV(p)
+            end do
+        case default
+            mp%found = .false.
+        end select
+    end function get_material_params
+
+
 
     ! Collision-rate saturation: nu(eps) = nu_sat [1 - exp(-(eps/eps0)^n)].
     ! Smooth (no hard min() cutoff -- the derivative discontinuity destabilizes
