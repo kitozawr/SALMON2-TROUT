@@ -8,6 +8,7 @@ Drop into a calculation directory and run:
     python3 plot_sbe_results.py                     # auto-detect everything
     python3 plot_sbe_results.py --downsample 200    # thin out large RT curves
     python3 plot_sbe_results.py --band-path L Gamma X W K
+    python3 plot_sbe_results.py --lattice wurtzite          # CdS (orthorhombic)
 
 What is plotted
 ---------------
@@ -100,7 +101,7 @@ SNAP_ENABLED = False
 # X = (2pi/a)(1,0,0) wraps onto Gamma), so the folded plot overlays the
 # states of up to 4 primitive BZ points at every tick -- use the unfolded
 # *_bandpath.data plot for a clean primitive-cell picture.
-HS_POINTS = {
+HS_POINTS_FCC = {
     'Gamma': [ 0.000,  0.000,  0.000],
     'X':     [ 0.000,  0.500,  0.500],
     'L':     [ 0.500,  0.500,  0.500],
@@ -108,16 +109,57 @@ HS_POINTS = {
     'K':     [ 0.375,  0.375,  0.750],
     'U':     [ 0.250,  0.625,  0.625],
 }
+HS_POINTS = HS_POINTS_FCC          # back-compat alias (cubic GaAs/Si default)
+
+# Wurtzite CdS is carried as an 8-atom ORTHORHOMBIC (sqrt3 x 1 x 1) supercell,
+# al(1:3) = (a, a*sqrt3, c). Its *_k.data is in orthorhombic-cell reduced
+# coordinates, so the high-symmetry points are the standard orthorhombic-BZ
+# points (unambiguous in that frame); the hexagonal correspondence is noted.
+#   Z == A  (zone top along the c-axis [0001]: the inversion-breaking direction
+#            where the wurtzite even harmonics live); X,Y,S relate to M/K.
+HS_POINTS_WZ = {
+    'Gamma': [0.0, 0.0, 0.0],
+    'X':     [0.5, 0.0, 0.0],   # along a* (the sqrt3-short direction)
+    'Y':     [0.0, 0.5, 0.0],   # along b*
+    'A':     [0.0, 0.0, 0.5],   # == hexagonal A (Gamma-A along c)
+    'S':     [0.5, 0.5, 0.0],   # in-plane corner
+    'U':     [0.5, 0.0, 0.5],
+    'T':     [0.0, 0.5, 0.5],
+    'R':     [0.5, 0.5, 0.5],
+}
 # Rows of the FCC primitive reciprocal basis in 2pi/a (= sc-reduced) units.
 _B_FCC_RED = np.array([[-1.0, 1.0, 1.0],
                        [ 1.0, -1.0, 1.0],
                        [ 1.0, 1.0, -1.0]])
+# Wurtzite-CdS orthorhombic reciprocal-length weights (relative |b_i| = 1/L_i,
+# L = a : a*sqrt3 : c with c/a = 1.623): used only to space band-path segments
+# by physical |dk| on the anisotropic cell.
+_WZ_RECIP_W = np.array([1.0, 1.0 / np.sqrt(3.0), 1.0 / 1.623])
 
 def _fcc_prim_to_sc_reduced(q):
     """FCC-primitive reduced coordinates -> simple-cubic reduced (k/(2pi/a))."""
     return np.asarray(q, dtype=float) @ _B_FCC_RED
 
-DEFAULT_BAND_PATH = ['L', 'Gamma', 'X', 'W', 'K']
+def _wz_orth_to_cart(q):
+    """Orthorhombic reduced coords -> Cartesian (in 2pi/a units) for the
+    wurtzite cell, weighting each axis by its physical reciprocal length so
+    band-path segment distances are physically proportioned."""
+    return np.asarray(q, dtype=float) * _WZ_RECIP_W
+
+DEFAULT_BAND_PATH_FCC = ['L', 'Gamma', 'X', 'W', 'K']
+DEFAULT_BAND_PATH_WZ  = ['A', 'Gamma', 'X', 'S', 'Y', 'Gamma']
+DEFAULT_BAND_PATH = DEFAULT_BAND_PATH_FCC
+
+# Per-lattice plotting context: symmetry points, default path, reduced->Cartesian
+# transform, and the point-group sign/permutation set used to snap a path point
+# to the MP grid. FCC allows cubic permutations+signs; orthorhombic (wurtzite
+# supercell) allows sign flips only (the three axes are inequivalent).
+def _lattice_context(lattice):
+    if lattice == 'wurtzite':
+        return dict(hs=HS_POINTS_WZ, path=DEFAULT_BAND_PATH_WZ,
+                    to_cart=_wz_orth_to_cart, permute=False)
+    return dict(hs=HS_POINTS_FCC, path=DEFAULT_BAND_PATH_FCC,
+                to_cart=_fcc_prim_to_sc_reduced, permute=True)
 
 
 # ===========================================================================
@@ -1021,14 +1063,17 @@ def _detect_spinor(occup):
     return bool(0.0 < occ_max <= 1.0 + 1e-6)
 
 
-def _sym_equivalents(point):
+def _sym_equivalents(point, permute=True):
     """
-    Generate all distinct cubic symmetry equivalents of *point*
-    (all permutations × all sign flips), each wrapped to (-0.5, 0.5].
+    Generate all distinct symmetry equivalents of *point*, each wrapped to
+    (-0.5, 0.5]. permute=True (cubic FCC): all axis permutations × sign flips.
+    permute=False (orthorhombic wurtzite supercell): sign flips only — the three
+    axes are inequivalent, so permuting them is NOT a symmetry.
     """
     p = np.asarray(point, dtype=float)
+    perms = itertools.permutations(p) if permute else (tuple(p),)
     seen, result = set(), []
-    for perm in itertools.permutations(p):
+    for perm in perms:
         for signs in itertools.product([1, -1], repeat=3):
             c = np.array(perm) * np.array(signs)
             c = c - np.floor(c + 0.5)          # wrap to (-0.5, 0.5]
@@ -1039,13 +1084,13 @@ def _sym_equivalents(point):
     return result
 
 
-def _nearest_k(ideal, k_db, snap_tol):
+def _nearest_k(ideal, k_db, snap_tol, permute=True):
     """
     Return index (1-based) of the grid k-point nearest to *ideal*,
-    accounting for all cubic symmetry equivalents of *ideal*.
+    accounting for the lattice symmetry equivalents of *ideal*.
     Returns (k_idx, dist) or (None, dist) if dist > snap_tol.
     """
-    equivs = _sym_equivalents(ideal)
+    equivs = _sym_equivalents(ideal, permute=permute)
     best_id, best_dist = None, np.inf
     for kp in k_db:
         d = min(np.linalg.norm(kp['c'] - eq) for eq in equivs)
@@ -1056,11 +1101,16 @@ def _nearest_k(ideal, k_db, snap_tol):
 
 def plot_band_structure(kfile, eigenfile, output_dir,
                         path_labels=None, hs_points=None,
-                        energy_range_ev=(-6, 12), dpi=150, spin_sum='auto'):
+                        energy_range_ev=(-6, 12), dpi=150, spin_sum='auto',
+                        lattice='fcc'):
     """
     Plot band structure from *_k.data and *_eigen.data.
     k-points must be in reduced (dimensionless) coordinates.
     Eigenvalues are read in Hartree, shifted to VBM = 0, plotted in eV.
+
+    lattice: 'fcc' (cubic GaAs/Si, default) or 'wurtzite' (orthorhombic CdS
+             supercell) — selects the high-symmetry points, the default path,
+             the reduced->Cartesian transform, and the snap symmetry group.
 
     spin_sum: 'auto' — detect a spinor (spin-orbit split) dataset from the
               occupation column (max occ <= 1) and merge adjacent (Kramers
@@ -1069,10 +1119,13 @@ def plot_band_structure(kfile, eigenfile, output_dir,
               are kept as faint lines underneath.
               'on'  — force the merge, 'off' — plot all bands as-is.
     """
+    ctx = _lattice_context(lattice)
+    to_cart = ctx['to_cart']
+    permute = ctx['permute']
     if path_labels is None:
-        path_labels = DEFAULT_BAND_PATH
+        path_labels = ctx['path']
     if hs_points is None:
-        hs_points = HS_POINTS
+        hs_points = ctx['hs']
 
     # Validate path labels
     unknown = [l for l in path_labels if l not in hs_points]
@@ -1127,17 +1180,17 @@ def plot_band_structure(kfile, eigenfile, output_dir,
 
     for seg in range(len(path_labels) - 1):
         la, lb  = path_labels[seg], path_labels[seg + 1]
-        # Convert FCC-primitive reduced labels to simple-cubic reduced
-        # coordinates (the basis of *_k.data); the ideal path points are then
-        # wrapped into the cubic BZ by _sym_equivalents() before snapping.
-        pa = _fcc_prim_to_sc_reduced(hs_points[la])
-        pb = _fcc_prim_to_sc_reduced(hs_points[lb])
+        # Convert the (lattice-specific) reduced labels to the Cartesian/reduced
+        # basis of *_k.data; the ideal path points are then wrapped into the BZ
+        # by _sym_equivalents() (lattice symmetry group) before snapping.
+        pa = to_cart(hs_points[la])
+        pb = to_cart(hs_points[lb])
         seg_len = np.linalg.norm(pb - pa)
         print(f"  {la} → {lb}  (|Δk| = {seg_len:.4f} r.l.u.)")
 
         for s in range(steps + 1):
             ideal  = pa + (s / steps) * (pb - pa)
-            kid, _ = _nearest_k(ideal, k_db, snap_tol)
+            kid, _ = _nearest_k(ideal, k_db, snap_tol, permute=permute)
             if kid is None:
                 continue
             if full_path and full_path[-1]['kid'] == kid:
@@ -1508,9 +1561,10 @@ def main():
                         help='Image resolution (DPI)')
     parser.add_argument('--downsample', type=int, default=1,
                         help='Keep every N-th line in RT files (1 = all lines)')
-    parser.add_argument('--band-path', nargs='+', default=DEFAULT_BAND_PATH,
+    parser.add_argument('--band-path', nargs='+', default=None,
                         metavar='PT',
-                        help='High-symmetry path for band structure plot')
+                        help='High-symmetry path for band structure plot '
+                             '(default: the --lattice default path).')
     parser.add_argument('--energy-range', nargs=2, type=float,
                         default=[-6.0, 12.0], metavar=('EMIN', 'EMAX'),
                         help='Energy window for band structure plot (eV)')
@@ -1524,6 +1578,11 @@ def main():
                         help='1-based band index taken as the valence-band '
                              'maximum (energy zero) when plotting band.dat from '
                              'a dft_band run. Default: nb//2 (half filling).')
+    parser.add_argument('--lattice', choices=['fcc', 'wurtzite'], default='fcc',
+                        help='Lattice/symmetry-point set for the band-structure '
+                             'plot: "fcc" (cubic GaAs/Si, default) or "wurtzite" '
+                             '(orthorhombic CdS supercell: Gamma/X/Y/A/S high-'
+                             'symmetry points, default path A-Gamma-X-S-Y-Gamma).')
 
     # Mode shortcuts (each implies the complementary --no-* flag)
     mode = parser.add_mutually_exclusive_group()
@@ -1648,7 +1707,8 @@ def main():
                     kf, ef, output_dir,
                     path_labels=args.band_path,
                     energy_range_ev=tuple(args.energy_range),
-                    dpi=args.dpi, spin_sum=args.spin_sum)
+                    dpi=args.dpi, spin_sum=args.spin_sum,
+                    lattice=args.lattice)
             except Exception as exc:
                 print(f"  ERROR in band structure for {kf.name}: {exc}")
 
