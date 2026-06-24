@@ -15,6 +15,23 @@ All per-material constants that the SBE **dissipation channels** consume are ass
 
 No channel code changes — every dissipation channel reads the struct. A material-dependent channel requested for a name not in the registry stops with `error stop` and the supported list.
 
+### Provenance rule (STRICT) — no source ⇒ forbidden ✅
+
+**A channel may be enabled for a material ONLY if its constants are backed by a cited source for THAT material. No source ⇒ the constant is invalid ⇒ the channel is forbidden, and the SBE init aborts (`error stop`). Constants are NEVER transferred from another material.** The registry carries per-channel provenance gates `ii_ok / eph_ok / eeh_ok / coulomb_ok` (default `.false.`); a material sets a gate `.true.` only when it supplies the cited constants.
+
+### Effect-support matrix (which modes are allowed per material) ✅
+
+| Effect | GaAs | Si | CdS | Why CdS differs |
+|---|---|---|---|---|
+| EPM band structure | ✅ CB1966 | ✅ Kunikiyo 1994 | ✅ form factors cited (BC1967); **band solve WIP** | local form factors exist; the band-solve does not yet reproduce 2.58 eV |
+| Kuhn-Zurek decoherence | ✅ | ✅ | ✅ | material-independent (λ=k_B T/τ_m, user-supplied) |
+| Coulomb HF | ✅ ε=12.9 | ✅ ε=11.7 | ⛔ **forbidden** | no single cited isotropic ε (anisotropic ∥/⊥c); pass an explicit `sbe_coulomb_epsilon` to override |
+| Impact ionization | ✅ Stobbe quartic | ✅ Keldysh quadratic | ⛔ **forbidden** | no cited CdS prefactor P (literature scarce) |
+| Electron-phonon | ✅ Fischetti 1e14 | ✅ Meng 1.3e14 | ⛔ **forbidden** | no cited CdS saturation rate ν_sat (ħω_LO is known, the rate is not) |
+| Carrier-carrier (e-e/e-h) | ✅ | ✅ | ⛔ **forbidden** | no cited CdS rate scale |
+
+⛔ = enabling it for CdS aborts the run with a `FORBIDDEN` message. This is intentional: a forbidden mode must error, not silently borrow GaAs/Si numbers.
+
 ### What the code selects per material (the complete `s_material_params`) ✅
 
 These are **exactly** the fields `get_material_params(name)` fills — i.e. every constant a channel uses when you set `epm_material` and leave the `&sbe` knobs at their `'auto'`/sentinel defaults. Deeper provenance for each number is in the per-effect sections below.
@@ -54,6 +71,15 @@ These are **exactly** the fields `get_material_params(name)` fills — i.e. ever
 
 Notes: `eph_wraw` is the **un-normalized** D²/ħω weight; the channel normalizes Σ=1 at runtime, so the GaAs (eV/Å) vs Si (10⁸ eV/cm) deformation-potential units only need within-material consistency. The absolute e-ph magnitude is set by `eph_nu_sat_si`. `ii_prefactor`/`ii_exponent` carry matching units (s⁻¹eV⁻ᵃ).
 
+**`epm_material = 'CdS'`** (wurtzite P6₃mc, polar, non-centrosymmetric) — **STRUCTURE ONLY**
+| Struct field | Value | Used by | Source |
+|---|---|---|---|
+| `cell_au` (al box) | (7.816, 13.538, 12.685) Bohr = (a, a√3, c) | EPM geometry / `&system al(1:3)` | a=4.136 Å, c/a=1.623; BC1967 Table I |
+| `is_diamond` | `.false.` (V^A≠0, broken inversion) | EPM structure factor | wurtzite, u=3/8 |
+| `ii_ok / eph_ok / eeh_ok / coulomb_ok` | all **`.false.`** | provenance gate | **no cited CdS rate constants** |
+
+CdS fills **no** dissipation fields — every dissipation channel is forbidden (see the support matrix above). The cited CdS constants that *do* exist (gap 2.58 eV, ε, ħω_LO=38 meV, α≈0.5, piezo e_ij) are recorded as documentation-only module parameters, each with its own source, for a future properly-cited channel; none is used by an enabled channel.
+
 ## 1. EPM form factors (local pseudopotential)
 
 ### GaAs (zincblende, Rydberg, |G|² in (2π/a)² units) ✅
@@ -77,6 +103,24 @@ Notes: `eph_wraw` is the **un-normalized** D²/ħω weight; the channel normaliz
 | a | 5.431 Å = 10.26 Bohr | same | std Si; Kunikiyo 1994 |
 
 **Validation (this fork):** converged indirect gap 1.059 eV (Kunikiyo's own calc 1.068; exp 1.12), CBM at 0.86·2π/a along ⟨100⟩. The 3-parameter local EPM intentionally does not reach the experimental gap. **Structure factor:** τ=(a/8)(1,1,1) for both; diamond purely real cos(G·τ); zincblende cos + i·sin.
+
+### CdS (wurtzite P6₃mc, **LOCAL** EPM) ✅ form factors cited — 🚧 band solve WIP
+**Source: T. K. Bergstresser & M. L. Cohen, *Phys. Rev.* 164, 1069 (1967).** The paper assumes spherically-symmetric atomic potentials (NO angular/nonlocal term) → the pseudopotential is **purely local** (so `rvnl_tm = 0`, like local GaAs/Si; there is **no** cited CdS nonlocal parameter, so none is added). The wurtzite form factors are obtained by interpolating the **zinc-blende CdS** form factors onto the hexagonal G-shells; the cited zinc-blende anchors (Table II, Ry):
+
+| Quantity | Value (Ry) | Source |
+|---|---|---|
+| V^S(3) | −0.24 | BC1967 Table II (zinc-blende CdS) |
+| V^S(8) | +0.03 | same |
+| V^S(11) | +0.04 | same |
+| V^A(3) | +0.23 | same |
+| V^A(4) | +0.13 | same |
+| V^A(11) | +0.05 | same |
+| V^A(12) | +0.05 | same |
+| a, c/a, u | 4.136 Å, 1.623, 3/8 | BC1967 Table I |
+| gap (validation target) | 2.58 eV, direct at Γ | BC1967 Table I |
+| a_ZB (anchor lattice) | √2·a_W | BC1967 Sec. II (nearest-neighbour match) |
+
+Implemented in [`../epm_wurtzite_cds.py`](../epm_wurtzite_cds.py) (orthorhombic √3×1×1 cell from `al(1:3)`, 8-atom structure factor, V^A≠0 broken inversion). **Validation status (honest):** the geometry and the cited form factors are correct and unit-tested ([`../tests/test_wurtzite_cds_epm.py`](../tests/test_wurtzite_cds_epm.py)); the **local band-structure solve does NOT yet reproduce the 2.58 eV gap** (it gives ≈13 eV — a convention/basis problem), so `validate_against_paper()` returns False and the bands are **not** used as physical. No unvalidated band structure is shipped.
 
 ## 2. Spin-orbit (GaAs spinor mode) ✅
 | Quantity | Value | Source |
