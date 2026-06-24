@@ -170,6 +170,22 @@ subroutine stop_unknown_material(name, channel)
 end subroutine stop_unknown_material
 
 
+! Abort when a channel is enabled for a material that has NO cited constants for
+! it (provenance gate). Constants are never transferred from another material:
+! no source => forbidden. The fix is to add a CITED constant + flip the *_ok
+! flag in get_material_params, or to disable the channel for this material.
+subroutine stop_forbidden_channel(name, channel)
+    implicit none
+    character(*), intent(in) :: name, channel
+    write(*, '(a)') '# ERROR: '//trim(channel)//' is FORBIDDEN for material "'//trim(name)//'":'
+    write(*, '(a)') '#        no cited CdS-/material-specific constants exist for it, and none'
+    write(*, '(a)') '#        may be transferred from another material (no source = not valid).'
+    write(*, '(a)') '#        Disable the channel for this material, or add a CITED constant and'
+    write(*, '(a)') '#        set the matching *_ok flag in get_material_params().'
+    error stop 'forbidden SBE channel for this material (see message above)'
+end subroutine stop_forbidden_channel
+
+
 subroutine init_eph_phonon_table(sbe, mp, kT_au)
     use sbe_superres_ssbe, only: bose_factor, mev_to_ha, s_material_params
     implicit none
@@ -386,6 +402,8 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     ! =========================================================================
     sbe%occ_max = merge(1d0, 2d0, yn_sbe_spinor == 'y')
     sbe%flag_impact = (yn_sbe_impact_ionization == 'y')
+    if (sbe%flag_impact .and. .not. mp%ii_ok) &
+        call stop_forbidden_channel(epm_material, 'impact ionization (yn_sbe_impact_ionization)')
     if (sbe%flag_impact) then
         ! Fit form/exponent/prefactor/threshold default to the material registry
         ! ('auto' / negative sentinels); an explicit namelist value overrides it.
@@ -461,6 +479,8 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     ! Coulomb-renormalized one. Off in the no-Coulomb limit (yn_sbe_coulomb='n').
     ! =========================================================================
     sbe%flag_coulomb = (yn_sbe_coulomb == 'y')
+    if (sbe%flag_coulomb .and. sbe_coulomb_epsilon <= 0d0 .and. .not. mp%coulomb_ok) &
+        call stop_forbidden_channel(epm_material, 'Coulomb HF (yn_sbe_coulomb, no cited dielectric)')
     if (sbe%flag_coulomb) then
         ! Background dielectric defaults to the material registry (sentinel <=0);
         ! an explicit sbe_coulomb_epsilon overrides it.
@@ -516,6 +536,8 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     !  PRB 91, 075201 (2015); Fischetti-Laux PRB 38, 9721 (1988)]
     ! =========================================================================
     sbe%flag_eph = (yn_sbe_eph == 'y')
+    if (sbe%flag_eph .and. .not. mp%eph_ok) &
+        call stop_forbidden_channel(epm_material, 'electron-phonon (yn_sbe_eph, no cited nu_sat)')
     if (sbe%flag_eph) then
         ! The phonon table and the nu_sat default both come from the material
         ! registry -- the channel cannot run without one.
@@ -558,6 +580,8 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     ! [rate scale: Goodnick-Lugli PRB 37, 2578; Fischetti-Laux PRB 38, 9721]
     ! =========================================================================
     sbe%flag_eeh = (yn_sbe_eeh == 'y')
+    if (sbe%flag_eeh .and. sbe_eeh_nu_sat <= 0d0 .and. .not. mp%eeh_ok) &
+        call stop_forbidden_channel(epm_material, 'carrier-carrier (yn_sbe_eeh, no cited rate)')
     if (sbe%flag_eeh) then
         if (sbe_eeh_nu_sat > 0d0) then
             sbe%eeh_nu_au = sbe_eeh_nu_sat * (au_fs * 1d-15)

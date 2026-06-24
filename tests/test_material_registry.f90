@@ -66,26 +66,28 @@ program test_material_registry
     call chk('Si_cb eps0 == Si', sicb%eps0, si%eps0)
     if (.not. sicb%is_diamond) call bad('Si_cb not diamond')
 
-    ! --- CdS (wurtzite, polar, non-centrosymmetric, orthorhombic cell) ------
-    if (cds%is_diamond)     call bad('CdS flagged diamond')
-    if (.not. cds%eph_polar) call bad('CdS not flagged polar')
-    call chk('CdS eps0', cds%eps0, 9.0d0)
-    call chk('CdS eps_inf', cds%eps_inf, 5.3d0)
-    if (trim(cds%ii_form) /= 'keldysh_quadratic') call bad('CdS ii_form')
-    call chk('CdS ii_exponent', cds%ii_exponent, 2d0)
-    call chk('CdS ii_threshold_ev (1.5 Eg)', cds%ii_threshold_ev, 3.6d0)
-    call chk('CdS nu_sat', cds%eph_nu_sat_si, 2.0d14)
-    call ichk('CdS eph_nph (single Frohlich LO)', cds%eph_nph, 1)
-    call chk('CdS LO hw', cds%eph_hw_mev(1), 38.0d0)
+    ! --- provenance gates: GaAs/Si channels are all cited (.true.) -----------
+    if (.not. (ga%ii_ok .and. ga%eph_ok .and. ga%eeh_ok .and. ga%coulomb_ok)) &
+        call bad('GaAs channels should all be supported')
+    if (.not. (si%ii_ok .and. si%eph_ok .and. si%eeh_ok .and. si%coulomb_ok)) &
+        call bad('Si channels should all be supported')
+
+    ! --- CdS (wurtzite, orthorhombic cell): structure ONLY, ALL dissipation --
+    !     channels FORBIDDEN (no cited CdS rate constants; none transferred). ---
+    if (cds%is_diamond)  call bad('CdS flagged diamond')
     ! orthorhombic cell is anisotropic: b = a*sqrt(3), c independent
     if (abs(cds%cell_au(2) - cds%cell_au(1)) < 1d-6) call bad('CdS cell not anisotropic (b==a)')
     call chk('CdS cell b = a*sqrt3', cds%cell_au(2), cds%cell_au(1)*sqrt(3d0), 1d-3)
     if (abs(cds%cell_au(3) - cds%cell_au(1)) < 1d-6) call bad('CdS cell c == a')
+    ! the load-bearing correctness check: every dissipation channel is forbidden
+    if (cds%ii_ok)      call bad('CdS impact ionization must be FORBIDDEN (no cited prefactor)')
+    if (cds%eph_ok)     call bad('CdS electron-phonon must be FORBIDDEN (no cited nu_sat)')
+    if (cds%eeh_ok)     call bad('CdS carrier-carrier must be FORBIDDEN (no cited rate)')
+    if (cds%coulomb_ok) call bad('CdS Coulomb must be FORBIDDEN (no single cited dielectric)')
 
-    ! every entry's phonon weights must be positive (normalizable downstream)
+    ! every cited phonon table's weights must be positive (normalizable)
     if (sum(ga%eph_wraw(1:ga%eph_nph)) <= 0d0) call bad('GaAs eph weights non-positive')
     if (sum(si%eph_wraw(1:si%eph_nph)) <= 0d0) call bad('Si eph weights non-positive')
-    if (sum(cds%eph_wraw(1:cds%eph_nph)) <= 0d0) call bad('CdS eph weights non-positive')
 
     if (nfail == 0) then
         write(*,'(a)') 'PASS'; call exit(0)

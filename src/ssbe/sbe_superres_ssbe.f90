@@ -91,34 +91,29 @@ module sbe_superres_ssbe
     real(8), parameter, public :: SI_M_LH   = 0.16d0    ! light-hole mass [m_e]
 
     ! =====================================================================
-    ! Wurtzite CdS (P6_3mc) -- polar, NON-centrosymmetric II-VI. Frohlich
-    ! polar-optical coupling dominates at 300 K (alpha ~ 0.5, ~7x GaAs);
-    ! piezoelectric acoustic is a wurtzite-only channel (not yet a Lindblad
-    ! channel here -- constants kept for the future piezo dissipator).
-    ! Dielectric is anisotropic (|| vs _|_ c); the registry uses the isotropic
-    ! average eps = (eps_|| + 2 eps_perp)/3. Cell is orthorhombic (a, a*sqrt3, c)
-    ! supplied via &system al(1:3) -- NOT a single cubic lattice constant.
-    ! [E_g, masses: Mukherjee arXiv:cond-mat/0409019; Ekuma-Bagayoko
-    !  arXiv:1011.2793. eps/LO: Raman ~303-307 cm^-1; arXiv:1907.08005.
-    !  alpha: cyclotron arXiv:cond-mat/0107481; path-integral arXiv:2205.11780.
-    !  piezo e_ij: Berlincourt-Jaffe-Shiozawa, Phys. Rev. 129, 1009 (1963).]
+    ! Wurtzite CdS (P6_3mc) -- polar, NON-centrosymmetric II-VI.
+    ! STRUCTURAL constants (cited, used by the EPM geometry); the SBE
+    ! dissipation channels are FORBIDDEN for CdS (see get_material_params /
+    ! the init guard) because no CdS-specific cited RATE constants exist for
+    ! the Lindblad forms -- nothing is transferred from GaAs/Si.
+    ! [a, c, u=3/8, gap=2.58 eV(low-T): Bergstresser & Cohen, Phys. Rev. 164,
+    !  1069 (1967), Table I; the local EPM form factors are in their Table II.]
+    ! The constants below are DOCUMENTATION-ONLY (not consumed by any enabled
+    ! channel) and each carries its own primary source; they are kept so a
+    ! future, properly-cited CdS channel can use them WITH that source.
     ! =====================================================================
-    real(8), parameter, public :: CDS_A_BOHR    = 7.8159d0  ! a = 4.136 Ang
-    real(8), parameter, public :: CDS_ASQ3_BOHR = 13.5376d0 ! b = a*sqrt(3)
-    real(8), parameter, public :: CDS_C_BOHR    = 12.6877d0 ! c = 6.714 Ang
-    real(8), parameter, public :: CDS_U_INT     = 0.377d0   ! internal parameter (ideal 0.375)
-    real(8), parameter, public :: CDS_EG_EV     = 2.42d0    ! direct gap at Gamma, 300 K
-    real(8), parameter, public :: CDS_EPS0      = 9.0d0     ! static dielectric (isotropic avg)
-    real(8), parameter, public :: CDS_EPS_INF   = 5.3d0     ! high-frequency dielectric (avg)
-    real(8), parameter, public :: CDS_HW_LO_MEV = 38.0d0    ! Frohlich LO phonon [meV]
-    real(8), parameter, public :: CDS_HW_TO_MEV = 30.0d0    ! TO phonon [meV]
-    real(8), parameter, public :: CDS_ALPHA_FR  = 0.5d0     ! Frohlich coupling (electron)
-    real(8), parameter, public :: CDS_NU_SAT_SI = 2.0d14    ! e-ph sat. rate [s^-1] (estimate)
+    real(8), parameter, public :: CDS_A_BOHR    = 7.8159d0  ! a = 4.136 Ang  [BC1967 Table I]
+    real(8), parameter, public :: CDS_ASQ3_BOHR = 13.5376d0 ! b = a*sqrt(3) (orthorhombic)
+    real(8), parameter, public :: CDS_C_BOHR    = 12.6877d0 ! c = 6.714 Ang (c/a=1.623) [BC1967]
+    real(8), parameter, public :: CDS_U_INT     = 0.375d0   ! internal parameter u=3/8 [BC1967]
+    real(8), parameter, public :: CDS_EG_EV     = 2.58d0    ! direct gap at Gamma (low-T) [BC1967 Table I]
+    ! -- the following have sources OTHER than BC1967 and are NOT used by any
+    !    enabled SBE channel (the channels are forbidden); kept for the record:
+    real(8), parameter, public :: CDS_HW_LO_MEV = 38.0d0    ! Frohlich LO ~305 cm^-1 [Raman]
     real(8), parameter, public :: CDS_RHO_GCM3  = 4.82d0    ! mass density [g/cm^3]
-    real(8), parameter, public :: CDS_M_E       = 0.21d0    ! electron mass (_|_ c) [m_e]
-    real(8), parameter, public :: CDS_E33       = 0.385d0   ! piezo stress const [C/m^2]
-    real(8), parameter, public :: CDS_E31       = -0.262d0  ! piezo stress const [C/m^2]
-    real(8), parameter, public :: CDS_E15       = -0.183d0  ! piezo stress const [C/m^2]
+    real(8), parameter, public :: CDS_E33       = 0.385d0   ! piezo [C/m^2] [Berlincourt PR 129,1009]
+    real(8), parameter, public :: CDS_E31       = -0.262d0  ! piezo [C/m^2] [Berlincourt 1963]
+    real(8), parameter, public :: CDS_E15       = -0.183d0  ! piezo [C/m^2] [Berlincourt 1963]
 
     ! =====================================================================
     ! Material registry -- the SINGLE place that maps a material name to all
@@ -138,6 +133,15 @@ module sbe_superres_ssbe
         real(8)       :: a_lattice_au = 0d0       ! in-plane lattice constant a [Bohr]
         real(8)       :: cell_au(3)   = 0d0       ! expected &system al(1:3) box [Bohr]
         logical       :: is_diamond   = .false.   ! diamond (V^A=0) vs zincblende/wurtzite
+        ! -- PROVENANCE GATES --------------------------------------------------
+        ! A channel may be enabled for a material ONLY if its constants are
+        ! backed by a cited source for THAT material. No source => the flag is
+        ! .false. => the SBE init aborts (error stop) if the channel is enabled.
+        ! Never fall back to another material's constants.
+        logical       :: ii_ok        = .false.   ! impact-ionization fit cited?
+        logical       :: eph_ok       = .false.   ! e-ph rate (nu_sat) cited?
+        logical       :: eeh_ok       = .false.   ! carrier-carrier rate cited?
+        logical       :: coulomb_ok   = .false.   ! dielectric for Coulomb cited?
         ! dielectric (Coulomb HF exchange / carrier screening)
         real(8)       :: eps0         = 1d0       ! static dielectric
         real(8)       :: eps_inf      = 1d0       ! high-frequency dielectric
@@ -171,6 +175,7 @@ contains
             mp%a_lattice_au = 10.68d0
             mp%cell_au = (/ 10.68d0, 10.68d0, 10.68d0 /)   ! cubic
             mp%is_diamond   = .false.
+            mp%ii_ok = .true.; mp%eph_ok = .true.; mp%eeh_ok = .true.; mp%coulomb_ok = .true.
             mp%eps0 = GAAS_EPS0;  mp%eps_inf = GAAS_EPS_INF
             mp%ii_form = 'stobbe_quartic'; mp%ii_exponent = 4d0
             mp%ii_prefactor = 2d12;        mp%ii_threshold_ev = 2.1d0
@@ -189,6 +194,7 @@ contains
             mp%a_lattice_au = 10.26d0
             mp%cell_au = (/ 10.26d0, 10.26d0, 10.26d0 /)   ! cubic
             mp%is_diamond   = .true.
+            mp%ii_ok = .true.; mp%eph_ok = .true.; mp%eeh_ok = .true.; mp%coulomb_ok = .true.
             mp%eps0 = SI_EPS;  mp%eps_inf = SI_EPS     ! non-polar: eps_inf = eps0
             mp%ii_form = 'keldysh_quadratic'; mp%ii_exponent = 2d0
             mp%ii_prefactor = 2d12;           mp%ii_threshold_ev = 1.1d0
@@ -200,22 +206,21 @@ contains
                 mp%eph_wraw(p)   = SI_PHONON_D_1E8EVCM(p)**2 / SI_PHONON_E_MEV(p)
             end do
         case ('CdS')
-            ! Wurtzite, polar, NON-centrosymmetric. Orthorhombic cell (a, a*sqrt3,
-            ! c) via &system al(1:3) -- NOT cubic. Single dominant Frohlich LO
-            ! mode (no equivalent-valley intervalley set like Si/GaAs; direct gap
-            ! at Gamma). nu_sat is an estimate from the strong alpha~0.5 coupling.
+            ! Wurtzite (P6_3mc), polar, NON-centrosymmetric. Orthorhombic cell
+            ! (a, a*sqrt3, c) via &system al(1:3) -- NOT cubic. Only the STRUCTURE
+            ! is recorded here; the SBE DISSIPATION CHANNELS ARE ALL FORBIDDEN
+            ! (ii_ok=eph_ok=eeh_ok=coulomb_ok=.false. by default). There is no
+            ! cited CdS rate constant for the Lindblad forms used here -- the
+            ! impact-ionization prefactor and the e-ph saturation rate nu_sat in
+            ! particular have no CdS source -- so NONE may be substituted from
+            ! another material. Enabling any of them aborts (see init). Cited CdS
+            ! constants that DO exist (E_g, eps, hw_LO, alpha, piezo) are kept as
+            ! module parameters for documentation / future cited channels.
+            ! [lattice/gap/u: Bergstresser & Cohen, Phys. Rev. 164, 1069 (1967)]
             mp%found = .true.
             mp%a_lattice_au = CDS_A_BOHR
             mp%cell_au = (/ CDS_A_BOHR, CDS_ASQ3_BOHR, CDS_C_BOHR /)  ! orthorhombic
             mp%is_diamond   = .false.                  ! V^A != 0 (broken inversion)
-            mp%eps0 = CDS_EPS0;  mp%eps_inf = CDS_EPS_INF
-            mp%ii_form = 'keldysh_quadratic'; mp%ii_exponent = 2d0   ! wide-gap soft
-            mp%ii_prefactor = 2d12;           mp%ii_threshold_ev = 3.6d0   ! ~1.5 E_g
-            mp%eph_nu_sat_si = CDS_NU_SAT_SI
-            mp%eph_polar = .true.                      ! Frohlich-dominated (alpha~0.5)
-            mp%eph_nph = 1
-            mp%eph_hw_mev(1) = CDS_HW_LO_MEV
-            mp%eph_wraw(1)   = 1d0                     ! single mode -> weight 1
         case default
             mp%found = .false.
         end select
