@@ -72,18 +72,26 @@ program test_material_registry
     if (.not. (si%ii_ok .and. si%eph_ok .and. si%eeh_ok .and. si%coulomb_ok)) &
         call bad('Si channels should all be supported')
 
-    ! --- CdS (wurtzite, orthorhombic cell): structure ONLY, ALL dissipation --
-    !     channels FORBIDDEN (no cited CdS rate constants; none transferred). ---
+    ! --- CdS (wurtzite, orthorhombic cell): channels enabled per the md spec --
     if (cds%is_diamond)  call bad('CdS flagged diamond')
     ! orthorhombic cell is anisotropic: b = a*sqrt(3), c independent
     if (abs(cds%cell_au(2) - cds%cell_au(1)) < 1d-6) call bad('CdS cell not anisotropic (b==a)')
     call chk('CdS cell b = a*sqrt3', cds%cell_au(2), cds%cell_au(1)*sqrt(3d0), 1d-3)
     if (abs(cds%cell_au(3) - cds%cell_au(1)) < 1d-6) call bad('CdS cell c == a')
-    ! the load-bearing correctness check: every dissipation channel is forbidden
-    if (cds%ii_ok)      call bad('CdS impact ionization must be FORBIDDEN (no cited prefactor)')
-    if (cds%eph_ok)     call bad('CdS electron-phonon must be FORBIDDEN (no cited nu_sat)')
-    if (cds%eeh_ok)     call bad('CdS carrier-carrier must be FORBIDDEN (no cited rate)')
-    if (cds%coulomb_ok) call bad('CdS Coulomb must be FORBIDDEN (no single cited dielectric)')
+    ! cited dissipation channels from the md: e-ph (Frohlich), Coulomb, II
+    if (.not. cds%eph_ok)     call bad('CdS e-ph (Frohlich) should be enabled (md cited)')
+    if (.not. cds%coulomb_ok) call bad('CdS Coulomb should be enabled (md cited eps)')
+    if (.not. cds%ii_ok)      call bad('CdS impact ionization should be enabled (md cited E_th)')
+    ! carrier-carrier has no cited CdS rate -> still forbidden
+    if (cds%eeh_ok)           call bad('CdS carrier-carrier must stay FORBIDDEN (no cited rate)')
+    ! e-ph is the cited Frohlich polar-LO at 38 meV
+    if (.not. cds%eph_polar)  call bad('CdS should be flagged polar (Frohlich)')
+    call ichk('CdS eph_nph (single Frohlich LO)', cds%eph_nph, 1)
+    call chk('CdS LO hw = 38 meV', cds%eph_hw_mev(1), 38.0d0)
+    call chk('CdS eps0', cds%eps0, 9.0d0)
+    call chk('CdS II threshold = 1.5 Eg', cds%ii_threshold_ev, 3.6d0)
+    ! II prefactor is a fit parameter (md): registry holds a sentinel, not a value
+    if (cds%ii_prefactor > 0d0) call bad('CdS II prefactor must be a sentinel (fit parameter)')
 
     ! every cited phonon table's weights must be positive (normalizable)
     if (sum(ga%eph_wraw(1:ga%eph_nph)) <= 0d0) call bad('GaAs eph weights non-positive')

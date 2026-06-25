@@ -92,24 +92,34 @@ module sbe_superres_ssbe
 
     ! =====================================================================
     ! Wurtzite CdS (P6_3mc) -- polar, NON-centrosymmetric II-VI.
-    ! STRUCTURAL constants (cited, used by the EPM geometry); the SBE
-    ! dissipation channels are FORBIDDEN for CdS (see get_material_params /
-    ! the init guard) because no CdS-specific cited RATE constants exist for
-    ! the Lindblad forms -- nothing is transferred from GaAs/Si.
-    ! [a, c, u=3/8, gap=2.58 eV(low-T): Bergstresser & Cohen, Phys. Rev. 164,
-    !  1069 (1967), Table I; the local EPM form factors are in their Table II.]
-    ! The constants below are DOCUMENTATION-ONLY (not consumed by any enabled
-    ! channel) and each carries its own primary source; they are kept so a
-    ! future, properly-cited CdS channel can use them WITH that source.
+    ! Structure: Bergstresser & Cohen, Phys. Rev. 164, 1069 (1967).
+    ! DISSIPATION CHANNELS (cited in the CdS physics-methods spec / md):
+    !   * Frohlich polar-optical e-ph -- the PRIMARY room-T channel
+    !     (hw_LO = 38 meV [Raman]; alpha ~ 0.5 [cyclotron, arXiv:cond-mat/
+    !     0107481; path-integral arXiv:2205.11780]). nu_sat is DERIVED from the
+    !     cited coupling: the Frohlich rate scale ~ alpha * omega_LO.
+    !   * Coulomb HF (static dielectric eps0 ~ 9.0 isotropic avg, eps_inf ~ 5.3
+    !     [md; anisotropic ||/_|_ c]).
+    !   * Impact ionization: Keldysh soft threshold E_th ~ 1.5 E_g = 3.6 eV
+    !     [md, (3/2)E_g rule]; the PREFACTOR is a fit parameter (CdS-specific
+    !     value scarce -- md), so the user must set sbe_ii_prefactor explicitly.
+    ! Carrier-carrier (e-e/e-h) has NO cited CdS rate -> stays forbidden.
+    ! Piezoelectric acoustic (e33/e31/e15 [Berlincourt PR 129,1009]) and
+    ! deformation-potential acoustic are cited but NOT yet SBE Lindblad channels.
     ! =====================================================================
     real(8), parameter, public :: CDS_A_BOHR    = 7.8159d0  ! a = 4.136 Ang  [BC1967 Table I]
     real(8), parameter, public :: CDS_ASQ3_BOHR = 13.5376d0 ! b = a*sqrt(3) (orthorhombic)
     real(8), parameter, public :: CDS_C_BOHR    = 12.6877d0 ! c = 6.714 Ang (c/a=1.623) [BC1967]
     real(8), parameter, public :: CDS_U_INT     = 0.375d0   ! internal parameter u=3/8 [BC1967]
     real(8), parameter, public :: CDS_EG_EV     = 2.58d0    ! direct gap at Gamma (low-T) [BC1967 Table I]
-    ! -- the following have sources OTHER than BC1967 and are NOT used by any
-    !    enabled SBE channel (the channels are forbidden); kept for the record:
-    real(8), parameter, public :: CDS_HW_LO_MEV = 38.0d0    ! Frohlich LO ~305 cm^-1 [Raman]
+    real(8), parameter, public :: CDS_EPS0      = 9.0d0     ! static dielectric (isotropic avg) [md]
+    real(8), parameter, public :: CDS_EPS_INF   = 5.3d0     ! high-frequency dielectric [md]
+    real(8), parameter, public :: CDS_HW_LO_MEV = 38.0d0    ! Frohlich LO ~305 cm^-1 [Raman; md]
+    real(8), parameter, public :: CDS_ALPHA_FR  = 0.5d0     ! Frohlich coupling alpha [md]
+    ! Frohlich e-ph rate scale nu_sat = alpha * omega_LO (omega_LO = hw_LO/hbar):
+    ! 0.5 * (38e-3 eV / 6.582e-16 eV.s) = 2.89e13 s^-1 (~35 fs; md: sub-100 fs).
+    real(8), parameter, public :: CDS_NU_SAT_SI = 2.89d13   ! derived from cited alpha, hw_LO [md]
+    real(8), parameter, public :: CDS_II_ETH_EV = 3.6d0     ! II threshold ~1.5 E_g [md, (3/2)E_g]
     real(8), parameter, public :: CDS_RHO_GCM3  = 4.82d0    ! mass density [g/cm^3]
     real(8), parameter, public :: CDS_E33       = 0.385d0   ! piezo [C/m^2] [Berlincourt PR 129,1009]
     real(8), parameter, public :: CDS_E31       = -0.262d0  ! piezo [C/m^2] [Berlincourt 1963]
@@ -209,18 +219,31 @@ contains
             ! Wurtzite (P6_3mc), polar, NON-centrosymmetric. Orthorhombic cell
             ! (a, a*sqrt3, c) via &system al(1:3) -- NOT cubic. Only the STRUCTURE
             ! is recorded here; the SBE DISSIPATION CHANNELS ARE ALL FORBIDDEN
-            ! (ii_ok=eph_ok=eeh_ok=coulomb_ok=.false. by default). There is no
-            ! cited CdS rate constant for the Lindblad forms used here -- the
-            ! impact-ionization prefactor and the e-ph saturation rate nu_sat in
-            ! particular have no CdS source -- so NONE may be substituted from
-            ! another material. Enabling any of them aborts (see init). Cited CdS
-            ! constants that DO exist (E_g, eps, hw_LO, alpha, piezo) are kept as
-            ! module parameters for documentation / future cited channels.
-            ! [lattice/gap/u: Bergstresser & Cohen, Phys. Rev. 164, 1069 (1967)]
+            ! Channels enabled with CITED constants from the CdS physics-methods
+            ! spec (md): e-ph (Frohlich, PRIMARY), Coulomb (eps), impact
+            ! ionization (E_th cited; prefactor is a fit parameter -> user must
+            ! set sbe_ii_prefactor, so ii_prefactor stays the sentinel here).
+            ! Carrier-carrier has no cited CdS rate -> eeh_ok stays .false.
+            ! [structure: Bergstresser & Cohen, Phys. Rev. 164, 1069 (1967)]
             mp%found = .true.
             mp%a_lattice_au = CDS_A_BOHR
             mp%cell_au = (/ CDS_A_BOHR, CDS_ASQ3_BOHR, CDS_C_BOHR /)  ! orthorhombic
             mp%is_diamond   = .false.                  ! V^A != 0 (broken inversion)
+            mp%coulomb_ok = .true.; mp%eph_ok = .true.; mp%ii_ok = .true.
+            mp%eps0 = CDS_EPS0;  mp%eps_inf = CDS_EPS_INF
+            ! Frohlich polar-optical: a single dominant LO mode at 38 meV; the
+            ! rate scale nu_sat = alpha*omega_LO is the cited Frohlich coupling.
+            mp%eph_polar = .true.
+            mp%eph_nph = 1
+            mp%eph_hw_mev(1) = CDS_HW_LO_MEV
+            mp%eph_wraw(1)   = 1d0                     ! single mode -> weight 1
+            mp%eph_nu_sat_si = CDS_NU_SAT_SI
+            ! Impact ionization: Keldysh soft threshold; E_th cited, prefactor is
+            ! a fit parameter (left to the user via sbe_ii_prefactor).
+            mp%ii_form = 'keldysh_quadratic'; mp%ii_exponent = 2d0
+            mp%ii_threshold_ev = CDS_II_ETH_EV
+            mp%ii_prefactor = -1d0     ! sentinel: NO cited CdS prefactor; the
+            ! init requires the user to set sbe_ii_prefactor explicitly (fit param).
         case default
             mp%found = .false.
         end select

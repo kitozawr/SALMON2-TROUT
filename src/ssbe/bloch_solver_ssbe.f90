@@ -419,6 +419,15 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
         ii_exp_eff  = merge(sbe_ii_exponent,     mp%ii_exponent,     sbe_ii_exponent     > 0d0)
         ii_pref_eff = merge(sbe_ii_prefactor,    mp%ii_prefactor,    sbe_ii_prefactor    > 0d0)
         ii_thr_eff  = merge(sbe_ii_threshold_ev, mp%ii_threshold_ev, sbe_ii_threshold_ev >= 0d0)
+        ! A material whose registry prefactor is a sentinel (no cited value, e.g.
+        ! CdS: the II prefactor is a fit parameter) requires an explicit
+        ! sbe_ii_prefactor -- never invent or borrow one.
+        if (ii_pref_eff <= 0d0) then
+            write(*, '(a)') '# ERROR: impact ionization for material "'//trim(epm_material)// &
+                            '" has no cited prefactor (it is a fit parameter).'
+            write(*, '(a)') '#        Set sbe_ii_prefactor explicitly in &sbe.'
+            error stop 'impact-ionization prefactor not cited for this material; set sbe_ii_prefactor'
+        end if
         if ((sbe_ii_exponent <= 0d0 .or. sbe_ii_prefactor <= 0d0 .or. &
              sbe_ii_threshold_ev < 0d0) .and. .not. mp%found) &
             call stop_unknown_material(epm_material, 'impact ionization (sentinel default)')

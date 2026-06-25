@@ -21,16 +21,16 @@ No channel code changes — every dissipation channel reads the struct. A materi
 
 ### Effect-support matrix (which modes are allowed per material) ✅
 
-| Effect | GaAs | Si | CdS | Why CdS differs |
+| Effect | GaAs | Si | CdS | CdS source |
 |---|---|---|---|---|
-| EPM band structure | ✅ CB1966 | ✅ Kunikiyo 1994 | ✅ **validated** (BC1967, 2.55 vs 2.58 eV) | cited wurtzite form factors; exact 2-fold folding to the al-vector SBE cell |
+| EPM band structure | ✅ CB1966 | ✅ Kunikiyo 1994 | ✅ **validated** (2.55 vs 2.58 eV) | BC1967; exact 2-fold folding to the al-vector SBE cell |
 | Kuhn-Zurek decoherence | ✅ | ✅ | ✅ | material-independent (λ=k_B T/τ_m, user-supplied) |
-| Coulomb HF | ✅ ε=12.9 | ✅ ε=11.7 | ⛔ **forbidden** | no single cited isotropic ε (anisotropic ∥/⊥c); pass an explicit `sbe_coulomb_epsilon` to override |
-| Impact ionization | ✅ Stobbe quartic | ✅ Keldysh quadratic | ⛔ **forbidden** | no cited CdS prefactor P (literature scarce) |
-| Electron-phonon | ✅ Fischetti 1e14 | ✅ Meng 1.3e14 | ⛔ **forbidden** | no cited CdS saturation rate ν_sat (ħω_LO is known, the rate is not) |
-| Carrier-carrier (e-e/e-h) | ✅ | ✅ | ⛔ **forbidden** | no cited CdS rate scale |
+| Coulomb HF | ✅ ε=12.9 | ✅ ε=11.7 | ✅ ε=9.0 | static dielectric (isotropic avg) [md] |
+| Electron-phonon | ✅ Fischetti 1e14 | ✅ Meng 1.3e14 | ✅ Fröhlich LO 38 meV, ν_sat=2.9e13 | ħω_LO [Raman], α≈0.5 [cyclotron]; ν_sat = α·ω_LO [md] |
+| Impact ionization | ✅ Stobbe quartic | ✅ Keldysh quadratic | ✅ E_th=3.6 eV; **prefactor = user fit param** | E_th=1.5·E_g [md (3/2)E_g]; prefactor scarce → must set `sbe_ii_prefactor` |
+| Carrier-carrier (e-e/e-h) | ✅ | ✅ | ⛔ **forbidden** | no cited CdS rate scale (not in the md) |
 
-⛔ = enabling it for CdS aborts the run with a `FORBIDDEN` message. This is intentional: a forbidden mode must error, not silently borrow GaAs/Si numbers.
+CdS dissipation comes from the CdS physics-methods spec (md): Fröhlich polar-optical e-ph is the **primary** room-T channel. The impact-ionization **prefactor** is a fit parameter (no cited CdS value) — enabling II without an explicit `sbe_ii_prefactor` aborts. Carrier-carrier has no cited CdS rate → ⛔ forbidden (enabling it aborts). The **piezoelectric acoustic** (e₃₃/e₃₁/e₁₅ [Berlincourt 1963]) and **deformation-potential acoustic** channels are cited in the md but are **not yet SBE Lindblad channels** (future). ⛔ = enabling it for CdS aborts; nothing is borrowed from GaAs/Si.
 
 ### What the code selects per material (the complete `s_material_params`) ✅
 
@@ -71,14 +71,20 @@ These are **exactly** the fields `get_material_params(name)` fills — i.e. ever
 
 Notes: `eph_wraw` is the **un-normalized** D²/ħω weight; the channel normalizes Σ=1 at runtime, so the GaAs (eV/Å) vs Si (10⁸ eV/cm) deformation-potential units only need within-material consistency. The absolute e-ph magnitude is set by `eph_nu_sat_si`. `ii_prefactor`/`ii_exponent` carry matching units (s⁻¹eV⁻ᵃ).
 
-**`epm_material = 'CdS'`** (wurtzite P6₃mc, polar, non-centrosymmetric) — **STRUCTURE ONLY**
+**`epm_material = 'CdS'`** (wurtzite P6₃mc, polar, non-centrosymmetric)
 | Struct field | Value | Used by | Source |
 |---|---|---|---|
 | `cell_au` (al box) | (7.816, 13.538, 12.685) Bohr = (a, a√3, c) | EPM geometry / `&system al(1:3)` | a=4.136 Å, c/a=1.623; BC1967 Table I |
 | `is_diamond` | `.false.` (V^A≠0, broken inversion) | EPM structure factor | wurtzite, u=3/8 |
-| `ii_ok / eph_ok / eeh_ok / coulomb_ok` | all **`.false.`** | provenance gate | **no cited CdS rate constants** |
+| `eps0 / eps_inf` | 9.0 / 5.3 | Coulomb HF | static/∞ dielectric (isotropic avg) [md] |
+| `eph_polar / eph_nph / eph_hw_mev(1)` | `.true.` / 1 / 38 meV | e-ph | Fröhlich LO [Raman; md] |
+| `eph_nu_sat_si` | 2.89e13 s⁻¹ | e-ph rate scale | α·ω_LO from α=0.5, ħω_LO=38 meV [md] |
+| `ii_form / ii_exponent / ii_threshold_ev` | keldysh_quadratic / 2 / 3.6 eV | impact ionization | Keldysh soft; E_th=1.5·E_g [md] |
+| `ii_prefactor` | **sentinel (−1)** → user must set `sbe_ii_prefactor` | impact ionization | no cited CdS prefactor (fit parameter) [md] |
+| `coulomb_ok / eph_ok / ii_ok` | `.true.` | provenance gates | cited in the md |
+| `eeh_ok` | `.false.` | provenance gate | no cited CdS carrier-carrier rate |
 
-CdS fills **no** dissipation fields — every dissipation channel is forbidden (see the support matrix above). The cited CdS constants that *do* exist (gap 2.58 eV, ε, ħω_LO=38 meV, α≈0.5, piezo e_ij) are recorded as documentation-only module parameters, each with its own source, for a future properly-cited channel; none is used by an enabled channel.
+Every CdS constant carries its source; the impact-ionization **prefactor** is the one genuinely uncited quantity (a fit parameter per the md), so it stays a sentinel and the run aborts unless the user supplies `sbe_ii_prefactor`. Carrier-carrier stays forbidden. Piezoelectric (e₃₃/e₃₁/e₁₅ [Berlincourt 1963]) and deformation-acoustic are cited but not yet SBE channels.
 
 ## 1. EPM form factors (local pseudopotential)
 
