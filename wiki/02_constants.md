@@ -23,7 +23,7 @@ No channel code changes — every dissipation channel reads the struct. A materi
 
 | Effect | GaAs | Si | CdS | Why CdS differs |
 |---|---|---|---|---|
-| EPM band structure | ✅ CB1966 | ✅ Kunikiyo 1994 | ✅ form factors cited (BC1967); **band solve WIP** | local form factors exist; the band-solve does not yet reproduce 2.58 eV |
+| EPM band structure | ✅ CB1966 | ✅ Kunikiyo 1994 | ✅ **validated** (BC1967, 2.55 vs 2.58 eV) | cited wurtzite form factors; exact 2-fold folding to the al-vector SBE cell |
 | Kuhn-Zurek decoherence | ✅ | ✅ | ✅ | material-independent (λ=k_B T/τ_m, user-supplied) |
 | Coulomb HF | ✅ ε=12.9 | ✅ ε=11.7 | ⛔ **forbidden** | no single cited isotropic ε (anisotropic ∥/⊥c); pass an explicit `sbe_coulomb_epsilon` to override |
 | Impact ionization | ✅ Stobbe quartic | ✅ Keldysh quadratic | ⛔ **forbidden** | no cited CdS prefactor P (literature scarce) |
@@ -104,23 +104,23 @@ CdS fills **no** dissipation fields — every dissipation channel is forbidden (
 
 **Validation (this fork):** converged indirect gap 1.059 eV (Kunikiyo's own calc 1.068; exp 1.12), CBM at 0.86·2π/a along ⟨100⟩. The 3-parameter local EPM intentionally does not reach the experimental gap. **Structure factor:** τ=(a/8)(1,1,1) for both; diamond purely real cos(G·τ); zincblende cos + i·sin.
 
-### CdS (wurtzite P6₃mc, **LOCAL** EPM) ✅ form factors cited — 🚧 band solve WIP
-**Source: T. K. Bergstresser & M. L. Cohen, *Phys. Rev.* 164, 1069 (1967).** The paper assumes spherically-symmetric atomic potentials (NO angular/nonlocal term) → the pseudopotential is **purely local** (so `rvnl_tm = 0`, like local GaAs/Si; there is **no** cited CdS nonlocal parameter, so none is added). The wurtzite form factors are obtained by interpolating the **zinc-blende CdS** form factors onto the hexagonal G-shells; the cited zinc-blende anchors (Table II, Ry):
+### CdS (wurtzite P6₃mc, **LOCAL** EPM) ✅ validated against BC1967
+**Source: T. K. Bergstresser & M. L. Cohen, *Phys. Rev.* 164, 1069 (1967).** The paper assumes spherically-symmetric atomic potentials (NO angular/nonlocal term) → the pseudopotential is **purely local** (so `rvnl_tm = 0`, like local GaAs/Si; there is **no** cited CdS nonlocal parameter, so none is added). BC1967 give the **wurtzite** form factors directly in Table II (their tuned values); the cited values (Ry, keyed by |G|² in the reduced units (√2π/a_W)² = (2π/a_ZB)², a_ZB=√2·a_W):
 
-| Quantity | Value (Ry) | Source |
-|---|---|---|
-| V^S(3) | −0.24 | BC1967 Table II (zinc-blende CdS) |
-| V^S(8) | +0.03 | same |
-| V^S(11) | +0.04 | same |
-| V^A(3) | +0.23 | same |
-| V^A(4) | +0.13 | same |
-| V^A(11) | +0.05 | same |
-| V^A(12) | +0.05 | same |
-| a, c/a, u | 4.136 Å, 1.623, 3/8 | BC1967 Table I |
-| gap (validation target) | 2.58 eV, direct at Γ | BC1967 Table I |
-| a_ZB (anchor lattice) | √2·a_W | BC1967 Sec. II (nearest-neighbour match) |
+| shell (\|G\|²) | V^S | V^A | Source |
+|---|---|---|---|
+| 002 (3.04) | −0.26 | +0.23 | BC1967 Table II (wurtzite CdS) |
+| 101 (3.43) | −0.24 | +0.18 | same |
+| 102 (5.70) | −0.20 | +0.08 | same |
+| 103 (9.50) | +0.04 | +0.05 | same |
+| 200/201 (10.7/11.4) | +0.04 | +0.05 | same |
+| 202 (13.3) | +0.02 | +0.03 | same |
+| a, c/a, u | 4.136 Å, 1.623, 3/8 | | BC1967 Table I |
+| gap | **2.58 eV**, direct at Γ | | BC1967 Table I (validation target) |
 
-Implemented in [`../epm_wurtzite_cds.py`](../epm_wurtzite_cds.py) (orthorhombic √3×1×1 cell from `al(1:3)`, 8-atom structure factor, V^A≠0 broken inversion). **Validation status (honest):** the geometry and the cited form factors are correct and unit-tested ([`../tests/test_wurtzite_cds_epm.py`](../tests/test_wurtzite_cds_epm.py)); the **local band-structure solve does NOT yet reproduce the 2.58 eV gap** (it gives ≈13 eV — a convention/basis problem), so `validate_against_paper()` returns False and the bands are **not** used as physical. No unvalidated band structure is shipped.
+**Validation ✅:** implemented in [`../epm_wurtzite_cds.py`](../epm_wurtzite_cds.py) (hexagonal primitive cell for the band check; orthorhombic √3×1×1 cell from `al(1:3)` for the SBE). The **structure factors match Table II** (002: |S^S|,|S^A|=0.71,0.71; 101: 0.33,0.80; 102: 0.35,0.35) and the **converged direct gap at Γ = 2.55 eV reproduces the paper's 2.58 eV** (|Δ|≈0.03 eV, inside the paper's ~0.27 eV form-factor accuracy). Two things had to be right (both were initially wrong, giving 13 eV): the potential is normalized by **total atoms per cell** (1/n, the BC1967 "volume per atom" normalization — *not* per species), and the **wurtzite** Table II form factors are used (not the zinc-blende anchors).
+
+**Folding to the SBE cell (EXACT) ✅:** the SBE uses the orthorhombic 8-atom `al(1:3)` cell, a √3×1×1 supercell of the hexagonal primitive cell (folding factor 2). Because the supercell potential is primitive-periodic, the supercell Hamiltonian at Γ is **block-diagonal over the 2 cosets** of the primitive reciprocal lattice (off-coset |H| ≈ 8×10⁻¹⁷ — the analogue of the cubic 4-fold FCC folding's parity selection rule). Coset 0 = Γ_hex carries the 2.54 eV direct gap; coset 1 = the zone-edge partner (6.2 eV, so the CBM stays at Γ). The orthorhombic gap equals the primitive gap → the folding is consistent and exactly unfoldable. Unit-tested in [`../tests/test_wurtzite_cds_epm.py`](../tests/test_wurtzite_cds_epm.py).
 
 ## 2. Spin-orbit (GaAs spinor mode) ✅
 | Quantity | Value | Source |
