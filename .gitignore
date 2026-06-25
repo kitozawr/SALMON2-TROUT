@@ -68,3 +68,8 @@ htmlcov/
 *.tar.bz2
 *.tar.xz
 *.tar.zst
+# SALMON transient working files (written to cwd by the input parser)
+.atomic_coor.tmp
+.atomic_red_coor.tmp
+.namelist.tmp
+.reenetrance.tmp
