@@ -1,8 +1,21 @@
-# SALMON2-SBE — SALMON fork with CF4/Yoshida SBE propagation, CPTP decoherence & EPM ground states
+# SALMON-TROUT
 
-This repository is a fork of the original [SALMON project](http://salmon-tddft.jp/), an open-source software package for *ab-initio* quantum-mechanical calculations of light-matter interactions. 
+**Time-dependent Relaxation with Open-system Unified Treatment**
 
-This fork extends SALMON's Semiconductor Bloch Equations (SBE) module with a **commutator-free Magnus 4 (CF4) / Suzuki-Yoshida exponential propagator**, a **strictly CPTP Kuhn-Zurek/Caldeira-Leggett decoherence model**, an optional **k-local impact-ionization Lindblad channel**, an optional **Coulomb (time-dependent Hartree–Fock) renormalization** for the extreme-THz regime (Golde–Kira–Meier–Koch), **frozen-core optimizations**, and a self-contained **local Empirical Pseudopotential Method (EPM)** ground-state solver (Cohen-Bergstresser, GaAs) that closes the EPM → SBE pipeline without external scripts.
+A velocity-gauge semiconductor Bloch equation solver with many-body 
+CPTP Lindblad dissipation for strong-field THz/MIR physics.
+
+## Features
+- CF4/Magnus 4th-order unitary propagator
+- CPTP Lindblad channels: e-ph, e-e, impact ionization
+- Systolic ring MPI for nonlocal collision integrals
+- Materials: Si, GaAs, CdS (wurtzite), Graphene (2D)
+- HHG with realistic scattering-limited coherence
+- Empirical Pseudopotential Method (EPM)
+
+## Based on
+SALMON (Scalable Ab-initio Light-Matter simulator for Optics and Nanoscience). This repository is a fork of the original [SALMON project](http://salmon-tddft.jp/), an open-source software package for *ab-initio* quantum-mechanical calculations of light-matter interactions. 
+
 
 ## Contents
 
