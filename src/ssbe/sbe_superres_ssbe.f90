@@ -158,6 +158,10 @@ module sbe_superres_ssbe
         logical       :: eph_ok       = .false.   ! e-ph rate (nu_sat) cited?
         logical       :: eeh_ok       = .false.   ! carrier-carrier rate cited?
         logical       :: coulomb_ok   = .false.   ! dielectric for Coulomb cited?
+        logical       :: auger_ok     = .false.   ! Auger coeff C cited?
+        ! Auger recombination (Sec 13): R = C n^3, density-gated above n_gate.
+        real(8)       :: auger_c_cm6s    = 0d0    ! Auger coefficient C [cm^6/s]
+        real(8)       :: auger_n_gate_cm3 = 0d0   ! activation density [cm^-3]
         ! dielectric (Coulomb HF exchange / carrier screening)
         real(8)       :: eps0         = 1d0       ! static dielectric
         real(8)       :: eps_inf      = 1d0       ! high-frequency dielectric
@@ -255,6 +259,11 @@ contains
             mp%is_diamond   = .false.                  ! V^A != 0 (broken inversion)
             mp%coulomb_ok = .true.; mp%eph_ok = .true.; mp%ii_ok = .true.
             mp%eeh_ok = .false.   ! no cited CdS carrier-carrier rate (see above)
+            ! Auger recombination IS cited for CdS: C = 2.0e-30 cm^6/s
+            ! [Haury et al., PRB 57, 11513 (1998)], density-gated at n >= 1e18
+            ! cm^-3 [Shah et al., IEEE JQE 22, 1728 (1986)].
+            mp%auger_ok = .true.
+            mp%auger_c_cm6s = CDS_AUGER_C;  mp%auger_n_gate_cm3 = CDS_EE_ACT_N
             mp%eps0 = CDS_EPS0;  mp%eps_inf = CDS_EPS_INF
             ! Frohlich polar-optical: a single dominant LO mode at 38 meV; the
             ! rate scale nu_sat = alpha*omega_LO is the cited Frohlich coupling.

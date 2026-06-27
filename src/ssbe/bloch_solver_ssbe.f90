@@ -70,6 +70,15 @@ module bloch_solver_ssbe
         logical :: flag_eeh   = .false.
         real(8) :: eeh_nu_au  = 0d0     ! carrier-carrier rate [1/a.u.time]
 
+        ! Auger recombination (Sec 13): density-gated, number-conserving CPTP
+        ! channel. Per-carrier rate gamma = auger_c_au * n^2 (n in cm^-3), so the
+        ! total recombination rate is R = C n^3. Inert below auger_n_gate_cm3.
+        logical :: flag_auger      = .false.
+        real(8) :: auger_c_au      = 0d0   ! C[cm^6/s]*(au_fs*1e-15): gamma=auger_c_au*n_cm3^2
+        real(8) :: auger_n_gate_cm3 = 0d0  ! activation density [cm^-3]
+        real(8) :: auger_eg_au     = 0d0   ! band gap E_g [Ha] (hot-carrier target offset)
+        real(8) :: n_exc_cm3       = 0d0   ! running excited-carrier density [cm^-3]
+
         ! Nonlocal impact ionization (Part C4): the hot electron ionizes a
         ! valence partner drawn from the WHOLE BZ (momentum exchange), so the
         ! partner-population / Pauli factors use the global BZ-averaged active-
@@ -225,7 +234,8 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
                              yn_sbe_eph, sbe_eph_temperature_k, sbe_eph_nu_sat, &
                              sbe_eph_eps0_ev, sbe_eph_n, sbe_search_sigma_e_ev, &
                              yn_sbe_bgr_threshold, sbe_bgr_n_gate, sbe_bgr_coeff, &
-                             yn_sbe_superres, yn_sbe_eeh, sbe_eeh_nu_sat, epm_material
+                             yn_sbe_superres, yn_sbe_eeh, sbe_eeh_nu_sat, epm_material, &
+                             yn_sbe_auger, sbe_auger_c_cm6s, sbe_auger_n_gate_cm3
     use sbe_superres_ssbe, only: bose_factor, s_material_params, &
                                  get_material_params, MAT_SUPPORTED
     use math_constants, only: pi
@@ -401,6 +411,16 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     ! k-local impact-ionization channel (optional, yn_sbe_impact_ionization)
     ! =========================================================================
     sbe%occ_max = merge(1d0, 2d0, yn_sbe_spinor == 'y')
+
+    ! Active-subspace valence-branch count (gap edge: v1 = nv_act, c1 = nv_act+1
+    ! in energy-ordered active indexing). Needed by BOTH the impact-ionization
+    ! and the Auger channels, so compute it unconditionally here (not inside the
+    ! impact block -- an Auger-only run must still have it set).
+    sbe%nv_act = 0
+    do ib = 1, sbe%n_active_bands
+        if (sbe%active_idx(ib) <= homo_idx) sbe%nv_act = sbe%nv_act + 1
+    end do
+
     sbe%flag_impact = (yn_sbe_impact_ionization == 'y')
     if (sbe%flag_impact .and. .not. mp%ii_ok) &
         call stop_forbidden_channel(epm_material, 'impact ionization (yn_sbe_impact_ionization)')
@@ -442,12 +462,8 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
         if (homo_idx + 1 > gs%nb) stop "impact ionization: no conduction bands"
         sbe%ii_ecbm_au = minval(gs%eigen(homo_idx + 1, :))
         sbe%ii_eg_au   = gs%eg_au
-        ! Valence branches inside the active subspace: v1 = sbe%nv_act,
-        ! c1 = sbe%nv_act + 1 in active (energy-ordered Houston) indexing.
-        sbe%nv_act = 0
-        do ib = 1, sbe%n_active_bands
-            if (sbe%active_idx(ib) <= homo_idx) sbe%nv_act = sbe%nv_act + 1
-        end do
+        ! (sbe%nv_act -- the gap-edge valence-branch count -- is set
+        !  unconditionally above, before the channel blocks.)
         ! Sublattice resolution is enabled iff the unfolding weights were
         ! loaded (gs%unfold_w not all zero). When absent, the channel falls
         ! back to the original folded (single-pool) treatment.
@@ -601,6 +617,41 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
             write(*, '(a)') '# carrier-carrier (e-e/e-h) thermalization (Part F) enabled:'
             write(*, '(a,ES12.5,a)') '#   nu_cc = ', sbe%eeh_nu_au, &
                 ' 1/a.u.t; CPTP relax to Fermi-Dirac (conserves number+energy)'
+        end if
+    end if
+
+    ! =========================================================================
+    ! Auger recombination (Sec 13): density-gated, number-conserving CPTP
+    ! channel. A conduction electron recombines with a valence hole and the
+    ! released gap energy promotes a second conduction electron to a hot state
+    ! (gap-edge mean-field closure). Per-carrier rate gamma = C n^2 (R = C n^3).
+    ! Provenance-gated: the material must supply a cited C (CdS: Haury 1998).
+    ! =========================================================================
+    sbe%flag_auger = (yn_sbe_auger == 'y')
+    if (sbe%flag_auger) then
+        if (.not. mp%found) call stop_unknown_material(epm_material, 'Auger (yn_sbe_auger)')
+        if (.not. mp%auger_ok .and. sbe_auger_c_cm6s <= 0d0) &
+            call stop_forbidden_channel(epm_material, 'Auger recombination (yn_sbe_auger, no cited C)')
+        ! C [cm^6/s]: explicit override, else the cited material default.
+        if (sbe_auger_c_cm6s > 0d0) then
+            sbe%auger_c_au = sbe_auger_c_cm6s * (au_fs * 1d-15)
+        else
+            sbe%auger_c_au = mp%auger_c_cm6s * (au_fs * 1d-15)
+        end if
+        if (sbe_auger_n_gate_cm3 > 0d0) then
+            sbe%auger_n_gate_cm3 = sbe_auger_n_gate_cm3
+        else
+            sbe%auger_n_gate_cm3 = mp%auger_n_gate_cm3
+        end if
+        sbe%auger_eg_au = gs%eg_au
+        if (homo_idx + 1 > gs%nb) stop "Auger: no conduction bands"
+        if (lprint) then
+            write(*, '(a)') '# Auger recombination (Sec 13, density-gated CPTP) enabled:'
+            write(*, '(a,ES12.5,a,ES12.5,a)') '#   C = ', &
+                sbe%auger_c_au / (au_fs * 1d-15), ' cm^6/s, n_gate = ', &
+                sbe%auger_n_gate_cm3, ' cm^-3'
+            write(*, '(a,ES12.5,a)') '#   E_g = ', sbe%auger_eg_au, &
+                ' Ha; number-conserving (recombination + hot-carrier promotion)'
         end if
     end if
 
@@ -842,6 +893,11 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     ! running excited-carrier density (global reduction; once per step).
     if (sbe%flag_bgr) call update_bgr_threshold(sbe, gs)
 
+    ! Auger recombination (Sec 13): the per-carrier rate gamma = C n^2 needs the
+    ! running excited-carrier density n(t); compute it once per step (same global
+    ! reduction as BGR) and store it for apply_auger_recombination.
+    if (sbe%flag_auger) call update_excited_density(sbe, gs)
+
     ! Nonlocal impact ionization (Part C4): gather the BZ-averaged active-band
     ! occupations once per step (the valence partner is sourced from anywhere).
     if (sbe%flag_nl_ii .and. nba > 0) call gather_global_occupation(sbe, gs)
@@ -907,7 +963,7 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
             ! Kuhn-Zurek dephasing and/or impact-ionization channels, both in
             ! the same Houston basis (one shared ZHEEV), tau = +h/2 > 0
             !-----------------------------------------------------------------
-            if (sbe%flag_decoh .or. sbe%flag_impact .or. sbe%flag_eph .or. sbe%flag_eeh) then
+            if (sbe%flag_decoh .or. sbe%flag_impact .or. sbe%flag_eph .or. sbe%flag_eeh .or. sbe%flag_auger) then
                 call build_HVG(nba, eigen_active, p_active, Ac_begin, HVG)
                 if (sbe%flag_coulomb) HVG = HVG + sbe%sigma_hf(:, :, ik)
                 call houston_dissipate(sbe, nba, rho_a, HVG, p_active, Ac_begin, X_a, &
@@ -936,7 +992,7 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
             !-----------------------------------------------------------------
             ! Step 3: D(h/2) -- Strang dissipative half-step (see Step 1)
             !-----------------------------------------------------------------
-            if (sbe%flag_decoh .or. sbe%flag_impact .or. sbe%flag_eph .or. sbe%flag_eeh) then
+            if (sbe%flag_decoh .or. sbe%flag_impact .or. sbe%flag_eph .or. sbe%flag_eeh .or. sbe%flag_auger) then
                 call build_HVG(nba, eigen_active, p_active, Ac_end, HVG)
                 if (sbe%flag_coulomb) HVG = HVG + sbe%sigma_hf(:, :, ik)
                 call houston_dissipate(sbe, nba, rho_a, HVG, p_active, Ac_end, X_a, &
@@ -1048,6 +1104,27 @@ subroutine update_bgr_threshold(sbe, gs)
         sbe%ii_eth_au = sbe%ii_eth0_au
     end if
 end subroutine update_bgr_threshold
+
+
+! Running excited-carrier density n(t) [cm^-3] for the Auger rate (same global
+! reduction / normalization as update_bgr_threshold). Stored in sbe%n_exc_cm3.
+subroutine update_excited_density(sbe, gs)
+    use communication, only: comm_summation
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info),      intent(in)    :: gs
+    integer :: ik, ib
+    real(8) :: loc, glob
+
+    loc = 0d0
+    do ik = sbe%ik_min, sbe%ik_max
+        do ib = sbe%homo_idx + 1, sbe%nb
+            loc = loc + real(sbe%rho(ib, ib, ik)) * gs%kweight(ik)
+        end do
+    end do
+    call comm_summation(loc, glob, sbe%icomm)
+    sbe%n_exc_cm3 = (glob / sum(gs%kweight)) / gs%volume * sbe%au_dens_cm3
+end subroutine update_excited_density
 
 
 ! Build the instantaneous velocity-gauge Hamiltonian in the active subspace:
@@ -1392,7 +1469,7 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
     ! the Pauli factors (a built-in predictor-corrector). Each sub-step is CPTP,
     ! so positivity is never threatened. m_sub = 1 unless e-ph is active, so
     ! impact-ionization-only runs are byte-for-byte unchanged.
-    if (sbe%flag_impact .or. sbe%flag_eph .or. sbe%flag_eeh) then
+    if (sbe%flag_impact .or. sbe%flag_eph .or. sbe%flag_eeh .or. sbe%flag_auger) then
         ! field-aware Houston-branch sublattice weights for the unfolding-aware
         ! impact ionization (computed once; field-frozen over the half-step)
         if (sbe%flag_impact .and. sbe%flag_unfold_ii) then
@@ -1414,6 +1491,9 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
             m_sub = max(m_sub, min(20, max(1, ceiling(10d0 * sbe%eph_numax_au * tau))))
         if (sbe%flag_eeh) &
             m_sub = max(m_sub, min(20, max(1, ceiling(10d0 * sbe%eeh_nu_au * tau))))
+        if (sbe%flag_auger) &
+            m_sub = max(m_sub, min(20, max(1, ceiling(10d0 * &
+                    sbe%auger_c_au * sbe%n_exc_cm3**2 * tau))))
         tau_sub_d = tau / dble(m_sub)
         do isub_d = 1, m_sub
             if (sbe%flag_impact) &
@@ -1423,6 +1503,8 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
                 call apply_eph_relaxation(sbe, nba, t2, evals, Ac, tau_sub_d)
             if (sbe%flag_eeh) &
                 call apply_carrier_carrier(sbe, nba, t2, evals, tau_sub_d)
+            if (sbe%flag_auger) &
+                call apply_auger_recombination(sbe, nba, t2, evals, tau_sub_d)
         end do
     end if
 
@@ -1752,6 +1834,69 @@ subroutine apply_carrier_carrier(sbe, nba, rho_ad, evals, tau)
     real(8),                  intent(in)    :: evals(nba), tau
     call carrier_carrier_relax(nba, rho_ad, evals, sbe%occ_max, sbe%eeh_nu_au, tau)
 end subroutine apply_carrier_carrier
+
+
+!=============================================================================
+! Auger recombination (Sec 13): density-gated, number-conserving CPTP channel.
+! Gap-edge mean-field closure: a conduction electron (lowest CB branch ic1)
+! recombines with a valence hole (top VB branch iv1) -- destroying an e-h pair
+! -- and the released gap energy E_g promotes a SECOND ic1 electron to the
+! conduction state ic_hot energy-matched to E(ic1)+E_g. Both transfers run at
+! the per-carrier Auger rate gamma = C n^2 (so the recombination rate is C n^3),
+! gated to switch on only above n_gate. Realized as two amplitude-damping maps
+! (amp_damp_channel), each trace-preserving -> TOTAL carrier number conserved;
+! the Pauli factors (CB electron present, VB hole present, hot target empty) are
+! normalized by occ_max and clamped to [0,1], so the map is exactly CPTP and
+! recombination stops as the holes fill (hv1 -> 0). Energy is conserved to the
+! mean-field (HF-factorization) order, like the impact-ionization channel.
+!
+! NOTE: this acts on the HOUSTON/adiabatic (real-carrier) populations, not the
+! virtual driving polarization, and the rate is C n^2 with the tiny cited C
+! (CdS 2e-30 cm^6/s) -- so Auger is a RARE event that only becomes visible at
+! very high real carrier density / strong fields. Its job here is to be present
+! and exactly CPTP, not to dominate the dynamics.
+! [Auger coeff Haury PRB 57, 11513 (1998); GKLS: Taj-Rossi PRA 78, 052113 (2008)]
+!=============================================================================
+subroutine apply_auger_recombination(sbe, nba, rho_ad, evals, tau)
+    use sbe_superres_ssbe, only: amp_damp_channel
+    implicit none
+    type(s_sbe_bloch_solver), intent(in)    :: sbe
+    integer,                  intent(in)    :: nba
+    complex(8),               intent(inout) :: rho_ad(nba, nba)
+    real(8),                  intent(in)    :: evals(nba)
+    real(8),                  intent(in)    :: tau
+
+    integer :: iv1, ic1, ic_hot, a
+    real(8) :: gamma0, f, etgt, fc1, hv1, bhot, g_rec, g_prom
+
+    if (sbe%nv_act < 1 .or. sbe%nv_act >= nba) return
+    if (sbe%n_exc_cm3 < sbe%auger_n_gate_cm3) return        ! density gate
+    iv1 = sbe%nv_act          ! top valence branch (energy-ordered)
+    ic1 = sbe%nv_act + 1      ! lowest conduction branch
+    f = sbe%occ_max
+
+    ! per-carrier Auger rate gamma = C n^2 [1/a.u.t]
+    gamma0 = sbe%auger_c_au * sbe%n_exc_cm3**2
+    if (gamma0 * tau < 1d-14) return
+
+    ! hot-carrier target: conduction state energy-matched to E(ic1) + E_g
+    etgt = evals(ic1) + sbe%auger_eg_au
+    ic_hot = ic1
+    do a = ic1, nba
+        if (abs(evals(a) - etgt) < abs(evals(ic_hot) - etgt)) ic_hot = a
+    end do
+
+    ! Pauli factors (normalized by occ_max, clamped to [0,1])
+    fc1  = min(max(real(rho_ad(ic1,   ic1  )) / f, 0d0), 1d0)   ! CB electron present
+    hv1  = min(max(1d0 - real(rho_ad(iv1, iv1)) / f, 0d0), 1d0) ! VB hole present
+    bhot = min(max(1d0 - real(rho_ad(ic_hot, ic_hot)) / f, 0d0), 1d0) ! hot target empty
+
+    g_rec  = gamma0 * fc1 * hv1            ! recombination: needs CB e- + VB hole
+    g_prom = gamma0 * fc1 * hv1 * bhot     ! promotion: + hot target empty (Pauli)
+    if (ic_hot /= ic1) &
+        call amp_damp_channel(nba, rho_ad, ic1, ic_hot, g_prom, tau)
+    call amp_damp_channel(nba, rho_ad, ic1, iv1, g_rec, tau)
+end subroutine apply_auger_recombination
 
 
 ! Exact finite-time map of a single Lindblad jump channel L = sqrt(Gamma)|f><i|

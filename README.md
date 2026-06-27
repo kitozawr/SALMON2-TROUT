@@ -162,6 +162,9 @@ These `&sbe` parameters add Silicon support and the optional nonlocal CPTP dissi
 | `sbe_eph_eps0_ev` | eV | `0.8d0` | Onset $\varepsilon_0$ of the rate saturation $\nu(\varepsilon)=\nu_{\rm sat}[1-e^{-(\varepsilon/\varepsilon_0)^n}]$. |
 | `sbe_eph_n` | — | `2` | Saturation shape exponent $n$. |
 | `yn_sbe_eeh` | — | `'n'` | `'y'`: **carrier–carrier** (e-e/e-h) CPTP thermalization to a Fermi–Dirac (conserves number + energy). |
+| `yn_sbe_auger` | — | `'n'` | `'y'`: **Auger recombination** (density-gated, number-conserving CPTP; Sec 13). Per-carrier rate $\gamma=C n^2$ (so $R=C n^3$), inert below $n_{\rm gate}$. Acts on real (Houston) carriers ⇒ a *rare* event. Provenance-gated: cited $C$ required (CdS only). |
+| `sbe_auger_c_cm6s` | cm⁶/s | `-1.0d0` | Auger coefficient $C$. `≤ 0` ⇒ material default (CdS `2.0e-30` [Haury 1998]). |
+| `sbe_auger_n_gate_cm3` | cm⁻³ | `-1.0d0` | Activation density $n_{\rm gate}$. `≤ 0` ⇒ material default (CdS `1e18` [Shah 1986]). |
 | `sbe_eeh_nu_sat` | s⁻¹ | `-1.0d0` | Carrier-carrier rate scale. `≤ 0` ⇒ `1.0e14` default (both materials). |
 | `yn_sbe_bgr_threshold` | — | `'n'` | `'y'`: density-dependent **band-gap-renormalized** II threshold $E_{\rm th}(t)=E_{\rm th0}-\lvert K\,n^{1/3}\rvert$ (needs impact ionization on). |
 | `sbe_bgr_n_gate` | cm⁻³ | `5.0d18` | Apply the BGR shift only above this carrier density. |
@@ -192,6 +195,7 @@ Enable one block at a time and compare against this baseline. The table gives th
 | **Impact ionization** | `yn_sbe_impact_ionization = 'y'` | `'n'` (default) | *auto:* `stobbe_quartic`, $a=4$, $E_{\rm th}=2.1$ | *auto:* `keldysh_quadratic`, $a=2$ ($4.6$ full-band), $E_{\rm th}=1.1$ | *auto:* `keldysh_quadratic`, $E_{\rm th}=3.6$; **must set `sbe_ii_prefactor`** (fit param) |
 | **Electron–phonon** | `yn_sbe_eph = 'y'` (+ `&epm epm_material`) | `'n'` (default) | *auto:* Fröhlich-LO 36 meV + 5 intervalley, `ν_sat=1.0e14` | *auto:* 6 intervalley g/f, `ν_sat=1.3e14` | *auto:* Fröhlich-LO 38 meV, `ν_sat=2.9e13` (=α·ω_LO) |
 | **Carrier–carrier (e-e/e-h)** | `yn_sbe_eeh = 'y'` | `'n'` (default) | `ν_cc=1e14` (default), screening *auto* $\varepsilon=12.9$ | `ν_cc=1e14` (default), screening *auto* $\varepsilon=11.7$ | ⛔ **forbidden** (no cited rate) |
+| **Auger recombination** | `yn_sbe_auger = 'y'` | `'n'` (default) | ⛔ (not cited) | ⛔ (not cited) | *auto:* $C=2.0\times10^{-30}$ cm⁶/s, $n_{\rm gate}=10^{18}$ cm⁻³ |
 | **Coulomb HF** | `yn_sbe_coulomb = 'y'` | `'n'` (default) **or** `sbe_coulomb_strength=0` | *auto:* $\varepsilon=12.9$ | *auto:* $\varepsilon=11.7$ | *auto:* $\varepsilon=8.9$ |
 | **BGR-shifted II threshold** | `yn_sbe_bgr_threshold = 'y'` (needs II on) | `'n'` (default) | `sbe_bgr_n_gate=5e18`, `sbe_bgr_coeff=1.9e-8` | same defaults (tune $K$) | ⛔ (needs II) |
 | **HF sublattice projection** | `yn_sbe_hf_sublattice_proj = 'y'` (default; needs Coulomb + unfold) | `'n'` | applies to folded cubic cell | applies to folded cubic cell | n/a |

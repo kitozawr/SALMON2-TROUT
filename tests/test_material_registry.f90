@@ -95,6 +95,13 @@ program test_material_registry
     call chk('CdS II threshold = 1.5 Eg', cds%ii_threshold_ev, 3.6d0)
     ! II prefactor is a fit parameter (md): registry holds a sentinel, not a value
     if (cds%ii_prefactor > 0d0) call bad('CdS II prefactor must be a sentinel (fit parameter)')
+    ! Auger recombination IS cited for CdS (Haury 1998 C; Shah 1986 n_gate)
+    if (.not. cds%auger_ok)  call bad('CdS Auger should be enabled (Haury 1998)')
+    call chk('CdS Auger C = 2.0e-30 cm^6/s', cds%auger_c_cm6s, 2.0d-30, 1d-40)
+    call chk('CdS Auger n_gate = 1e18 cm^-3', cds%auger_n_gate_cm3, 1.0d18, 1d8)
+    ! GaAs/Si Auger NOT cited/enabled (effect matrix: still 'pending')
+    if (ga%auger_ok) call bad('GaAs Auger must be forbidden (not cited)')
+    if (si%auger_ok) call bad('Si Auger must be forbidden (not cited)')
 
     ! every cited phonon table's weights must be positive (normalizable)
     if (sum(ga%eph_wraw(1:ga%eph_nph)) <= 0d0) call bad('GaAs eph weights non-positive')
