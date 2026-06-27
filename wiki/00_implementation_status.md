@@ -2,7 +2,7 @@
 
 **Read this first on every resume.** It records what is done, what is next, key decisions, and the test inventory. Update it in the same commit as any code change.
 
-Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #44 into `develop-2.0.0`); (2) new materials — **GaAs, Si/Si_cb, wurtzite CdS, monolayer graphene** — each a validated Python EPM reference + cited CPTP dissipation channels. The maintainer drives one bounded increment per session ("continue"). Test grid: **4×4×4 (or 5×5×5), scalar (no spinor)**. Current test count: **12/12** (`python3 tests/run_all.py`).
+Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #44 into `develop-2.0.0`); (2) new materials — **GaAs, Si/Si_cb, wurtzite CdS, monolayer graphene** — each a validated Python EPM reference + cited CPTP dissipation channels. The maintainer drives one bounded increment per session ("continue"). Test grid: **4×4×4 (or 5×5×5), scalar (no spinor)**. Current test count: **13/13** (`python3 tests/run_all.py`).
 
 ---
 
@@ -58,6 +58,7 @@ Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #
 - **CdS (wurtzite P6₃mc):** EPM band structure VALIDATED; dissipation channels CITED & enabled (see effect-support matrix in wiki/02). Cell = orthorhombic `al(1:3)=(a,a√3,c)` (not a single cubic constant). Form factors are the REAL cited **wurtzite** values from **Bergstresser & Cohen, Phys. Rev. 164, 1069 (1967), Table II** (LOCAL potential — spherical atomic potentials, no nonlocal term ⇒ `rvnl_tm=0`; no cited CdS nonlocal parameter exists, so none is fabricated). **Validated:** direct gap at Γ converges to **2.55 eV vs BC1967's 2.58 eV** (|Δ|≈0.03 eV); structure factors match Table II (002/101/102). Two bugs that gave 13 eV were fixed: (1) potential normalized by **total atoms/cell** (1/n, the BC1967 "volume per atom" normalization — not per species); (2) use the **wurtzite** Table II form factors, not the zinc-blende anchors. **Folding to the SBE cell is EXACT:** the orthorhombic supercell (8 atoms, the al-vector cell) block-diagonalizes over the 2 cosets (off-coset |H|≈8e-17, analogue of the cubic 4-fold FCC folding) and reproduces the same 2.54 eV gap; coset 0 = Γ_hex (direct gap), coset 1 = zone-edge (6.2 eV). **CdS dissipation — three CITED & enabled, carrier-carrier FORBIDDEN:** enabled = Fröhlich polar-optical e-ph (primary; ħω_LO=38 meV [Raman], ν_sat=α·ω_LO=2.89e13 s⁻¹ from α=0.5 [cyclotron]), Coulomb (**ε₀=8.9** [Berlincourt 1963]), impact ionization (E_th=1.5·E_g=3.6 eV; **prefactor is a fit parameter** → the run aborts unless `sbe_ii_prefactor` is set). **Carrier-carrier e-e is FORBIDDEN (`eeh_ok=.false.`)** — the strict-provenance resolution of the earlier inconsistency: there is **no cited CdS e-e rate**, so the FD-thermalization channel would borrow the generic 1e14 s⁻¹ scale cited only for GaAs/Si (Goodnick-Lugli; Fischetti-Laux), which the provenance rule forbids. The CdS literature only fixes a *timescale* (sub-100fs @ n≥1e18 [Shah 1986; Elsaesser 1991]) and an *Auger coefficient* (C=2.0e-30 cm⁶/s [Haury 1998]) — both belong to the **density-gated Auger Lindblad channel (wiki Sec 13), which is NOT yet implemented** (the constants `CDS_AUGER_C`/`CDS_EE_ACT_N` are declared but unused). A user with their own rate may opt in via `sbe_eeh_nu_sat` (same escape hatch as the II prefactor). Piezoelectric/deformation-acoustic cited but not yet SBE channels. `epm_wurtzite_cds.py`, `tests/test_wurtzite_cds_epm.py`.
 - **Material registry (single source of per-material constants):** `get_material_params(name)` in `sbe_superres_ssbe.f90` returns one `s_material_params` struct (dielectric ε0/ε∞, II fit form/exponent/prefactor/threshold, e-ph phonon table + ν_sat, lattice, diamond flag) assembled from the cited module constants. Every channel auto-selects through it; the namelist defaults are sentinels (`sbe_ii_form='auto'`, `sbe_ii_exponent/prefactor/threshold ≤ 0`, `sbe_coulomb_epsilon ≤ 0`) that resolve to the material value, and any explicit namelist value overrides. GaAs resolves to the exact legacy numbers (byte-for-byte). Unknown material + a material-dependent channel ⇒ `error stop` with the supported list. **Adding a material = one `case` block + its name in `MAT_SUPPORTED`** — no edits scattered across channels. (EPM form factors are the other per-material table, already case-based in `epm_cohen_bergstresser.f90`.)
 - **Fortran MPI EPM == Python reference (cubic), VERIFIED by build+run:** the Python EPM is the source of truth; the in-SALMON `src/epm` solver was using the **FCC primitive cell** (4 valence bands, Cartesian k.data, an a.u.² cutoff) and so did NOT reproduce the Python's **simple-cubic 8-atom supercell + FCC-in-cubic parity band-folding** (16 valence bands, reduced k.data, `(2π/a)²`-unit cutoff). Three concrete mismatches at the same `epm_pw_cutoff_ry`: 181 vs 171 PW, gap 1.43 vs 1.38 eV at Γ, FCC-grid vs cubic-grid k-points. **Fixed** by switching the Fortran to the simple-cubic supercell (`cb_lattice_vectors_sc`), the integer-shell cutoff, the explicit parity selection rule in `build_hamiltonian`, and reduced-coordinate `k.data`. **Verified**: built SALMON (gfortran+OpenMPI, `-fallow-argument-mismatch`) and diffed `theory='epm'` output vs `epm_gaas_reference.py` for **GaAs and Si (scalar)** — k-points exact, band energies to **5e-11 Ha**, occupations identical, valence/optical momentum to **~1e-10**; the only residual is the basis-arbitrary degenerate-subspace coupling of the single top (truncation-boundary) conduction band, which differs even between LAPACK/scipy and is physically irrelevant. Contract locked by `tests/test_epm_cubic_folding_contract.py`. **Spinor and non-cubic (CdS/graphene) Fortran EPM still TODO** — use the Python refs there.
+- **CdS + graphene Python EPM now emit folded scalar GS files (EPM→SBE closed, VERIFIED end-to-end):** the Python refs (`epm_wurtzite_cds.py`, `epm_graphene.py`) gained a `main_gs()` that builds the MP grid, diagonalizes the FOLDED supercell Hamiltonian, and writes `SYSNAME_k/_eigen/_tm.data` via a shared writer `epm_io.py` (byte-compatible with gs_info_ssbe; reduced-k, Hartree, rvnl_tm=0 local). **CdS:** orthorhombic 8-atom cell (al=a,a√3,c), nelec=32/nstate=32, 2-fold folded; ran in the SBE binary (clean 20-step run, trace=32 conserved, field-driven current). **graphene:** NEW rectangular 4-atom cell + 2-fold fold (PART G2), al=(a,√3a,vacuum), nelec=4/nstate=8; ran in the SBE (trace=4 conserved, in-plane current). Two graphene gotchas fixed: (1) **structure factor must be normalized by the number of primitive cells** (`struct_norm`) — the supercell sum over 4 atoms was 2× too strong vs the validated 2-atom primitive, so the folded bands didn't match; with `struct_norm=2` the rect folded-K reproduces the primitive Dirac energy 1.034 eV exactly and the cone stays gapless. (2) **It is a minimal π-model** (Ramanujam 3 form factors → Dirac cone = lowest band pair, 1 π e⁻/atom), so nelec=4 (not 16) puts the Fermi level at the Dirac point. **Fortran `src/epm` is cubic-only — NOT used for CdS/graphene.** Unfold map (`_unfold.data`) still pending (needs the SBE 4→N coset reader). `tests/test_epm_folded_gs.py`.
 - **VG band budget ≠ PW cutoff:** the band count N_b carried into the dynamics is a correctness axis SEPARATE from the EPM plane-wave cutoff, and the Houston/adiabatic basis does NOT fix an insufficient N_b — it diagonalizes the already-truncated H_VG^(N_b), inheriting the truncation error (Hylleraas-Undheim-MacDonald). Monitor `P_top = max_k ρ̃_{N_b,N_b}` (criterion a): the real-time solver warns on the **error channel** and **continues** when P_top > 1e-3 (it does not stop — the user re-runs with more bands + an N_b convergence study). Re-verify N_b for every new material / driver wavelength; the converged value does not transfer. See wiki/06.
 - **a.u. conversion audit (verified):** rates s⁻¹→a.u.⁻¹ via `×(au_fs·1e-15)`; energies eV→Ha via `/au_ev`; `mev_to_ha=E·1e-3/au_ev`; deformation potentials `d_evcm_to_au=D·BOHR_CM/au_ev`, `d_evang_to_au=D·BOHR_ANG/au_ev`; mass density `rho_gcm3_to_au=ρ·BOHR_CM³/ME_G`; carrier density a.u.⁻³→cm⁻³ via `1e24/BOHR_ANG³`. The e-ph `eph_wrel=D²/ħω` is normalized to a dimensionless per-mode weight, so GaAs (eV/Å) vs Si (1e8 eV/cm) deformation-potential units only need within-material consistency (the absolute scale is `ν_sat`).
 
@@ -83,6 +84,7 @@ Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #
 | `test_material_registry.f90` | material registry + provenance gates | GaAs/Si all gates `.true.`; CdS gates (e-ph/Coulomb/II `.true.`, **e-e `.false.` forbidden**, II prefactor sentinel); unknown→not-found |
 | `test_wurtzite_cds_epm.py` | CdS EPM geometry + cited FFs | orthorhombic cell from al, 8 atoms (4 Cd+4 S), Hermitian H, broken inversion, exact BC1967 Table II anchors; band solve reported NOT-yet-validated (not asserted) |
 | `test_epm_cubic_folding_contract.py` | Fortran↔Python EPM convention (cubic) | simple-cubic basis count (171 PW @ cutoff 11.1), exact 4-coset (FCC-in-cubic) folding block-diagonality, folded spectrum = union of coset spectra, reduced-k MP grid (first pt −3/8) — the contract the Fortran `src/epm` solver must mirror |
+| `test_epm_folded_gs.py` | CdS+graphene folded GS emission (Python) | epm_io writer round-trip + non-orthogonal-cell rejection; graphene rect 4-atom 2-fold exact + gapless folded Dirac + struct_norm reproduces primitive Dirac; CdS/graphene main_gs band count, occupations (2/filled band), reduced-k, files written |
 | _(add per increment)_ | | |
 
 End-to-end smoke (manual): scalar GaAs 4³, `yn_sbe_superres='y'` + `yn_sbe_eph='y'`
@@ -110,17 +112,22 @@ generate those GS with the Python references.
 | GaAs | `epm_gaas_reference.py` | CB 1966 | ✅ 4-fold FCC (exact) | ✅ emitted (full EPM→SBE pipeline) |
 | Si (Kunikiyo, default) | `epm_si_reference.py` | gap 1.059 eV, CBM 0.850 | ✅ 4-fold FCC (reuses GaAs) | ✅ emitted (full pipeline) |
 | Si_cb (Cohen-Bergstresser) | `epm_si_reference.py --variant Si_cb` | gap 0.818 eV, CBM 0.850 | ✅ 4-fold FCC | ✅ emitted |
-| CdS | `epm_wurtzite_cds.py` | gap 2.55 vs 2.58 eV (BC1967) | ✅ 2-fold orth←hex, **verified exact** (off-coset \|H\|≈8e-17) | ❌ **NOT wired** (folding verified in the Python module only; no CdS `_unfold.data`/GS emission) |
-| graphene | `epm_graphene.py` | zero gap at K, v_F 9.6e5, Γ −7.78, M −2.70 | ❌ **NO folding** — Config-A primitive cell only (the simpler task; G2 orthorhombic 4-atom + 2-fold not done) | ❌ NOT wired |
+| CdS | `epm_wurtzite_cds.py` | gap 2.55 vs 2.58 eV (BC1967) | ✅ 2-fold orth←hex, **verified exact** (off-coset \|H\|≈8e-17) | ✅ **Python emits eigen/tm/k** (folded orthorhombic, scalar); **ran end-to-end in the SBE** (trace=32 conserved). `_unfold.data` pending |
+| graphene | `epm_graphene.py` | zero gap at K, v_F 9.6e5, Γ −7.78, M −2.70 | ✅ **rectangular 4-atom + 2-fold, verified exact** (off-coset=0; reproduces primitive Dirac) | ✅ **Python emits eigen/tm/k** (folded rectangular, π-model, scalar); **ran end-to-end in the SBE** (trace=4 conserved). `_unfold.data` pending |
 
-**HONEST status (do not overclaim):** only GaAs/Si have the **complete EPM→SBE
-pipeline** (folding + GS-file emission). CdS has the **folding implemented and
-verified exact** but it is NOT yet plumbed into the SBE (no `_unfold.data`, no
-eigen/tm/k emission) — it is at the band+folding validation stage. **graphene
-did the SIMPLER task**: primitive-cell band validation, **no folding** (PART G2
-not implemented), and the prompt's "skip folding if the SBE accepts a
-non-orthogonal cell" shortcut was taken WITHOUT verifying the SBE actually
-accepts the hexagonal non-orthogonal cell.
+**HONEST status:** **all four materials now emit SBE GS files and run in the
+SBE.** GaAs/Si via the Fortran `theory='epm'` path (verified == Python) and the
+Python ref; **CdS and graphene via the Python references** on their folded
+supercells (CdS orthorhombic 2-fold; graphene rectangular 4-atom 2-fold — both
+verified exact and both ran end-to-end in the SBE binary with trace conserved).
+**The Fortran `src/epm` solver is cubic-only and is NOT ready for CdS/graphene**
+— use the Python refs for those. Still pending for the 2-fold materials: the
+band-**unfolding** map (`_unfold.data`), which needs the SBE reader generalized
+from the hardcoded 4 cosets to N (gs_info_ssbe read_unfold_data + the
+bloch_solver unfold loops); the spinor Fortran path; and the Auger Lindblad
+channel. **graphene is a minimal π-model** (Ramanujam 3 form factors): Dirac
+cone = lowest band pair, 1 π e⁻/atom → 4-atom cell uses nelec=4, nstate=8,
+occ 2/π-band, Fermi at the Dirac point (not a full 4-electron valence model).
 
 **Si vs Si_cb:** identical machinery (diamond, V^A≡0, a=10.26 Bohr, 4-fold fold);
 ONLY the V^S triplet differs (Kunikiyo vs CB). See README "Supported materials".
@@ -181,23 +188,24 @@ Branch `develop-2.0.0` (merged from PR #44). Order of priority per the maintaine
      (Auger/CM, no-Kuhn-Zurek policy G6) or the **Auger Lindblad** (Sec 13 is in
      wiki/02 only).
 
-6. **GRAPHENE FOLDING (G2) — graphene EPM is the SIMPLER task so far.** Current
-   `epm_graphene.py` is Config-A primitive-cell ONLY (Dirac cone validated), NO
-   folding. To bring it level with CdS:
-   (a) **FIRST check whether the SBE accepts a NON-ORTHOGONAL (hexagonal) cell**
-       (G2.0). If YES → use the 2-atom hexagonal primitive cell, skip folding
-       entirely (cleaner). If NO → (b).
-   (b) implement the orthorhombic 4-atom rectangular cell (a × √3a, zigzag x /
-       armchair y), the 2-fold hex→rect fold, the `graphene_unfold.data` map,
-       and assert Dirac fold lands at ⅔ Γ–X (k_x=±0.851 Å⁻¹), block-diagonal to
-       machine precision (mirror `orth_folding_check` in epm_wurtzite_cds.py).
+6. **GRAPHENE FOLDING (G2) — ✅ DONE (rectangular 4-atom cell).** `epm_graphene.py`
+   now has the orthorhombic 4-atom rectangular cell (a × √3a, zigzag x / armchair
+   y), the 2-fold hex→rect fold (`rect_folding_check`: off-coset |H|=0, exact),
+   and the cell reproduces the primitive Dirac cone (gapless) once the structure
+   factor is normalized per primitive cell (`struct_norm`). GS files emit on this
+   folded cell. **Remaining:** the `graphene_unfold.data` MAP (see item 7) — only
+   the folding + GS emission are done, not the inverse unfold map.
 
-7. **WIRE CdS + graphene EPM → SBE GS files.** Only GaAs/Si emit the SBE
-   ground-state data (eigen/tm/k + `_unfold.data`). CdS folding is verified IN
-   THE PYTHON MODULE but NOT plumbed into the SBE: it does not yet write the
-   CdS GS files / unfold map. TODO: have epm_wurtzite_cds.py (and graphene) emit
-   the eigen/tm/k.data + per-material `_unfold.data` in the SBE's read contract
-   (reuse the GaAs writers), so the full EPM→SBE pipeline closes for all 4.
+7. **WIRE CdS + graphene EPM → SBE GS files — ✅ DONE (eigen/tm/k), unfold map
+   pending.** `epm_wurtzite_cds.py` and `epm_graphene.py` now emit
+   `SYSNAME_k/_eigen/_tm.data` on their folded supercells via the shared writer
+   `epm_io.py`; both were **run end-to-end in the SBE binary** (trace conserved).
+   **Still TODO: the `_unfold.data` map for the 2-fold materials.** The SBE
+   reader `gs_info_ssbe::read_unfold_data` (and the `bloch_solver` unfold loops)
+   are hardcoded to **4 FCC cosets**; the CdS/graphene maps are **2-coset**, so
+   emitting them requires generalizing the reader/loops from 4 → N cosets first.
+   Until then, CdS/graphene run WITHOUT unfolded-population output (which is
+   optional — `read_unfold_data` treats a missing map gracefully).
 
 8. Optional refinements (unchanged): inter-k momentum-resolved F/C4 on the ring;
    dynamic LOPC; absolute golden-rule e-ph prefactor; Chefonov Si bleaching run.

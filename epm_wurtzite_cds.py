@@ -34,8 +34,10 @@ at Gamma). Form factors are interpolated onto the hexagonal G-shells from the
 zinc-blende shells of a_ZB = sqrt(2) a_W (BC1967 Sec. II).
 """
 
+import sys
+
 import numpy as np
-from numpy.linalg import eigvalsh
+from numpy.linalg import eigh, eigvalsh
 
 RY_TO_HA = 0.5
 HA_TO_EV = 27.211386245988
@@ -249,7 +251,63 @@ def validate_against_paper(cutoff_ry=12.0, tol_ev=0.1):
     return abs(gap - CDS_GAP_PAPER_EV) <= tol_ev, gap, npw
 
 
-if __name__ == '__main__':
+# =============================================================================
+# SBE ground-state emission (scalar, NO spinor) on the FOLDED orthorhombic cell
+# =============================================================================
+# The SBE runs on the orthorhombic 8-atom al(1:3)=(a,a*sqrt3,c) cell, whose bands
+# are the hexagonal-primitive bands FOLDED 2-fold (verified exact by
+# orth_folding_check). This emits SYSNAME_k/_eigen/_tm.data in the SBE read
+# contract (via epm_io), so theory='sbe' can run CdS end-to-end. The local
+# pseudopotential has no nonlocal velocity term -> rvnl_tm = 0.
+CDS_SYSNAME      = 'CdS'
+CDS_NELEC        = 32           # 8 atoms * 4 valence e-/formula-pair = 32
+CDS_NSTATE       = 32           # 16 valence (folded) + 16 conduction
+CDS_NUM_KGRID    = (4, 4, 4)
+CDS_GS_CUTOFF_RY = 9.0          # |G|^2 [a.u.^2]; 2-fold folding is exact here
+
+
+def main_gs(sysname=CDS_SYSNAME, num_kgrid=CDS_NUM_KGRID, nstate=CDS_NSTATE,
+            nelec=CDS_NELEC, cutoff_ry=CDS_GS_CUTOFF_RY, outdir='./'):
+    """Emit the scalar SBE ground-state files for CdS on the orthorhombic cell."""
+    import epm_io
+    a_au, c_au = CDS_A_ANG * ANG_TO_BOHR, CDS_C_ANG * ANG_TO_BOHR
+    A, B, C = orthorhombic_vectors_au(a_au, c_au)
+    Brec, _ = reciprocal(A, B, C)
+    pos, spec = wurtzite_atoms_orth(a_au, c_au)
+    Gcart, _ = build_pw_basis(Brec, cutoff_ry)
+    npw = len(Gcart)
+    if nstate > npw:
+        raise ValueError(f'nstate={nstate} exceeds npw={npw}; raise cutoff')
+    kpoint, kweight = epm_io.monkhorst_pack(Brec, num_kgrid)
+    nk = kpoint.shape[0]
+    nocc = nelec // 2
+
+    print(f'# EPM CdS (wurtzite, orthorhombic 8-atom cell, 2-fold folded) -- scalar')
+    print(f'#   al(1:3) = {np.round(cds_cell_au(), 4)} Bohr  (a, a*sqrt3, c)')
+    print(f'#   plane waves = {npw}, k-points = {nk}, bands = {nstate}, '
+          f'valence e- = {nelec} (occ 2/band)')
+
+    eigen = np.zeros((nstate, nk))
+    occup = np.zeros((nstate, nk))
+    p_tm = np.zeros((nstate, nstate, 3, nk), dtype=complex)
+    rvnl_tm = np.zeros((nstate, nstate, 3, nk), dtype=complex)   # local -> 0
+    for ik in range(nk):
+        H = build_hamiltonian(kpoint[ik], Gcart, pos, spec)
+        ev, evec = eigh(H)
+        eigen[:, ik] = ev[:nstate]
+        occup[:nocc, ik] = 2.0
+        p_tm[:, :, :, ik] = epm_io.momentum_matrix(kpoint[ik], Gcart, evec[:, :nstate])
+        if (ik + 1) % max(1, nk // 8) == 0 or ik == nk - 1:
+            print(f'#   ... diagonalized k-point {ik + 1}/{nk}')
+
+    b_matrix = np.array(Brec)
+    epm_io.write_epm_gs_files(sysname, outdir, 'CdS', kpoint, b_matrix, kweight,
+                              eigen, occup, p_tm, rvnl_tm,
+                              extra_note='wurtzite orthorhombic 2-fold folded')
+    return eigen, occup
+
+
+def _print_validation():
     print('CdS wurtzite EPM (BC1967 local form factors):')
     print(f'  SBE cell al(1:3) = {np.round(cds_cell_au(),3)} Bohr  (a, a*sqrt3, c)')
     print('  -- hexagonal primitive cell (band validation) --')
@@ -263,3 +321,12 @@ if __name__ == '__main__':
     print(f'     orthorhombic gap@Gamma = {gorth:.3f} eV  (== primitive: folding OK)')
     print(f'     coset0 Gamma_hex gap = {g0:.3f} eV (the direct gap); '
           f'coset1 partner gap = {g1:.3f} eV')
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'validate':
+        _print_validation()            # band/folding validation only (no files)
+    else:
+        _print_validation()
+        print()
+        main_gs()                      # emit the scalar SBE ground-state files
