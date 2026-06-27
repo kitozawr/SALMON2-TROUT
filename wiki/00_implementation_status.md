@@ -185,16 +185,19 @@ Branch `develop-2.0.0` (merged from PR #44). Order of priority per the maintaine
 5. **WIKI COMPLETENESS sweep (audited 2024-restart).** Fixed: wiki/00 line 58
    CdS "all dissipation FORBIDDEN" contradiction; wiki/00 roadmap line; the
    `[md]` shorthand refs in wiki/02 → real source labels; wiki/02 matrix + §12 +
-   §13 are current. **STILL INCOMPLETE (not stale, missing):**
-   - **wiki/04** (config examples) has **no CdS or graphene recipes** — only
-     GaAs/Si + Maxwell-SBE. Add `epm_material='CdS'` (al-vector cell) and
-     `'graphene'` (N×N×1, no-Kuhn-Zurek) recipes.
-   - **wiki/05** (folding/unfolding) documents ONLY the cubic 4-fold FCC fold —
-     add the **CdS 2-fold orth←hex** and the **graphene 2-fold (G2, pending)**
-     coset maps (the 2-fold derivation lives in `epm_wurtzite_cds.py`).
-   - **wiki/01** (physics models) does not yet cover the **graphene channels**
-     (Auger/CM, no-Kuhn-Zurek policy G6) or the **Auger Lindblad** (Sec 13 is in
-     wiki/02 only).
+   §13 are current. **✅ DONE (this doc pass):**
+   - **wiki/04** (config examples) now has **CdS and graphene recipes** (Python-EPM
+     workflow, al-vector cells), the Auger params (`yn_sbe_auger`,
+     `sbe_auger_c_cm6s`, `sbe_auger_n_gate_cm3`), `epm_material` extended to
+     CdS/graphene with the Python-reference note, and the unfold/bandpath plotting.
+   - **wiki/05** (folding/unfolding) now has §6 (**CdS 2-fold orth←hex** +
+     **graphene 2-fold rect←hex**) and §7 (the **N-coset unfold** generalization,
+     4 cubic / 2 wurtzite-rectangular).
+   - **wiki/01** (physics models) now has §12 (**Auger recombination** CPTP
+     Lindblad), the e-ph/eeh gate-fix note (§6), the carrier-carrier ✅ status, and
+     the **occ_max Pauli normalization** note (§8). STILL missing: the graphene
+     dissipation channels (e-ph E2g/A1', gapless-CM Auger, no-Kuhn-Zurek G6) — they
+     await the graphene registry entry (item 3).
 
 6. **GRAPHENE FOLDING (G2) — ✅ DONE (rectangular 4-atom cell).** `epm_graphene.py`
    now has the orthorhombic 4-atom rectangular cell (a × √3a, zigzag x / armchair

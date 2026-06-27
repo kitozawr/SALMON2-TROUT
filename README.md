@@ -7,7 +7,7 @@ CPTP Lindblad dissipation for strong-field THz/MIR physics.
 
 ## Features
 - CF4/Magnus 4th-order unitary propagator
-- CPTP Lindblad channels: e-ph, e-e, impact ionization
+- CPTP Lindblad channels: e-ph, e-e, impact ionization, Auger recombination
 - Systolic ring MPI for nonlocal collision integrals
 - Materials: Si, GaAs, CdS (wurtzite), Graphene (2D)
 - HHG with realistic scattering-limited coherence

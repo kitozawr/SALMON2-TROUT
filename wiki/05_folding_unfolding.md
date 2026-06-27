@@ -1,6 +1,6 @@
 # Band Folding & Unfolding
 
-> Why the cubic-cell representation folds the primitive bands, why the folding is exact, how it is unfolded, and why it matters for Hartree-Fock. Applies identically to GaAs (zincblende) and Silicon (diamond) — both FCC. Folding/unfold pipeline ✅ implemented; HF sublattice projection (§4) 🚧 Part E.
+> Why a conventional-cell representation folds the primitive bands, why the folding is exact, how it is unfolded, and why it matters for Hartree-Fock. The **cubic 4-fold** fold (§1–5) applies identically to GaAs (zincblende) and Silicon (diamond) — both FCC. The **2-fold** folds (§6) cover wurtzite CdS (orthorhombic←hexagonal) and monolayer graphene (rectangular←hexagonal); the unfold pipeline is generalized from 4 to **N cosets** (§7). Folding/unfold pipeline ✅ implemented for all four; HF sublattice projection (§4) wired for the cubic 4-fold path.
 
 ## 1. The folding ✅
 The conventional cubic 8-atom cell is a supercell of 4 primitive FCC cells. The MP-grid band plot shows the primitive bands **folded 4-fold**: every cubic k-point carries the states of 4 primitive BZ points, and the conduction manifold appears as 4 overlaid copies of CB1/CB2/CB3. These dense crossings are an artifact of the supercell representation, not physics. [Popescu & Zunger, PRB 85, 085201 (2012)]
@@ -25,3 +25,18 @@ A Fock exchange Σ^HF that couples all bands at a given cubic k will **spuriousl
 
 ## 5. Silicon vs GaAs ✅
 The folding/unfolding is **identical** for both — diamond and zincblende share the FCC Bravais lattice. The GaAs unfold machinery transfers to Si verbatim; only the EPM form-factor table changes (and V^A=0 for Si). High-symmetry valley positions differ (Si: 6 Δ-valleys near X at 0.85·2π/a along ⟨100⟩; GaAs: 4 L-valleys along ⟨111⟩), but the unfolding code finds sublattice character by spectral weight, not by hardcoded valley coordinates — no material-specific change needed.
+
+## 6. The 2-fold folds: CdS (wurtzite) and graphene ✅
+The non-cubic materials use a **2-fold** supercell instead of the cubic 4-fold, but the principle is identical: the supercell potential is primitive-periodic, so the supercell Hamiltonian is **block-diagonal over the 2 cosets** of the primitive reciprocal lattice (verified to machine precision, the analogue of §2's parity rule). Each coset block, diagonalized, returns the primitive bands at a shifted k.
+
+**CdS (wurtzite P6₃mc).** The SBE cell is the orthorhombic `al(1:3) = (a, a√3, c)` box — a √3×1×1 supercell of the hexagonal primitive cell (2 cosets). A plane wave G is coset 0 if `G·a_prim_i/2π` is integer for all primitive real vectors a_prim_i (it is a hexagonal reciprocal vector), else coset 1. At Γ the off-coset block is |H|≈8×10⁻¹⁷; coset 0 carries the 2.55 eV direct gap (Γ_hex), coset 1 the zone-edge partner (6.2 eV). Derivation + check: `orth_coset` / `orth_folding_check` in [`../epm_wurtzite_cds.py`](../epm_wurtzite_cds.py); the 2-fold coset offset is `[0, 1, 0]` (orthorhombic-reduced, the doubled a√3 direction).
+
+**graphene (monolayer).** The rectangular 4-atom cell — zigzag x (length a), armchair y (length √3a) — is a 2-fold supercell of the 2-atom hexagonal primitive cell. Coset classification (`rect_coset`) is the same primitive-reciprocal test; the cell reproduces the primitive **Dirac cone gaplessly** (the folded K lands gapless, verified) once the structure factor is normalized per primitive cell (`struct_norm` — the 4-atom sum is otherwise 2× too strong). `rect_folding_check` / `rect_atoms_ang` in [`../epm_graphene.py`](../epm_graphene.py); coset offset `[0, −1, 0]` (armchair direction).
+
+## 7. N-coset unfold pipeline (4 cosets cubic, 2 cosets wurtzite/rectangular) ✅
+The unfold infrastructure of §3 is generalized from the hardcoded 4 FCC cosets to **N cosets**, backward-compatibly:
+1. **The Python EPM emits the N-coset map** (`epm_io.compute_unfold_map` + `write_unfold_file`): per supercell band, the coset spectral weights `w_s` (Σ_s w_s = 1; exact folding ⇒ each band lives wholly in one coset), the dominant coset, and the primitive-band rank from that coset block's spectrum. `SYSNAME_unfold.data` carries `n_coset` as a 4th header field (4 = cubic, 2 = wurtzite/rectangular). CdS uses `orth_coset`, graphene `rect_coset`; GaAs/Si the 4-fold FCC map.
+2. **SALMON reads `n_coset`** (`gs_info_ssbe::read_unfold_data`; legacy 3-field GaAs headers fall back to 4), broadcasts it, and the population loop (`bloch_solver`) + the `_sbe_nex_k_unfold.data` writer (`datafile`/`realtime`) run over `1..n_coset`. The fixed-size (1:4) arrays are padded with zeros, so the **GaAs 4-coset path is byte-unchanged** (verified: legacy map → trace conserved, 4 cosets/k).
+3. **The plotter** reads the cosets from the output and renders the unfolded + folded k–t maps for any N. Verified end-to-end: the graphene 2-coset unfolded conduction population localizes at the **Dirac points** (zero near Γ) — the map correctly places carriers in the right primitive-BZ sectors.
+
+**HF sublattice projection for the 2-fold materials** (§4) is the open piece: the projector is wired for the cubic 4-fold cosets; the CdS/graphene 2-fold unfold weights must feed the same `apply_hf_sublattice_projection` for a folded-cell Coulomb run to be inter-coset-clean (TODO).
