@@ -28,10 +28,10 @@ No channel code changes — every dissipation channel reads the struct. A materi
 | Coulomb HF | ✅ ε=12.9 | ✅ ε=11.7 | ✅ ε=8.9 | 🚧 (2D V(q)=2πe²/εq) | static dielectric (isotropic avg) [Berlincourt 1963] |
 | Electron-phonon | ✅ Fischetti 1e14 | ✅ Meng 1.3e14 | ✅ Fröhlich LO 38 meV, ν_sat=2.9e13 | 🚧 E2g/A1'/acoustic (G4) | ħω_LO [Raman], α≈0.5 [cyclotron]; ν_sat = α·ω_LO (derived from the cited α, ħω_LO) |
 | Impact ionization | ✅ Stobbe quartic | ✅ Keldysh quadratic | ✅ E_th=3.6 eV; **prefactor = user fit param** | 🚧 Auger (gapless) | E_th=1.5·E_g [(3/2)E_g rule]; prefactor scarce → must set `sbe_ii_prefactor` |
-| Carrier-carrier (e-e/e-h) | ✅ | ✅ | ✅ | 🚧 (G5) | **sub-100fs thermalization at n > 1e18, Shah 1986; Elsaesser 1989** |
-| Auger recombination | 🚧 | 🚧 | ✅ | 🚧 (gapless CM) | **Haury 1998 (C = 2.0e-30 cm⁶/s)** |
+| Carrier-carrier (e-e/e-h) | ✅ | ✅ | ⛔ **forbidden** (no cited rate) | 🚧 (G5) | timescale only (sub-100fs at n > 1e18, Shah 1986; Elsaesser 1991) — no rate constant; the FD channel would borrow the GaAs/Si 1e14 |
+| Auger recombination | 🚧 | 🚧 | 🚧 (constant cited, channel not wired) | 🚧 (gapless CM) | **Haury 1998 (C = 2.0e-30 cm⁶/s)** — Lindblad jump channel (Sec 13) pending |
 
-CdS dissipation: Fröhlich polar-optical e-ph is the **primary** room-T channel. The impact-ionization **prefactor** is a fit parameter (no cited CdS value) — enabling II without an explicit `sbe_ii_prefactor` aborts. **Carrier-carrier (e-e) and Auger recombination are now cited and enabled** — they switch on **dynamically when the carrier density exceeds the activation thresholds** (e-e at n ≳ 1×10¹⁸ cm⁻³ → sub-100 fs thermalization [Shah 1986; Elsaesser 1989]; Auger via C·n³ with C = 2.0×10⁻³⁰ cm⁶/s [Haury 1998]). The **piezoelectric acoustic** (e₃₃/e₃₁/e₁₅ [Berlincourt 1963]) and **deformation-potential acoustic** channels are cited but not yet SBE Lindblad channels (future). ⛔ = enabling it for that material aborts; nothing is borrowed between materials. 🚧 = the constants are cited and documented but the SBE channel/material wiring is in progress.
+CdS dissipation: Fröhlich polar-optical e-ph is the **primary** room-T channel. The impact-ionization **prefactor** is a fit parameter (no cited CdS value) — enabling II without an explicit `sbe_ii_prefactor` aborts. **Carrier-carrier (e-e) is FORBIDDEN for CdS** (`eeh_ok=.false.`): there is no cited CdS carrier-carrier *rate*, so the implemented FD-thermalization channel would have to borrow the generic 1×10¹⁴ s⁻¹ scale cited only for GaAs/Si — forbidden by the provenance rule. The CdS literature gives a *timescale* (sub-100 fs at n ≳ 1×10¹⁸ cm⁻³ [Shah 1986; Elsaesser 1991]) and an *Auger coefficient* (C = 2.0×10⁻³⁰ cm⁶/s [Haury 1998]); both belong to the **density-gated Auger Lindblad channel (Sec 13)**, which is **not yet implemented**. The constants `CDS_AUGER_C` / `CDS_EE_ACT_N` are declared (cited) but no channel consumes them yet. A user with their own CdS e-e rate can still opt in by setting `sbe_eeh_nu_sat` explicitly (same explicit-input escape hatch as the II prefactor). The **piezoelectric acoustic** (e₃₃/e₃₁/e₁₅ [Berlincourt 1963]) and **deformation-potential acoustic** channels are cited but not yet SBE Lindblad channels (future). ⛔ = enabling it for that material aborts; nothing is borrowed between materials. 🚧 = the constants are cited and documented but the SBE channel/material wiring is in progress.
 
 ### What the code selects per material (the complete `s_material_params`) ✅
 
@@ -82,11 +82,12 @@ Notes: `eph_wraw` is the **un-normalized** D²/ħω weight; the channel normaliz
 | `eph_nu_sat_si` | 2.89e13 s⁻¹ | e-ph rate scale | α·ω_LO; α=0.5 [cyclotron], ħω_LO=38 meV [Raman] |
 | `ii_form / ii_exponent / ii_threshold_ev` | keldysh_quadratic / 2 / 3.6 eV | impact ionization | Keldysh soft; E_th=1.5·E_g ((3/2)E_g rule) |
 | `ii_prefactor` | **sentinel (−1)** → user must set `sbe_ii_prefactor` | impact ionization | no cited CdS prefactor (it is a fit parameter) |
-| `auger_coeff` | 2.0e-30 cm⁶/s | Auger recombination | Haury et al., PRB 57, 11513 (1998) |
-| `ee_activation_n` | 1.0e18 cm⁻³ | e-e scattering threshold | Shah et al., IEEE JQE 22, 1728 (1986) |
-| `coulomb_ok / eph_ok / ii_ok / eeh_ok` | `.true.` | provenance gates | all cited |
+| `coulomb_ok / eph_ok / ii_ok` | `.true.` | provenance gates | Coulomb/e-ph/II cited |
+| `eeh_ok` | `.false.` | carrier-carrier gate | **no cited CdS e-e rate → forbidden** |
 
-Every CdS constant carries its source. The impact-ionization **prefactor** is the one genuinely uncited quantity (a fit parameter), so it stays a sentinel and the run aborts unless the user supplies `sbe_ii_prefactor`. **Carrier-carrier (e-e) and Auger are now cited and enabled**, switching on dynamically above their density thresholds (`ee_activation_n`; Auger via C·n³). Piezoelectric (e₃₃/e₃₁/e₁₅ [Berlincourt 1963]) and deformation-acoustic are cited but not yet SBE channels.
+Module parameters declared (cited) but **not yet consumed by any channel** — the Auger Lindblad channel (Sec 13) that would use them is not implemented: `CDS_AUGER_C` = 2.0e-30 cm⁶/s [Haury et al., PRB 57, 11513 (1998)]; `CDS_EE_ACT_N` = 1.0e18 cm⁻³ [Shah et al., IEEE JQE 22, 1728 (1986)]. These are **not** `s_material_params` struct fields.
+
+Every CdS constant carries its source. The impact-ionization **prefactor** is the one genuinely uncited quantity (a fit parameter), so it stays a sentinel and the run aborts unless the user supplies `sbe_ii_prefactor`. **Carrier-carrier (e-e) is forbidden** (`eeh_ok=.false.`): no cited CdS rate, and the cited timescale/Auger constants belong to the not-yet-wired Auger Lindblad channel (Sec 13). Piezoelectric (e₃₃/e₃₁/e₁₅ [Berlincourt 1963]) and deformation-acoustic are cited but not yet SBE channels.
 
 ## 1. EPM form factors (local pseudopotential)
 
