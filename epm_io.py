@@ -152,6 +152,78 @@ def write_bandpath_file(sysname, outdir, material, labels, node_dists, dists,
     print(f'# EPM ({material}): wrote band path {fname} ({N} k-points, {nb} bands, nv={nv})')
 
 
+def compute_unfold_map(build_H, kpoints, Gcart, hkls, coset, n_coset, nstate):
+    """Compute the supercell-band -> coset unfold map (generic, any folding).
+
+    build_H(k) -> H (npw x npw, Hermitian; units irrelevant -- only the spectral
+    ORDER is used);  Gcart (npw,d);  hkls (npw,d) integer reciprocal indices;
+    coset (npw,) in 0..n_coset-1 (which folding coset each plane wave belongs to).
+
+    Returns (offsets[n_coset,3] int, isub[nstate,nk], ibprim[nstate,nk],
+    wsub[n_coset,nstate,nk]):
+      * offsets: the smallest-|G| representative of each coset, in integer
+        supercell-reduced coords (padded to 3 components) -> the G0(s) the SBE
+        uses as k_prim = k_sc + G0(s).
+      * isub: dominant coset of each supercell band (1..n_coset).
+      * ibprim: its primitive-band rank = position in the dominant coset block's
+        spectrum (symmetric at degeneracies).
+      * wsub: spectral weight of each band on each coset (sum_s = 1).
+    Because the supercell H is block-diagonal over the cosets (exact folding),
+    each band lives wholly in one coset; the weights make degeneracies symmetric.
+    """
+    npw = Gcart.shape[0]
+    nk = len(kpoints)
+    g2 = np.einsum('ij,ij->i', Gcart, Gcart)
+    block_idx = [np.where(coset == s)[0] for s in range(n_coset)]
+    offsets = np.zeros((n_coset, 3), dtype=int)
+    for s in range(n_coset):
+        idx = block_idx[s]
+        rep = idx[np.argmin(g2[idx])]
+        offsets[s, :hkls.shape[1]] = np.round(hkls[rep]).astype(int)
+
+    isub = np.zeros((nstate, nk), dtype=int)
+    ibprim = np.zeros((nstate, nk), dtype=int)
+    wsub = np.zeros((n_coset, nstate, nk))
+    for ik in range(nk):
+        H = build_H(kpoints[ik])
+        evals, evecs = np.linalg.eigh(H)
+        w2 = np.abs(evecs[:, :nstate]) ** 2                  # (npw, nstate)
+        ws = np.array([w2[block_idx[s]].sum(axis=0) for s in range(n_coset)])
+        ws /= np.maximum(ws.sum(axis=0), 1e-300)
+        dom = np.argmax(ws, axis=0)                          # (nstate,)
+        block_evals = [np.sort(np.linalg.eigvalsh(H[np.ix_(bi, bi)]))
+                       for bi in block_idx]
+        for ib in range(nstate):
+            s = dom[ib]
+            isub[ib, ik] = s + 1
+            ibprim[ib, ik] = 1 + int(np.searchsorted(block_evals[s], evals[ib] - 1e-9))
+            wsub[:, ib, ik] = ws[:, ib]
+    return offsets, isub, ibprim, wsub
+
+
+def write_unfold_file(sysname, outdir, material, n_coset, nv_prim,
+                      offsets, isub, ibprim, wsub):
+    """Write SYSNAME_unfold.data (N-coset format read by gs_info_ssbe). The
+    header carries n_coset (4 = cubic FCC, 2 = wurtzite/rectangular 2-fold)."""
+    nstate, nk = isub.shape
+    fname = f'{outdir}{sysname}_unfold.data'
+    with open(fname, 'w') as f:
+        f.write('# unfold map (supercell band -> coset spectral weights)\n')
+        f.write('# nk, nb, nv_prim, n_coset\n')
+        f.write(f'{nk:8d}{nstate:8d}{nv_prim:8d}{n_coset:8d}\n')
+        f.write('# isub, offset G0 (sc reduced)\n')
+        for s in range(n_coset):
+            f.write(f'{s + 1:4d}{offsets[s, 0]:4d}{offsets[s, 1]:4d}{offsets[s, 2]:4d}\n')
+        f.write('# ik, ib, isub, ibprim, w1..w_ncoset\n')
+        for ik in range(nk):
+            for ib in range(nstate):
+                f.write('{:6d}{:6d}{:4d}{:6d}'.format(
+                    ik + 1, ib + 1, isub[ib, ik], ibprim[ib, ik]))
+                f.write(''.join(f'{wsub[s, ib, ik]:12.6f}' for s in range(n_coset)) + '\n')
+    print(f'# EPM ({material}): wrote unfold map {fname} '
+          f'(nk={nk}, nb={nstate}, n_coset={n_coset}, nv_prim={nv_prim})')
+
+
 def _write_tm_block(f, mat, nk, nb):
     for ik in range(nk):
         for ib in range(nb):

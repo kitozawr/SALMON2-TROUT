@@ -98,6 +98,23 @@ with tempfile.TemporaryDirectory() as td:
     kvals = np.loadtxt(td + 'graphene_k.data', comments='#')
     check("graphene k.data reduced (|k|<=0.5)", np.abs(kvals[:, 1:4]).max() <= 0.5 + 1e-9)
 
+    # --- 2-coset unfold map (graphene) ---
+    G.main_unfoldmap(num_kgrid=(2, 2, 1), nstate=G.GRAPHENE_NSTATE, outdir=td)
+    check("graphene unfold: wrote graphene_unfold.data",
+          os.path.exists(td + 'graphene_unfold.data'))
+    with open(td + 'graphene_unfold.data') as fh:
+        lines = [l for l in fh if not l.startswith('#')]
+    hdr = lines[0].split()
+    check("graphene unfold header: n_coset = 2", int(hdr[3]) == 2)
+    check("graphene unfold header: nv_prim = 1", int(hdr[2]) == 1)
+    # two coset offset lines, then weight rows whose w1+w2 = 1 and one coset ~1
+    offs = lines[1:3]
+    check("graphene unfold: 2 coset offsets", len(offs) == 2 and offs[0].split()[0] == '1')
+    wrows = np.array([[float(x) for x in l.split()[4:6]] for l in lines[3:]])
+    check("graphene unfold: weights sum to 1", np.allclose(wrows.sum(axis=1), 1.0, atol=1e-6))
+    check("graphene unfold: exact folding (each band ~1 in one coset)",
+          np.all(wrows.max(axis=1) > 0.999))
+
 
 # --- CdS GS emission (small/fast) --------------------------------------------
 with tempfile.TemporaryDirectory() as td:

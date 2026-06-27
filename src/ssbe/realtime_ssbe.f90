@@ -120,7 +120,7 @@ subroutine main_realtime_ssbe(icomm)
         if (gs%have_unfold) then
             pop_lev_k = 0.0d0
             call write_sbe_nex_k_unfold_block(fh_sbe_nex_k_unfold, 0.0d0, nk, &
-                & gs%kpoint, gs%unfold_offset, pop_lev_k)
+                & gs%kpoint, gs%unfold_offset, pop_lev_k, gs%n_coset)
             flush(fh_sbe_nex_k_unfold)
         end if
     end if
@@ -189,7 +189,7 @@ subroutine main_realtime_ssbe(icomm)
                 call calc_unfolded_population_k(sbe, gs, Ac_ext_t(:, it), pop_lev_k, icomm)
                 if (irank == 0) then
                     call write_sbe_nex_k_unfold_block(fh_sbe_nex_k_unfold, t, nk, &
-                        & gs%kpoint, gs%unfold_offset, pop_lev_k)
+                        & gs%kpoint, gs%unfold_offset, pop_lev_k, gs%n_coset)
                 end if
             end if
 

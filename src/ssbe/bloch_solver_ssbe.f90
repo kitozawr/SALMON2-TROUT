@@ -2025,7 +2025,7 @@ subroutine calc_unfolded_population_k(sbe, gs, Ac, pop_lev, icomm)
         do i = 1, nba
             in = sbe%active_idx(i)
             isub = gs%unfold_sub(in, ik)
-            if (isub < 1 .or. isub > 4) cycle
+            if (isub < 1 .or. isub > gs%n_coset) cycle
             irank_prim = gs%unfold_prim(in, ik)
             if (irank_prim < 1) cycle
             if (irank_prim <= gs%nv_prim) then
@@ -2052,7 +2052,7 @@ subroutine calc_unfolded_population_k(sbe, gs, Ac, pop_lev, icomm)
                 end if
             end if
             popi = real(t2(i, i))
-            do s = 1, 4
+            do s = 1, gs%n_coset
                 pop_local(islot, s, ik) = pop_local(islot, s, ik) &
                     & + gs%unfold_w(s, in, ik) * popi
             end do

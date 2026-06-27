@@ -333,6 +333,26 @@ def main_bandpath(sysname=CDS_SYSNAME, outdir='./'):
                                dists, qreds, eig, nv=CDS_NVAL_PRIM, spinor=0)
 
 
+def main_unfoldmap(sysname=CDS_SYSNAME, num_kgrid=CDS_NUM_KGRID, nstate=CDS_NSTATE,
+                   cutoff_ry=CDS_GS_CUTOFF_RY, outdir='./'):
+    """Emit SYSNAME_unfold.data: the 2-coset (orthorhombic<-hexagonal) band ->
+    coset spectral-weight map for the SBE's unfolded-population output. Same
+    k-grid / cutoff / nstate as main_gs (the SBE checks nk and nb match)."""
+    import epm_io
+    a_au, c_au = CDS_A_ANG * ANG_TO_BOHR, CDS_C_ANG * ANG_TO_BOHR
+    A, B, C = orthorhombic_vectors_au(a_au, c_au)
+    Brec, _ = reciprocal(A, B, C)
+    pos, spec = wurtzite_atoms_orth(a_au, c_au)
+    Gcart, hkls = build_pw_basis(Brec, cutoff_ry)
+    coset = orth_coset(Gcart, a_au, c_au)        # 0/1 (2-fold)
+    kpoint, _ = epm_io.monkhorst_pack(Brec, num_kgrid)
+    offsets, isub, ibprim, wsub = epm_io.compute_unfold_map(
+        lambda k: build_hamiltonian(k, Gcart, pos, spec),
+        kpoint, Gcart, np.array(hkls), coset, n_coset=2, nstate=nstate)
+    epm_io.write_unfold_file(sysname, outdir, 'CdS', 2, CDS_NVAL_PRIM,
+                             offsets, isub, ibprim, wsub)
+
+
 def _print_validation():
     print('CdS wurtzite EPM (BC1967 local form factors):')
     print(f'  SBE cell al(1:3) = {np.round(cds_cell_au(),3)} Bohr  (a, a*sqrt3, c)')
@@ -355,8 +375,11 @@ if __name__ == '__main__':
         _print_validation()            # band/folding validation only (no files)
     elif mode == 'bandpath':
         main_bandpath()                # clean primitive band path only
+    elif mode == 'unfoldmap':
+        main_unfoldmap()               # 2-coset unfold map only
     else:
         _print_validation()
         print()
         main_gs()                      # emit the scalar SBE ground-state files
         main_bandpath()                # + the clean primitive band path
+        main_unfoldmap()               # + the 2-coset unfold map

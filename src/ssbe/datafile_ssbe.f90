@@ -176,16 +176,17 @@ end subroutine write_sbe_nex_k_unfold_header
 
 
 
-subroutine write_sbe_nex_k_unfold_block(fh, t, nk, kpoint, offset, pop_lev)
+subroutine write_sbe_nex_k_unfold_block(fh, t, nk, kpoint, offset, pop_lev, n_coset)
     use inputoutput, only: t_unit_time
     implicit none
     integer, intent(in) :: fh, nk
     real(8), intent(in) :: t, kpoint(1:3, 1:nk), offset(1:3, 1:4)
     real(8), intent(in) :: pop_lev(1:4, 1:4, 1:nk)
+    integer, intent(in) :: n_coset     ! 4 (cubic FCC) or 2 (wurtzite/rect 2-fold)
     integer :: ik, isub
     write(fh, '(a,f16.8,a,a)') "# t = ", t * t_unit_time%conv, " ", trim(t_unit_time%name)
     do ik = 1, nk
-        do isub = 1, 4
+        do isub = 1, n_coset
             write(fh, '(I6, I4, 7E18.10)') ik, isub, &
                 & kpoint(1:3, ik) + offset(1:3, isub), pop_lev(1:4, isub, ik)
         end do

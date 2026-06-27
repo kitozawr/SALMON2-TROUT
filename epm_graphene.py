@@ -381,6 +381,27 @@ def main_bandpath(sysname=GRAPHENE_SYSNAME, outdir='./'):
                                dists, qreds, eig_ev / HA_TO_EV, nv=1, spinor=0)
 
 
+def main_unfoldmap(sysname=GRAPHENE_SYSNAME, num_kgrid=GRAPHENE_NUM_KGRID,
+                   nstate=GRAPHENE_NSTATE, cutoff_ev=GRAPHENE_CUTOFF_EV, outdir='./'):
+    """Emit SYSNAME_unfold.data: the 2-coset (rectangular<-hexagonal) band ->
+    coset spectral-weight map. Same k-grid / cutoff / nstate as main_gs."""
+    import epm_io
+    Gcart2d, hk = rect_pw_basis(cutoff_ev)
+    pos2d = rect_atoms_ang()
+    coset = rect_coset(Gcart2d)                  # 0/1 (2-fold)
+    A2, B2 = rect_cell_vectors_ang()
+    al_au = np.array([np.linalg.norm(A2), np.linalg.norm(B2), GRAPHENE_VACUUM_ANG]) * ANG_TO_BOHR
+    b_matrix = np.diag(2.0 * np.pi / al_au)
+    kpoint_au, _ = epm_io.monkhorst_pack(b_matrix, num_kgrid)
+    # build_H takes the in-plane k in Ang^-1 (z has no coupling)
+    k2d = kpoint_au[:, 0:2] * ANG_TO_BOHR
+    offsets, isub, ibprim, wsub = epm_io.compute_unfold_map(
+        lambda k: build_hamiltonian(k, Gcart2d, pos2d, struct_norm=GRAPHENE_STRUCT_NORM),
+        k2d, Gcart2d, np.array(hk), coset, n_coset=2, nstate=nstate)
+    epm_io.write_unfold_file(sysname, outdir, 'graphene', 2, GRAPHENE_NELEC // 4,
+                             offsets, isub, ibprim, wsub)
+
+
 def _print_validation():
     d = assert_geometry()
     print(f"graphene EPM (Ramanujam local, Config A 2D): a={A_LATT} Ang, bond={d:.3f} Ang")
@@ -402,8 +423,11 @@ if __name__ == '__main__':
         _print_validation()            # band/folding validation only (no files)
     elif mode == 'bandpath':
         main_bandpath()                # clean primitive band path only
+    elif mode == 'unfoldmap':
+        main_unfoldmap()               # 2-coset unfold map only
     else:
         _print_validation()
         print()
         main_gs()                      # emit the scalar SBE ground-state files
         main_bandpath()                # + the clean primitive band path
+        main_unfoldmap()               # + the 2-coset unfold map
