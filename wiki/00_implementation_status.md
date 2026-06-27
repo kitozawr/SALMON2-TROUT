@@ -103,13 +103,23 @@ benchmark (run `python3 tests/run_all.py`, currently 11/11). The fast in-SALMON
 **deprecated for the non-cubic materials (CdS, graphene) until debugged**;
 generate those GS with the Python references.
 
-| Material | Module | Validated |
-|---|---|---|
-| GaAs | `epm_gaas_reference.py` | Cohen-Bergstresser 1966 |
-| Si (Kunikiyo, default) | `epm_si_reference.py` | gap 1.059 eV (Kunikiyo 1.068), CBM 0.850 |
-| Si_cb (Cohen-Bergstresser) | `epm_si_reference.py --variant Si_cb` | gap 0.818 eV, CBM 0.850 |
-| CdS | `epm_wurtzite_cds.py` | direct gap 2.55 vs 2.58 eV (BC1967); exact 2-fold folding |
-| graphene | `epm_graphene.py` | zero gap at K, v_F 9.6e5, Γ −7.78, M −2.70 (Ramanujam) |
+| Material | Module | Band-validated | Folding | SBE GS files (eigen/tm/k + unfold) |
+|---|---|---|---|---|
+| GaAs | `epm_gaas_reference.py` | CB 1966 | ✅ 4-fold FCC (exact) | ✅ emitted (full EPM→SBE pipeline) |
+| Si (Kunikiyo, default) | `epm_si_reference.py` | gap 1.059 eV, CBM 0.850 | ✅ 4-fold FCC (reuses GaAs) | ✅ emitted (full pipeline) |
+| Si_cb (Cohen-Bergstresser) | `epm_si_reference.py --variant Si_cb` | gap 0.818 eV, CBM 0.850 | ✅ 4-fold FCC | ✅ emitted |
+| CdS | `epm_wurtzite_cds.py` | gap 2.55 vs 2.58 eV (BC1967) | ✅ 2-fold orth←hex, **verified exact** (off-coset \|H\|≈8e-17) | ❌ **NOT wired** (folding verified in the Python module only; no CdS `_unfold.data`/GS emission) |
+| graphene | `epm_graphene.py` | zero gap at K, v_F 9.6e5, Γ −7.78, M −2.70 | ❌ **NO folding** — Config-A primitive cell only (the simpler task; G2 orthorhombic 4-atom + 2-fold not done) | ❌ NOT wired |
+
+**HONEST status (do not overclaim):** only GaAs/Si have the **complete EPM→SBE
+pipeline** (folding + GS-file emission). CdS has the **folding implemented and
+verified exact** but it is NOT yet plumbed into the SBE (no `_unfold.data`, no
+eigen/tm/k emission) — it is at the band+folding validation stage. **graphene
+did the SIMPLER task**: primitive-cell band validation, **no folding** (PART G2
+not implemented), and the prompt's "skip folding if the SBE accepts a
+non-orthogonal cell" shortcut was taken WITHOUT verifying the SBE actually
+accepts the hexagonal non-orthogonal cell.
+
 **Si vs Si_cb:** identical machinery (diamond, V^A≡0, a=10.26 Bohr, 4-fold fold);
 ONLY the V^S triplet differs (Kunikiyo vs CB). See README "Supported materials".
 
@@ -150,7 +160,25 @@ Branch `develop-2.0.0` (merged from PR #44). Order of priority per the maintaine
    A–G / 7 tests / PR #44 / forbidden CdS e-e"; sweep wiki/00,04 for stale text
    (the effect-support matrix + section 12/13 in wiki/02 are now current).
 
-6. Optional refinements (unchanged): inter-k momentum-resolved F/C4 on the ring;
+6. **GRAPHENE FOLDING (G2) — graphene EPM is the SIMPLER task so far.** Current
+   `epm_graphene.py` is Config-A primitive-cell ONLY (Dirac cone validated), NO
+   folding. To bring it level with CdS:
+   (a) **FIRST check whether the SBE accepts a NON-ORTHOGONAL (hexagonal) cell**
+       (G2.0). If YES → use the 2-atom hexagonal primitive cell, skip folding
+       entirely (cleaner). If NO → (b).
+   (b) implement the orthorhombic 4-atom rectangular cell (a × √3a, zigzag x /
+       armchair y), the 2-fold hex→rect fold, the `graphene_unfold.data` map,
+       and assert Dirac fold lands at ⅔ Γ–X (k_x=±0.851 Å⁻¹), block-diagonal to
+       machine precision (mirror `orth_folding_check` in epm_wurtzite_cds.py).
+
+7. **WIRE CdS + graphene EPM → SBE GS files.** Only GaAs/Si emit the SBE
+   ground-state data (eigen/tm/k + `_unfold.data`). CdS folding is verified IN
+   THE PYTHON MODULE but NOT plumbed into the SBE: it does not yet write the
+   CdS GS files / unfold map. TODO: have epm_wurtzite_cds.py (and graphene) emit
+   the eigen/tm/k.data + per-material `_unfold.data` in the SBE's read contract
+   (reuse the GaAs writers), so the full EPM→SBE pipeline closes for all 4.
+
+8. Optional refinements (unchanged): inter-k momentum-resolved F/C4 on the ring;
    dynamic LOPC; absolute golden-rule e-ph prefactor; Chefonov Si bleaching run.
 
 Also pending (validation, not code): a longer Si super-mode run to check the

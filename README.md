@@ -284,13 +284,15 @@ The `&epm` namelist configures the local-EPM ground-state solver (`theory='epm'`
 
 **The Python EPM references are the source of truth — each is validated against its cited benchmark.** The fast in-SALMON MPI EPM (`src/epm/`) is *secondary*: it is calibrated against the Python references and is currently **deprecated for the non-cubic materials (CdS, graphene) until debugged** — generate those ground states with the Python references. The validated Python references:
 
-| Material | Module | Structure | Validation (cited benchmark) |
-| :--- | :--- | :--- | :--- |
-| GaAs | `epm_gaas_reference.py` | zincblende (V^A≠0), 4-fold FCC fold | Cohen-Bergstresser PR 141, 789 (1966) |
-| **Si** (Kunikiyo, default) | `epm_si_reference.py` | diamond (V^A≡0), 4-fold FCC fold | indirect gap **1.059 eV** (Kunikiyo calc 1.068), CBM @ 0.850·2π/a [Kunikiyo JAP 75, 297 (1994)] |
-| **Si_cb** (Cohen-Bergstresser) | `epm_si_reference.py --variant Si_cb` | diamond, same machinery as Si | indirect gap **0.818 eV**, CBM @ 0.850 [CB PR 141, 789 (1966)] |
-| CdS | `epm_wurtzite_cds.py` | wurtzite (polar), orthorhombic `al(1:3)`, 2-fold fold | direct gap **2.55 eV** vs Bergstresser-Cohen PR 164, 1069 (1967) 2.58 eV; exact folding |
-| graphene | `epm_graphene.py` | honeycomb (D6h, V_A=0), 2D | **zero gap** at Dirac K, **v_F=9.6×10⁵ m/s**, Γ=−7.78 eV, M=−2.70 eV [Ramanujam thesis, ASU 2015] |
+| Material | Module | Structure / folding | Validation (cited benchmark) | EPM→SBE pipeline |
+| :--- | :--- | :--- | :--- | :--- |
+| GaAs | `epm_gaas_reference.py` | zincblende (V^A≠0), 4-fold FCC fold | Cohen-Bergstresser PR 141, 789 (1966) | ✅ full (folding + GS files) |
+| **Si** (Kunikiyo, default) | `epm_si_reference.py` | diamond (V^A≡0), 4-fold FCC fold | indirect gap **1.059 eV** (Kunikiyo calc 1.068), CBM @ 0.850·2π/a [Kunikiyo JAP 75, 297 (1994)] | ✅ full |
+| **Si_cb** (Cohen-Bergstresser) | `epm_si_reference.py --variant Si_cb` | diamond, same machinery as Si | indirect gap **0.818 eV**, CBM @ 0.850 [CB PR 141, 789 (1966)] | ✅ full |
+| CdS | `epm_wurtzite_cds.py` | wurtzite (polar), orthorhombic `al(1:3)`, **2-fold fold (verified exact)** | direct gap **2.55 eV** vs Bergstresser-Cohen PR 164, 1069 (1967) 2.58 eV | 🚧 folding verified in the Python module; **GS-file emission / unfold map not yet wired** |
+| graphene | `epm_graphene.py` | honeycomb (D6h, V_A=0), **2D primitive cell — NO folding yet (G2 pending)** | **zero gap** at Dirac K, **v_F=9.6×10⁵ m/s**, Γ=−7.78 eV, M=−2.70 eV [Ramanujam thesis, ASU 2015] | 🚧 band-validation only; folding (G2) + GS emission pending |
+
+> **Pipeline status (honest):** only GaAs/Si have the **complete** EPM→SBE pipeline (folding **and** ground-state-file emission). **CdS** has the 2-fold folding *implemented and verified exact* but it is **not yet wired into the SBE** (no `_unfold.data` / eigen-tm-k emission). **graphene** is the *simpler* stage — primitive-cell band validation, **no folding** (the orthorhombic 4-atom cell + 2-fold fold of PART G2 is not done; first check whether the SBE accepts a non-orthogonal hexagonal cell, which would make folding unnecessary). See `wiki/00_implementation_status.md` for the full TODO.
 
 **`Si` vs `Si_cb`:** identical machinery (diamond, V^A≡0, a=10.26 Bohr, 4-fold folding) — the *only* difference is the V^S form-factor triplet. `Si` uses Kunikiyo (−0.2258, +0.05698, +0.070709 Ry → gap 1.059 eV); `Si_cb` uses Cohen-Bergstresser (−0.21, +0.04, +0.08 Ry → gap 0.818 eV). `Si` (Kunikiyo) is the default as it matches the modern Si gap target; `Si_cb` is for cross-validation. Run `python3 tests/run_all.py` to validate all references.
 
