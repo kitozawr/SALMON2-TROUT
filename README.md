@@ -282,7 +282,7 @@ The `&epm` namelist configures the local-EPM ground-state solver (`theory='epm'`
 
 #### Supported materials & EPM references (Python-primary)
 
-**The Python EPM references are the source of truth — each is validated against its cited benchmark.** The fast in-SALMON MPI EPM (`src/epm/`) is *secondary*: it is calibrated against the Python references and is currently **deprecated for the non-cubic materials (CdS, graphene) until debugged** — generate those ground states with the Python references. The validated Python references:
+**The Python EPM references are the source of truth — each is validated against its cited benchmark.** The fast in-SALMON MPI EPM (`src/epm/`) is *secondary* and mirrors the Python convention: for the **cubic materials (GaAs, Si, Si_cb)** it uses the same simple-cubic 8-atom supercell + FCC-in-cubic parity band-folding, the same `(2π/a)²`-unit plane-wave cutoff, and writes reduced-coordinate `k.data` — so it is **verified byte-equivalent to the Python reference** (identical k-points, band energies to ~5×10⁻¹¹ Ha, occupations, and valence/optical momentum to ~10⁻¹⁰; checked by building SALMON and diffing `theory='epm'` output against `epm_gaas_reference.py` for GaAs and Si). It remains **deprecated for the non-cubic materials (CdS, graphene) until debugged** — generate those ground states with the Python references. The validated Python references:
 
 | Material | Module | Structure / folding | Validation (cited benchmark) | EPM→SBE pipeline |
 | :--- | :--- | :--- | :--- | :--- |
