@@ -96,36 +96,62 @@ Run all: `python3 tests/run_all.py` (each test prints PASS/FAIL and exits nonzer
 
 ---
 
-## Next action on resume
-**ALL roadmap parts A–G are implemented, tested (7/7) and documented.** Every
-new channel is CPTP and gated OFF by default; existing GaAs runs unchanged.
-Branch `claude/sbe-silicon-superres`, PR #44.
+## Materials — Python EPM references (THE source of truth) ✅
+The **Python EPM references are primary** and each is validated against a cited
+benchmark (run `python3 tests/run_all.py`, currently 11/11). The fast in-SALMON
+**MPI EPM (`src/epm/`) is SECONDARY** — calibrated against the Python refs and
+**deprecated for the non-cubic materials (CdS, graphene) until debugged**;
+generate those GS with the Python references.
 
-What remains is **validation + refinement** (not new roadmap items):
-1. **Physical validation runs** (need a scalar Si dataset, `epm_material='Si'`):
-   reproduce the Chefonov Si THz-bleaching staging (wiki/04 Example 4) — e-ph
-   cooling reduces the Drude conductivity; then enable II + carrier-carrier.
-   Add carrier-density/current diagnostics if needed.
-2. **Refinements (documented as such, optional):** the full inter-k
-   momentum-resolved versions of carrier-carrier (F) and impact ionization (C4)
-   on the ring (current: F = intra-k FD relaxation, C4 = global-partner
-   sourcing — both CPTP and conserving, but not yet full final-state-resolved);
-   dynamic LOPC screening wired into a carrier-carrier rate; the golden-rule
-   deformation-potential PREFACTOR used for absolute e-ph rates (current: ν_sat
-   scale + relative weights).
-3. **Future crystals/effects** (the maintainer noted "other crystals" beyond F):
-   new materials reuse the EPM form-factor table + folding; new effects slot in
-   as gated CPTP channels following the same pattern (primitive in
-   sbe_superres_ssbe + unit test + channel + end-to-end smoke + wiki + status).
+| Material | Module | Validated |
+|---|---|---|
+| GaAs | `epm_gaas_reference.py` | Cohen-Bergstresser 1966 |
+| Si (Kunikiyo, default) | `epm_si_reference.py` | gap 1.059 eV (Kunikiyo 1.068), CBM 0.850 |
+| Si_cb (Cohen-Bergstresser) | `epm_si_reference.py --variant Si_cb` | gap 0.818 eV, CBM 0.850 |
+| CdS | `epm_wurtzite_cds.py` | direct gap 2.55 vs 2.58 eV (BC1967); exact 2-fold folding |
+| graphene | `epm_graphene.py` | zero gap at K, v_F 9.6e5, Γ −7.78, M −2.70 (Ramanujam) |
+**Si vs Si_cb:** identical machinery (diamond, V^A≡0, a=10.26 Bohr, 4-fold fold);
+ONLY the V^S triplet differs (Kunikiyo vs CB). See README "Supported materials".
 
-Earlier detailed plan (kept for reference):
-- C3 full energy-windowed expanding-radius partner search (enumeration, no MC).
-- C4 nonlocal momentum-exchange impact ionization + nonlocal e-ph (genuine q).
-- D systolic-ring MPI replacing the all-gather; ONE fused ring pass for Σ^HF +
-  nonlocal II + nonlocal e-ph (+ the F e-e hook); active-subspace compression;
-  C1 predictor-corrector.
-Validate against the Chefonov Si THz-bleaching staging (wiki/04 Example 4)
-before claiming physical correctness. Keep all behind yn_sbe_superres OFF.
+## Next action on resume — STANDING TODOs (context restarted)
+Branch `develop-2.0.0` (merged from PR #44). Order of priority per the maintainer:
+
+1. **Python EPM refs for all 4 materials FIRST, MPI EPM second.** Done: all four
+   Python refs validated (table above). The MPI Fortran EPM still needs
+   debugging/calibration for CdS + graphene (non-cubic folding) — mark deprecated
+   in code until it reproduces the Python-ref gaps. *(README documents this.)*
+
+2. **Sublattice-projection-with-Coulomb is the ONLY correct HF mode — verify on
+   ALL materials.** `apply_hf_sublattice_projection` zeroes the spurious
+   inter-coset Σ^HF created by folding. The cosets DIFFER per material (GaAs/Si
+   = 4-fold FCC; CdS/graphene = 2-fold, different coset vectors). TODO: confirm
+   `yn_sbe_hf_sublattice_proj='y'` + `yn_sbe_coulomb='y'` uses the correct
+   per-material coset/unfold weights (gs%unfold_w) and is block-diagonal to
+   machine precision for each. Currently wired for the FCC 4-fold path; the
+   CdS/graphene 2-fold unfold maps must feed the same projector.
+
+3. **GRAPHENE dissipators (G4/G5) + no-Kuhn-Zurek (G6)** — registry entry
+   `epm_material='graphene'` NOT yet added. Needed (constants in wiki, PROMPT_graphene_full):
+   - e-ph: E2g 196 meV (g²=0.0405 eV²), A1' 160 meV (g²=0.0994 ×2 GW), acoustic
+     D_ac=16 eV (tunable); total ~1e10 s⁻¹ @300K, 196 meV threshold step.
+   - e-e/Auger: α=2.2/ε_eff, static|dynamical RPA switch, gapless CM up to ~2.
+   - **assert: graphene + Kuhn-Zurek flag → error** (coherence is many-body only).
+   - is_diamond=.true. (V_A=0, centrosymmetric); odd-only HHG (linear), 6m±1 (circular).
+
+4. **AUGER CPTP Lindblad primitive** (wiki Section 13) — write the
+   number-conserving Auger/impact-ion jump-operator channel in
+   `sbe_superres_ssbe.f90` (reuse amp_damp/carrier_carrier pattern) + unit test;
+   wire to graphene (G5) and **reuse for CdS** (C=2.0e-30 cm⁶/s [Haury 1998],
+   density-gated at n≥1e18 [Shah 1986]). CdS `eeh_ok` already documented `.true.`
+   in wiki — REGISTRY CODE still has CdS eeh_ok=.false.; flip it + add
+   CDS_AUGER_C / CDS_EE_ACTIVATION_N constants to match the wiki.
+
+5. **Clean remaining OUTDATED wiki fragments** — several pages still say "Parts
+   A–G / 7 tests / PR #44 / forbidden CdS e-e"; sweep wiki/00,04 for stale text
+   (the effect-support matrix + section 12/13 in wiki/02 are now current).
+
+6. Optional refinements (unchanged): inter-k momentum-resolved F/C4 on the ring;
+   dynamic LOPC; absolute golden-rule e-ph prefactor; Chefonov Si bleaching run.
 
 Also pending (validation, not code): a longer Si super-mode run to check the
 e-ph cooling actually reduces the Drude conductivity (bleaching) -- needs a Si

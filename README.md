@@ -276,9 +276,23 @@ The `&epm` namelist configures the local-EPM ground-state solver (`theory='epm'`
 
 | Parameter | Units | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `epm_material` | — | `'GaAs'` | Material whose tabulated Cohen-Bergstresser local form factors are used (currently `'GaAs'`). |
-| `epm_lattice_constant_au` | Bohr | `10.68d0` | Zincblende lattice constant $a$. |
+| `epm_material` | — | `'GaAs'` | `'GaAs'` \| `'Si'` \| `'Si_cb'` \| `'CdS'` \| `'graphene'` — selects the cited local form factors (see the materials table below). |
+| `epm_lattice_constant_au` | Bohr | `10.68d0` | Lattice constant $a$ (cubic materials). Non-cubic cells (CdS, graphene) use `&system al(1:3)`. |
 | `epm_pw_cutoff_ry` | Ry | `11.1d0` | Plane-wave cutoff $|\mathbf{k}+\mathbf{G}|^2$ for the basis set. |
+
+#### Supported materials & EPM references (Python-primary)
+
+**The Python EPM references are the source of truth — each is validated against its cited benchmark.** The fast in-SALMON MPI EPM (`src/epm/`) is *secondary*: it is calibrated against the Python references and is currently **deprecated for the non-cubic materials (CdS, graphene) until debugged** — generate those ground states with the Python references. The validated Python references:
+
+| Material | Module | Structure | Validation (cited benchmark) |
+| :--- | :--- | :--- | :--- |
+| GaAs | `epm_gaas_reference.py` | zincblende (V^A≠0), 4-fold FCC fold | Cohen-Bergstresser PR 141, 789 (1966) |
+| **Si** (Kunikiyo, default) | `epm_si_reference.py` | diamond (V^A≡0), 4-fold FCC fold | indirect gap **1.059 eV** (Kunikiyo calc 1.068), CBM @ 0.850·2π/a [Kunikiyo JAP 75, 297 (1994)] |
+| **Si_cb** (Cohen-Bergstresser) | `epm_si_reference.py --variant Si_cb` | diamond, same machinery as Si | indirect gap **0.818 eV**, CBM @ 0.850 [CB PR 141, 789 (1966)] |
+| CdS | `epm_wurtzite_cds.py` | wurtzite (polar), orthorhombic `al(1:3)`, 2-fold fold | direct gap **2.55 eV** vs Bergstresser-Cohen PR 164, 1069 (1967) 2.58 eV; exact folding |
+| graphene | `epm_graphene.py` | honeycomb (D6h, V_A=0), 2D | **zero gap** at Dirac K, **v_F=9.6×10⁵ m/s**, Γ=−7.78 eV, M=−2.70 eV [Ramanujam thesis, ASU 2015] |
+
+**`Si` vs `Si_cb`:** identical machinery (diamond, V^A≡0, a=10.26 Bohr, 4-fold folding) — the *only* difference is the V^S form-factor triplet. `Si` uses Kunikiyo (−0.2258, +0.05698, +0.070709 Ry → gap 1.059 eV); `Si_cb` uses Cohen-Bergstresser (−0.21, +0.04, +0.08 Ry → gap 0.818 eV). `Si` (Kunikiyo) is the default as it matches the modern Si gap target; `Si_cb` is for cross-validation. Run `python3 tests/run_all.py` to validate all references.
 
 ---
 
