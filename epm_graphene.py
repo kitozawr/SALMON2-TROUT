@@ -356,6 +356,31 @@ def main_gs(sysname=GRAPHENE_SYSNAME, num_kgrid=GRAPHENE_NUM_KGRID,
     return eigen, occup
 
 
+# 2D hexagonal-BZ high-symmetry points (reduced coords of the hex reciprocal)
+# and a primitive band path for the clean Dirac-cone level-structure plot.
+# K is the Dirac point = (2 b1 + b2)/3 -> reduced (2/3, 1/3) (matches
+# high_symmetry_points()); reduced (1/3,1/3) is NOT a BZ corner.
+GRAPHENE_HS = {'Gamma': (0, 0), 'M': (0.5, 0), 'K': (2/3, 1/3)}
+GRAPHENE_BANDPATH = ['Gamma', 'M', 'K', 'Gamma']
+GRAPHENE_BANDPATH_NB = 4        # 2 pi/pi* + 2 higher
+GRAPHENE_BANDPATH_NDIV = 50
+
+
+def main_bandpath(sysname=GRAPHENE_SYSNAME, outdir='./'):
+    """Emit SYSNAME_bandpath.data: the clean primitive (2-atom) bands along
+    Gamma-M-K-Gamma, showing the Dirac cone at K (energies -> Hartree)."""
+    import epm_io
+    Gcart, _ = build_pw_basis(GRAPHENE_CUTOFF_EV)
+    tau = basis_atoms()
+    b1, b2 = reciprocal_vectors()
+    Brec = np.array([b1, b2])
+    qreds, kcarts, dists, node_d = epm_io.build_path(GRAPHENE_HS, GRAPHENE_BANDPATH,
+                                                     GRAPHENE_BANDPATH_NDIV, Brec)
+    eig_ev = np.array([bands_at_k(kc, Gcart, tau, GRAPHENE_BANDPATH_NB) for kc in kcarts])
+    epm_io.write_bandpath_file(sysname, outdir, 'graphene', GRAPHENE_BANDPATH, node_d,
+                               dists, qreds, eig_ev / HA_TO_EV, nv=1, spinor=0)
+
+
 def _print_validation():
     d = assert_geometry()
     print(f"graphene EPM (Ramanujam local, Config A 2D): a={A_LATT} Ang, bond={d:.3f} Ang")
@@ -372,9 +397,13 @@ def _print_validation():
 
 
 if __name__ == '__main__':
-    if len(sys.argv) > 1 and sys.argv[1] == 'validate':
+    mode = sys.argv[1] if len(sys.argv) > 1 else ''
+    if mode == 'validate':
         _print_validation()            # band/folding validation only (no files)
+    elif mode == 'bandpath':
+        main_bandpath()                # clean primitive band path only
     else:
         _print_validation()
         print()
         main_gs()                      # emit the scalar SBE ground-state files
+        main_bandpath()                # + the clean primitive band path

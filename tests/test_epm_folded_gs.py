@@ -72,6 +72,16 @@ check("graphene supercell reproduces primitive Dirac energy (struct_norm)",
       abs(evK_rect[1] - evK_prim[0]) < 1e-3 and abs(evK_rect[2] - evK_prim[1]) < 1e-3)
 check("graphene 4 atoms in rectangular cell", len(posR) == 4)
 
+# bandpath high-symmetry K must be the Dirac point (gapless) -- guards the
+# reduced-coord K=(2/3,1/3) vs the non-corner (1/3,1/3) bug.
+b1p, b2p = G.reciprocal_vectors()
+Kpath = np.array(G.GRAPHENE_HS['K']) @ np.array([b1p, b2p])
+evKp = np.sort(np.linalg.eigvalsh(G.build_hamiltonian(Kpath, Gp, G.basis_atoms())))
+check("graphene bandpath K is the gapless Dirac point", abs(evKp[1] - evKp[0]) < 1e-2)
+# CdS primitive direct gap at Gamma ~ 2.5 eV (BC1967) -- bandpath sanity
+gap_cds, _, _ = W.direct_gap_at_gamma_primitive(9.0)
+check("CdS bandpath Gamma direct gap ~2.5 eV", 2.3 < gap_cds < 2.8)
+
 # --- graphene GS emission ----------------------------------------------------
 with tempfile.TemporaryDirectory() as td:
     td = td + '/'

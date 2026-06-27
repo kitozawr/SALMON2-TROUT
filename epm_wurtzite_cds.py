@@ -307,6 +307,32 @@ def main_gs(sysname=CDS_SYSNAME, num_kgrid=CDS_NUM_KGRID, nstate=CDS_NSTATE,
     return eigen, occup
 
 
+# Hexagonal-BZ high-symmetry points (reduced coords of the hex reciprocal) and
+# a primitive band path for the clean (unfolded) level-structure plot.
+CDS_HS_HEX = {'Gamma': (0, 0, 0), 'M': (0.5, 0, 0), 'K': (1/3, 1/3, 0),
+              'A': (0, 0, 0.5), 'L': (0.5, 0, 0.5), 'H': (1/3, 1/3, 0.5)}
+CDS_BANDPATH = ['A', 'Gamma', 'M', 'K', 'Gamma']
+CDS_BANDPATH_NB = 14            # 8 valence + 6 conduction
+CDS_BANDPATH_NDIV = 40
+CDS_BANDPATH_CUTOFF_RY = 12.0
+
+
+def main_bandpath(sysname=CDS_SYSNAME, outdir='./'):
+    """Emit SYSNAME_bandpath.data: the clean primitive (hexagonal-cell) bands
+    along CDS_BANDPATH, for the unfolded level-structure plot."""
+    import epm_io
+    a_au, c_au = CDS_A_ANG * ANG_TO_BOHR, CDS_C_ANG * ANG_TO_BOHR
+    a1, a2, a3 = hexagonal_vectors_au(a_au, c_au)
+    Brec, _ = reciprocal(a1, a2, a3)
+    pos, spec = hex_primitive_atoms(a_au, c_au)
+    Gcart, _ = build_pw_basis(Brec, CDS_BANDPATH_CUTOFF_RY)
+    qreds, kcarts, dists, node_d = epm_io.build_path(CDS_HS_HEX, CDS_BANDPATH,
+                                                     CDS_BANDPATH_NDIV, Brec)
+    eig = np.array([bands_at_k(kc, Gcart, pos, spec, CDS_BANDPATH_NB) for kc in kcarts])
+    epm_io.write_bandpath_file(sysname, outdir, 'CdS', CDS_BANDPATH, node_d,
+                               dists, qreds, eig, nv=CDS_NVAL_PRIM, spinor=0)
+
+
 def _print_validation():
     print('CdS wurtzite EPM (BC1967 local form factors):')
     print(f'  SBE cell al(1:3) = {np.round(cds_cell_au(),3)} Bohr  (a, a*sqrt3, c)')
@@ -324,9 +350,13 @@ def _print_validation():
 
 
 if __name__ == '__main__':
-    if len(sys.argv) > 1 and sys.argv[1] == 'validate':
+    mode = sys.argv[1] if len(sys.argv) > 1 else ''
+    if mode == 'validate':
         _print_validation()            # band/folding validation only (no files)
+    elif mode == 'bandpath':
+        main_bandpath()                # clean primitive band path only
     else:
         _print_validation()
         print()
         main_gs()                      # emit the scalar SBE ground-state files
+        main_bandpath()                # + the clean primitive band path

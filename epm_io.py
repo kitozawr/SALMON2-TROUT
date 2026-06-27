@@ -104,6 +104,54 @@ def write_epm_gs_files(sysname, outdir, material, kpoint_cart, b_matrix,
           f'(nk={nk}, nb={nb})')
 
 
+def build_path(hs_points, labels, ndiv, b_matrix):
+    """Sample a high-symmetry path. hs_points: {label: reduced-coord tuple};
+    labels: ordered node labels; b_matrix rows = reciprocal vectors [a.u.] (the
+    same dimension as the reduced coords, 2 or 3). Returns
+    (qreds[N,d], kcarts[N,d], dists[N], node_dists[len(labels)])."""
+    b = np.asarray(b_matrix)
+    qreds, kcarts, dists, node_d = [], [], [], [0.0]
+    cum = 0.0
+    nseg = len(labels) - 1
+    for iseg in range(nseg):
+        qa = np.array(hs_points[labels[iseg]], dtype=float)
+        qb = np.array(hs_points[labels[iseg + 1]], dtype=float)
+        ka, kb = qa @ b, qb @ b
+        seg_len = np.linalg.norm(kb - ka)
+        last = (iseg == nseg - 1)
+        for s in range(ndiv + (1 if last else 0)):
+            t = s / ndiv
+            q = qa + t * (qb - qa)
+            qreds.append(q); kcarts.append(q @ b); dists.append(cum + t * seg_len)
+        cum += seg_len
+        node_d.append(cum)
+    return np.array(qreds), np.array(kcarts), np.array(dists), node_d
+
+
+def write_bandpath_file(sysname, outdir, material, labels, node_dists, dists,
+                        qreds, eigen_ha, nv, spinor=0):
+    """Write SYSNAME_bandpath.data (primitive-cell unfolded bands) in the exact
+    format plot_sbe_results.py::_load_bandpath reads. eigen_ha: (N, nb) [Ha];
+    qreds: (N, d) reduced coords (d=2 padded to 3)."""
+    N, nb = eigen_ha.shape
+    q3 = np.zeros((N, 3))
+    q3[:, :qreds.shape[1]] = qreds
+    fname = f'{outdir}{sysname}_bandpath.data'
+    with open(fname, 'w') as f:
+        f.write(f'# unfolded primitive-cell band path -- EPM {material} reference\n')
+        f.write(f'# spinor = {spinor}\n')
+        f.write(f'# nv = {nv}\n')
+        f.write(f'# nb = {nb}\n')
+        f.write('# nodes: ' + '  '.join(f'{l} {d:.7f}'
+                                        for l, d in zip(labels, node_dists)) + '\n')
+        f.write('# ik, dist, q1, q2, q3 (primitive reduced), E_1..E_nb [Ha]\n')
+        for ik in range(N):
+            f.write('{:6d}{:14.7f}{:10.5f}{:10.5f}{:10.5f}'.format(
+                ik + 1, dists[ik], q3[ik, 0], q3[ik, 1], q3[ik, 2]))
+            f.write(''.join(f'{x:18.10E}' for x in eigen_ha[ik]) + '\n')
+    print(f'# EPM ({material}): wrote band path {fname} ({N} k-points, {nb} bands, nv={nv})')
+
+
 def _write_tm_block(f, mat, nk, nb):
     for ik in range(nk):
         for ib in range(nb):
