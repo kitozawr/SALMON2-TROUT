@@ -21,16 +21,17 @@ No channel code changes — every dissipation channel reads the struct. A materi
 
 ### Effect-support matrix (which modes are allowed per material) ✅
 
-| Effect | GaAs | Si | CdS | CdS source |
-|---|---|---|---|---|
-| EPM band structure | ✅ CB1966 | ✅ Kunikiyo 1994 | ✅ **validated** (2.55 vs 2.58 eV) | BC1967; exact 2-fold folding to the al-vector SBE cell |
-| Kuhn-Zurek decoherence | ✅ | ✅ | ✅ | material-independent (λ=k_B T/τ_m, user-supplied) |
-| Coulomb HF | ✅ ε=12.9 | ✅ ε=11.7 | ✅ ε=9.0 | static dielectric (isotropic avg) [md] |
-| Electron-phonon | ✅ Fischetti 1e14 | ✅ Meng 1.3e14 | ✅ Fröhlich LO 38 meV, ν_sat=2.9e13 | ħω_LO [Raman], α≈0.5 [cyclotron]; ν_sat = α·ω_LO [md] |
-| Impact ionization | ✅ Stobbe quartic | ✅ Keldysh quadratic | ✅ E_th=3.6 eV; **prefactor = user fit param** | E_th=1.5·E_g [md (3/2)E_g]; prefactor scarce → must set `sbe_ii_prefactor` |
-| Carrier-carrier (e-e/e-h) | ✅ | ✅ | ⛔ **forbidden** | no cited CdS rate scale (not in the md) |
+| Effect | GaAs | Si | CdS | graphene | CdS source |
+|---|---|---|---|---|---|
+| EPM band structure | ✅ CB1966 | ✅ Kunikiyo 1994 | ✅ **validated** (2.55 vs 2.58 eV) | ✅ **validated** (Dirac cone, v_F=9.6e5) | BC1967; exact 2-fold folding to the al-vector SBE cell |
+| Kuhn-Zurek decoherence | ✅ | ✅ | ✅ | ⛔ **disabled by policy** (G6) | material-independent (λ=k_B T/τ_m, user-supplied) |
+| Coulomb HF | ✅ ε=12.9 | ✅ ε=11.7 | ✅ ε=8.9 | 🚧 (2D V(q)=2πe²/εq) | static dielectric (isotropic avg) [Berlincourt 1963] |
+| Electron-phonon | ✅ Fischetti 1e14 | ✅ Meng 1.3e14 | ✅ Fröhlich LO 38 meV, ν_sat=2.9e13 | 🚧 E2g/A1'/acoustic (G4) | ħω_LO [Raman], α≈0.5 [cyclotron]; ν_sat = α·ω_LO [md] |
+| Impact ionization | ✅ Stobbe quartic | ✅ Keldysh quadratic | ✅ E_th=3.6 eV; **prefactor = user fit param** | 🚧 Auger (gapless) | E_th=1.5·E_g [md (3/2)E_g]; prefactor scarce → must set `sbe_ii_prefactor` |
+| Carrier-carrier (e-e/e-h) | ✅ | ✅ | ✅ | 🚧 (G5) | **sub-100fs thermalization at n > 1e18, Shah 1986; Elsaesser 1989** |
+| Auger recombination | 🚧 | 🚧 | ✅ | 🚧 (gapless CM) | **Haury 1998 (C = 2.0e-30 cm⁶/s)** |
 
-CdS dissipation comes from the CdS physics-methods spec (md): Fröhlich polar-optical e-ph is the **primary** room-T channel. The impact-ionization **prefactor** is a fit parameter (no cited CdS value) — enabling II without an explicit `sbe_ii_prefactor` aborts. Carrier-carrier has no cited CdS rate → ⛔ forbidden (enabling it aborts). The **piezoelectric acoustic** (e₃₃/e₃₁/e₁₅ [Berlincourt 1963]) and **deformation-potential acoustic** channels are cited in the md but are **not yet SBE Lindblad channels** (future). ⛔ = enabling it for CdS aborts; nothing is borrowed from GaAs/Si.
+CdS dissipation: Fröhlich polar-optical e-ph is the **primary** room-T channel. The impact-ionization **prefactor** is a fit parameter (no cited CdS value) — enabling II without an explicit `sbe_ii_prefactor` aborts. **Carrier-carrier (e-e) and Auger recombination are now cited and enabled** — they switch on **dynamically when the carrier density exceeds the activation thresholds** (e-e at n ≳ 1×10¹⁸ cm⁻³ → sub-100 fs thermalization [Shah 1986; Elsaesser 1989]; Auger via C·n³ with C = 2.0×10⁻³⁰ cm⁶/s [Haury 1998]). The **piezoelectric acoustic** (e₃₃/e₃₁/e₁₅ [Berlincourt 1963]) and **deformation-potential acoustic** channels are cited but not yet SBE Lindblad channels (future). ⛔ = enabling it for that material aborts; nothing is borrowed between materials. 🚧 = the constants are cited and documented but the SBE channel/material wiring is in progress.
 
 ### What the code selects per material (the complete `s_material_params`) ✅
 
@@ -76,15 +77,16 @@ Notes: `eph_wraw` is the **un-normalized** D²/ħω weight; the channel normaliz
 |---|---|---|---|
 | `cell_au` (al box) | (7.816, 13.538, 12.685) Bohr = (a, a√3, c) | EPM geometry / `&system al(1:3)` | a=4.136 Å, c/a=1.623; BC1967 Table I |
 | `is_diamond` | `.false.` (V^A≠0, broken inversion) | EPM structure factor | wurtzite, u=3/8 |
-| `eps0 / eps_inf` | 9.0 / 5.3 | Coulomb HF | static/∞ dielectric (isotropic avg) [md] |
+| `eps0 / eps_inf` | 8.9 / 5.3 | Coulomb HF / screening | static/∞ dielectric (isotropic avg) [Berlincourt 1963] |
 | `eph_polar / eph_nph / eph_hw_mev(1)` | `.true.` / 1 / 38 meV | e-ph | Fröhlich LO [Raman; md] |
 | `eph_nu_sat_si` | 2.89e13 s⁻¹ | e-ph rate scale | α·ω_LO from α=0.5, ħω_LO=38 meV [md] |
 | `ii_form / ii_exponent / ii_threshold_ev` | keldysh_quadratic / 2 / 3.6 eV | impact ionization | Keldysh soft; E_th=1.5·E_g [md] |
 | `ii_prefactor` | **sentinel (−1)** → user must set `sbe_ii_prefactor` | impact ionization | no cited CdS prefactor (fit parameter) [md] |
-| `coulomb_ok / eph_ok / ii_ok` | `.true.` | provenance gates | cited in the md |
-| `eeh_ok` | `.false.` | provenance gate | no cited CdS carrier-carrier rate |
+| `auger_coeff` | 2.0e-30 cm⁶/s | Auger recombination | Haury et al., PRB 57, 11513 (1998) |
+| `ee_activation_n` | 1.0e18 cm⁻³ | e-e scattering threshold | Shah et al., IEEE JQE 22, 1728 (1986) |
+| `coulomb_ok / eph_ok / ii_ok / eeh_ok` | `.true.` | provenance gates | all cited |
 
-Every CdS constant carries its source; the impact-ionization **prefactor** is the one genuinely uncited quantity (a fit parameter per the md), so it stays a sentinel and the run aborts unless the user supplies `sbe_ii_prefactor`. Carrier-carrier stays forbidden. Piezoelectric (e₃₃/e₃₁/e₁₅ [Berlincourt 1963]) and deformation-acoustic are cited but not yet SBE channels.
+Every CdS constant carries its source. The impact-ionization **prefactor** is the one genuinely uncited quantity (a fit parameter), so it stays a sentinel and the run aborts unless the user supplies `sbe_ii_prefactor`. **Carrier-carrier (e-e) and Auger are now cited and enabled**, switching on dynamically above their density thresholds (`ee_activation_n`; Auger via C·n³). Piezoelectric (e₃₃/e₃₁/e₁₅ [Berlincourt 1963]) and deformation-acoustic are cited but not yet SBE channels.
 
 ## 1. EPM form factors (local pseudopotential)
 
@@ -259,6 +261,11 @@ g-type couple same-⟨100⟩-axis valleys; f-type orthogonal-axis. **Project dec
 | Si ε (static, non-polar) | 11.7 | std Si |
 | Si m_l / m_t / m_hh / m_lh | 0.98 / 0.19 / 0.49 / 0.16 mₑ | Si effective-mass tables |
 | Si LOPC | N/A (non-polar, no Fröhlich LO-plasmon) | Fischetti PRB 44, 5527 (1991) |
+| **CdS ε₀ / ε_∞ (isotropic avg)** | **8.9 / 5.3** | Berlincourt et al., PR 129, 1009 (1963) |
+| **CdS m*_e / m*_h** | **0.21 / 0.70 mₑ** | Chiang & Himpsel (per arXiv:1011.2793) |
+| **CdS Auger coeff (n-type)** | **2.0e-30 cm⁶/s** | Haury et al., PRB 57, 11513 (1998) |
+| **CdS e-e thermalization** | **< 100 fs at n ≥ 1e18 cm⁻³** | Shah et al., IEEE JQE 22, 1728 (1986); Elsaesser et al. PRL 66, 1757 (1991) |
+| **CdS Thomas-Fermi screening** | **dynamic q_TF(n, T_e), ε_∞ = 5.3** (fast e-e process) | Hwang-Das Sarma / Lindhard |
 | κ_TF² (degenerate, a.u.) | 4(3n/π)^⅓/ε = 4k_F/(πε) | Ashcroft-Mermin; arXiv:2312.13059 |
 | κ_D² (Debye, a.u.) | 4πn/(εk_BT) | Ashcroft-Mermin |
 | Lindhard F(x) | ½+(1−x²)/(4x)ln\|(1+x)/(1−x)\| | Lindhard, Mat.-Fys. Medd. 28, 8 (1954) |
@@ -267,3 +274,13 @@ g-type couple same-⟨100⟩-axis valleys; f-type orthogonal-axis. **Project dec
 | screening default | static Lindhard/RPA (b); LOPC (c) GaAs-only n≳5e17 | recommendation |
 
 **No HF double-counting:** carrier-carrier (F) = correlation (2nd-Born/GW) self-energy, dissipative only; the static screened-exchange shift stays in Σ^HF. Carrier-carrier conserves Σf_k and ΣE_k f_k (validation invariants).
+
+## 13. Lindblad jump operators (Auger / impact-ionization-recombination) 🚧
+
+Auger recombination and its inverse (impact ionization / carrier multiplication) are added as a **density-gated, number-conserving CPTP channel** built from GKLS jump operators on the active level set — the same Taj-Rossi → Kossakowski machinery used for the other scattering channels. Reusable across materials (written for graphene's gapless CM, reused for CdS).
+
+**Process & operators.** Auger recombination annihilates an electron–hole pair and promotes a third carrier; impact ionization is the inverse. On a level set with adiabatic populations `ρ̃`, the jump operators are the products `L_recomb ∝ a†_h' a_e1 a_e2` (two carriers → one hot carrier + recombination) and `L_ii ∝ a†_e1 a†_e2 a_h'` (one hot carrier → two), cast into amplitude-transfer maps that **conserve total carrier number** (Auger is number-conserving within the e+h subsystem) and apply Pauli blocking (final-state `(1−f)` factors clamped to [0,1]). Each finite step `exp(τD)` is a genuine GKLS map (τ>0).
+
+**Rate / gating.** The Auger rate per unit volume is `R_Auger = C·n³` (electron-density form) with the cited **C = 2.0×10⁻³⁰ cm⁶/s for CdS** [Haury 1998]; the channel is **density-gated** — it is inert below `ee_activation_n` (CdS 1×10¹⁸ cm⁻³ [Shah 1986]) and turns on as the photoexcited density crosses it. For **graphene** the process is **nearly thresholdless** (gaplessness → carrier multiplication, CM factor up to ~2 [Plötzing 2014]); the collinear-scattering phase space is regularized by the lifetime broadening generated self-consistently by the e-ph + e-e rates (not an ad-hoc width). Screening choice (`static`|`dynamical` RPA) is a modeling switch — static maximizes CM/AR, dynamical can suppress it [Tomadin et al., PRB 88, 035430 (2013)].
+
+**CPTP invariants (tested where implemented):** trace (carrier number) conserved; populations stay in [0, occ]; Hermiticity preserved; γ=0 → identity. Sources: Taj-Rossi PRA 78, 052113 (2008); Rosati et al. PRB 90, 125140 (2014); Auger coeff Haury et al. PRB 57, 11513 (1998).
