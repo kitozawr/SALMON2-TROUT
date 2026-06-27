@@ -103,7 +103,11 @@ module sbe_superres_ssbe
     !   * Impact ionization: Keldysh soft threshold E_th ~ 1.5 E_g = 3.6 eV
     !     [md, (3/2)E_g rule]; the PREFACTOR is a fit parameter (CdS-specific
     !     value scarce -- md), so the user must set sbe_ii_prefactor explicitly.
-    ! Carrier-carrier (e-e/e-h) has NO cited CdS rate -> stays forbidden.
+    ! Carrier-carrier (e-e/e-h) and Auger recombination are CITED and enabled,
+    ! density-gated: e-e sub-100fs thermalization at n >= 1e18 cm^-3 [Shah et al.,
+    ! IEEE JQE 22, 1728 (1986); Elsaesser PRL 66, 1757 (1991)]; Auger via C n^3,
+    ! C = 2.0e-30 cm^6/s [Haury et al., PRB 57, 11513 (1998)]. (The Auger Lindblad
+    ! jump-operator channel itself -- wiki Section 13 -- is still being wired.)
     ! Piezoelectric acoustic (e33/e31/e15 [Berlincourt PR 129,1009]) and
     ! deformation-potential acoustic are cited but NOT yet SBE Lindblad channels.
     ! =====================================================================
@@ -112,8 +116,10 @@ module sbe_superres_ssbe
     real(8), parameter, public :: CDS_C_BOHR    = 12.6877d0 ! c = 6.714 Ang (c/a=1.623) [BC1967]
     real(8), parameter, public :: CDS_U_INT     = 0.375d0   ! internal parameter u=3/8 [BC1967]
     real(8), parameter, public :: CDS_EG_EV     = 2.58d0    ! direct gap at Gamma (low-T) [BC1967 Table I]
-    real(8), parameter, public :: CDS_EPS0      = 9.0d0     ! static dielectric (isotropic avg) [md]
-    real(8), parameter, public :: CDS_EPS_INF   = 5.3d0     ! high-frequency dielectric [md]
+    real(8), parameter, public :: CDS_EPS0      = 8.9d0     ! static dielectric (isotropic avg) [Berlincourt 1963]
+    real(8), parameter, public :: CDS_EPS_INF   = 5.3d0     ! high-frequency dielectric [Berlincourt 1963]
+    real(8), parameter, public :: CDS_AUGER_C   = 2.0d-30   ! Auger coeff [cm^6/s] [Haury PRB 57, 11513 (1998)]
+    real(8), parameter, public :: CDS_EE_ACT_N  = 1.0d18    ! e-e activation density [cm^-3] [Shah JQE 22, 1728]
     real(8), parameter, public :: CDS_HW_LO_MEV = 38.0d0    ! Frohlich LO ~305 cm^-1 [Raman; md]
     real(8), parameter, public :: CDS_ALPHA_FR  = 0.5d0     ! Frohlich coupling alpha [md]
     ! Frohlich e-ph rate scale nu_sat = alpha * omega_LO (omega_LO = hw_LO/hbar):
@@ -230,6 +236,9 @@ contains
             mp%cell_au = (/ CDS_A_BOHR, CDS_ASQ3_BOHR, CDS_C_BOHR /)  ! orthorhombic
             mp%is_diamond   = .false.                  ! V^A != 0 (broken inversion)
             mp%coulomb_ok = .true.; mp%eph_ok = .true.; mp%ii_ok = .true.
+            mp%eeh_ok = .true.    ! e-e/Auger cited: sub-100fs @ n>=1e18 [Shah 1986;
+            ! Elsaesser 1991]; Auger C=2.0e-30 cm^6/s [Haury 1998]. (Auger Lindblad
+            ! jump-operator channel still being wired -- carrier-carrier works now.)
             mp%eps0 = CDS_EPS0;  mp%eps_inf = CDS_EPS_INF
             ! Frohlich polar-optical: a single dominant LO mode at 38 meV; the
             ! rate scale nu_sat = alpha*omega_LO is the cited Frohlich coupling.

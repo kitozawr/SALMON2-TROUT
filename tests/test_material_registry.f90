@@ -82,13 +82,13 @@ program test_material_registry
     if (.not. cds%eph_ok)     call bad('CdS e-ph (Frohlich) should be enabled (md cited)')
     if (.not. cds%coulomb_ok) call bad('CdS Coulomb should be enabled (md cited eps)')
     if (.not. cds%ii_ok)      call bad('CdS impact ionization should be enabled (md cited E_th)')
-    ! carrier-carrier has no cited CdS rate -> still forbidden
-    if (cds%eeh_ok)           call bad('CdS carrier-carrier must stay FORBIDDEN (no cited rate)')
+    ! carrier-carrier (e-e) now cited for CdS (sub-100fs @ n>=1e18; Auger Haury)
+    if (.not. cds%eeh_ok)     call bad('CdS carrier-carrier should be enabled (Shah 1986; Haury 1998)')
     ! e-ph is the cited Frohlich polar-LO at 38 meV
     if (.not. cds%eph_polar)  call bad('CdS should be flagged polar (Frohlich)')
     call ichk('CdS eph_nph (single Frohlich LO)', cds%eph_nph, 1)
     call chk('CdS LO hw = 38 meV', cds%eph_hw_mev(1), 38.0d0)
-    call chk('CdS eps0', cds%eps0, 9.0d0)
+    call chk('CdS eps0', cds%eps0, 8.9d0)
     call chk('CdS II threshold = 1.5 Eg', cds%ii_threshold_ev, 3.6d0)
     ! II prefactor is a fit parameter (md): registry holds a sentinel, not a value
     if (cds%ii_prefactor > 0d0) call bad('CdS II prefactor must be a sentinel (fit parameter)')
