@@ -26,8 +26,8 @@ No channel code changes — every dissipation channel reads the struct. A materi
 | EPM band structure | ✅ CB1966 | ✅ Kunikiyo 1994 | ✅ **validated** (2.55 vs 2.58 eV) | ✅ **validated** (Dirac cone, v_F=9.6e5) | BC1967; exact 2-fold folding to the al-vector SBE cell |
 | Kuhn-Zurek decoherence | ✅ | ✅ | ✅ | ⛔ **disabled by policy** (G6) | material-independent (λ=k_B T/τ_m, user-supplied) |
 | Coulomb HF | ✅ ε=12.9 | ✅ ε=11.7 | ✅ ε=8.9 | 🚧 (2D V(q)=2πe²/εq) | static dielectric (isotropic avg) [Berlincourt 1963] |
-| Electron-phonon | ✅ Fischetti 1e14 | ✅ Meng 1.3e14 | ✅ Fröhlich LO 38 meV, ν_sat=2.9e13 | 🚧 E2g/A1'/acoustic (G4) | ħω_LO [Raman], α≈0.5 [cyclotron]; ν_sat = α·ω_LO [md] |
-| Impact ionization | ✅ Stobbe quartic | ✅ Keldysh quadratic | ✅ E_th=3.6 eV; **prefactor = user fit param** | 🚧 Auger (gapless) | E_th=1.5·E_g [md (3/2)E_g]; prefactor scarce → must set `sbe_ii_prefactor` |
+| Electron-phonon | ✅ Fischetti 1e14 | ✅ Meng 1.3e14 | ✅ Fröhlich LO 38 meV, ν_sat=2.9e13 | 🚧 E2g/A1'/acoustic (G4) | ħω_LO [Raman], α≈0.5 [cyclotron]; ν_sat = α·ω_LO (derived from the cited α, ħω_LO) |
+| Impact ionization | ✅ Stobbe quartic | ✅ Keldysh quadratic | ✅ E_th=3.6 eV; **prefactor = user fit param** | 🚧 Auger (gapless) | E_th=1.5·E_g [(3/2)E_g rule]; prefactor scarce → must set `sbe_ii_prefactor` |
 | Carrier-carrier (e-e/e-h) | ✅ | ✅ | ✅ | 🚧 (G5) | **sub-100fs thermalization at n > 1e18, Shah 1986; Elsaesser 1989** |
 | Auger recombination | 🚧 | 🚧 | ✅ | 🚧 (gapless CM) | **Haury 1998 (C = 2.0e-30 cm⁶/s)** |
 
@@ -79,9 +79,9 @@ Notes: `eph_wraw` is the **un-normalized** D²/ħω weight; the channel normaliz
 | `is_diamond` | `.false.` (V^A≠0, broken inversion) | EPM structure factor | wurtzite, u=3/8 |
 | `eps0 / eps_inf` | 8.9 / 5.3 | Coulomb HF / screening | static/∞ dielectric (isotropic avg) [Berlincourt 1963] |
 | `eph_polar / eph_nph / eph_hw_mev(1)` | `.true.` / 1 / 38 meV | e-ph | Fröhlich LO [Raman; md] |
-| `eph_nu_sat_si` | 2.89e13 s⁻¹ | e-ph rate scale | α·ω_LO from α=0.5, ħω_LO=38 meV [md] |
-| `ii_form / ii_exponent / ii_threshold_ev` | keldysh_quadratic / 2 / 3.6 eV | impact ionization | Keldysh soft; E_th=1.5·E_g [md] |
-| `ii_prefactor` | **sentinel (−1)** → user must set `sbe_ii_prefactor` | impact ionization | no cited CdS prefactor (fit parameter) [md] |
+| `eph_nu_sat_si` | 2.89e13 s⁻¹ | e-ph rate scale | α·ω_LO; α=0.5 [cyclotron], ħω_LO=38 meV [Raman] |
+| `ii_form / ii_exponent / ii_threshold_ev` | keldysh_quadratic / 2 / 3.6 eV | impact ionization | Keldysh soft; E_th=1.5·E_g ((3/2)E_g rule) |
+| `ii_prefactor` | **sentinel (−1)** → user must set `sbe_ii_prefactor` | impact ionization | no cited CdS prefactor (it is a fit parameter) |
 | `auger_coeff` | 2.0e-30 cm⁶/s | Auger recombination | Haury et al., PRB 57, 11513 (1998) |
 | `ee_activation_n` | 1.0e18 cm⁻³ | e-e scattering threshold | Shah et al., IEEE JQE 22, 1728 (1986) |
 | `coulomb_ok / eph_ok / ii_ok / eeh_ok` | `.true.` | provenance gates | all cited |
