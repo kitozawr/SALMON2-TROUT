@@ -907,7 +907,7 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
             ! Kuhn-Zurek dephasing and/or impact-ionization channels, both in
             ! the same Houston basis (one shared ZHEEV), tau = +h/2 > 0
             !-----------------------------------------------------------------
-            if (sbe%flag_decoh .or. sbe%flag_impact) then
+            if (sbe%flag_decoh .or. sbe%flag_impact .or. sbe%flag_eph .or. sbe%flag_eeh) then
                 call build_HVG(nba, eigen_active, p_active, Ac_begin, HVG)
                 if (sbe%flag_coulomb) HVG = HVG + sbe%sigma_hf(:, :, ik)
                 call houston_dissipate(sbe, nba, rho_a, HVG, p_active, Ac_begin, X_a, &
@@ -936,7 +936,7 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
             !-----------------------------------------------------------------
             ! Step 3: D(h/2) -- Strang dissipative half-step (see Step 1)
             !-----------------------------------------------------------------
-            if (sbe%flag_decoh .or. sbe%flag_impact) then
+            if (sbe%flag_decoh .or. sbe%flag_impact .or. sbe%flag_eph .or. sbe%flag_eeh) then
                 call build_HVG(nba, eigen_active, p_active, Ac_end, HVG)
                 if (sbe%flag_coulomb) HVG = HVG + sbe%sigma_hf(:, :, ik)
                 call houston_dissipate(sbe, nba, rho_a, HVG, p_active, Ac_end, X_a, &
