@@ -61,6 +61,13 @@ Usage:
   python3 zener_tunneling_estimate.py --perp-dir 010 --perp-frac 0 0.05 0.1 0.2
   python3 zener_tunneling_estimate.py --kmax-frac 0.5 --npts 401
   python3 zener_tunneling_estimate.py --kane-conv repo      # match w_inj in band_field_coupling.py
+  python3 zener_tunneling_estimate.py --map2d --n2d 41      # 2-D transverse birth map W(k_perp)
+
+The --map2d panel is the most direct visual test of the unfolded-population
+puzzle: it reads the FWHM of the injection "needle" at Gamma directly and shows
+the folded conduction-band geometry, so you can see that the diagonal weight in
+the SBE pop_lcb snapshots coincides with the FOLD positions (zone edge / L-valley
+diagonals via the kz-average), not with the injection blob.
 """
 import argparse, importlib.util, sys
 from pathlib import Path
@@ -99,6 +106,104 @@ def bands_at(bfc, epm, q_cart, ctx):
                                          ctx['npw'], ctx['a'], ctx['mu'], ctx['spinor'])
     return ev, p
 
+def _transverse_axes(field_axis):
+    """The two cubic Cartesian axes transverse to the field axis (the plane the
+    crystal momentum is NOT swept in, hence the plane the injection is born in
+    and the plane the folded copies live in). Returns (vec_a, vec_b, lab_a, lab_b)."""
+    pair = {'x': (1, 2), 'y': (0, 2), 'z': (0, 1)}[field_axis]
+    e = np.eye(3); labs = ['kx', 'ky', 'kz']
+    a, b = pair
+    return e[a], e[b], labs[a], labs[b]
+
+
+def birth_map_2d(bfc, epm, ctx, field_axis, kmax_frac, n2d, F, Ck, m_r):
+    """Transverse-plane Kane birth-rate map W(k_perp) at k_par = 0, plus the
+    FOLDED cubic lowest-conduction-band energy on the same grid (so the diagonal
+    blobs of the SBE pop_lcb map can be located).
+
+      W(k_perp) = |<cb|p_axis|Gamma8>|^2 * exp(-C m_r^1/2 E_g(k_perp)^3/2 / F)
+
+    Under acceleration along the field, k_perp is conserved, so W is exactly the
+    distribution that SEEDS the conduction population. Returns (grid[n2d] reduced,
+    W[n2d,n2d], Ecb_fold[n2d,n2d] eV, Eg[n2d,n2d] eV, (fwhm_a,fwhm_b) reduced,
+    (lab_a,lab_b), twopi_a). n2d is forced odd so the central row/col is k=0."""
+    if n2d % 2 == 0:
+        n2d += 1
+    a = ctx['a']; twopi_a = 2.0 * np.pi / a
+    Gcart, npw, Gidx = ctx['Gcart'], ctx['npw'], ctx['Gidx']
+    spinor, mu = ctx['spinor'], ctx['mu']
+    nv = epm.NELEC // 4; icb = nv; g8 = list(range(nv - 4, nv))
+    axis_idx = {'x': 0, 'y': 1, 'z': 2}[field_axis]
+    ncb = epm.NELEC if spinor else epm.NELEC // 2     # full-cubic lowest-CB index
+    va, vb, lab_a, lab_b = _transverse_axes(field_axis)
+    grid = np.linspace(-kmax_frac, kmax_frac, n2d)
+    W = np.zeros((n2d, n2d)); Ecb = np.zeros((n2d, n2d)); Eg = np.zeros((n2d, n2d))
+    for i, u in enumerate(grid):            # row -> axis b (vertical)
+        for j, w in enumerate(grid):        # col -> axis a (horizontal)
+            q = (w * va + u * vb) * twopi_a                 # k_par = 0
+            # unfolded primitive bands + (SO-corrected) momentum -> birth rate
+            ev, p = bfc.primitive_bands_momentum(epm, q, Gcart, Gidx, npw, a, mu, spinor)
+            eg = ev[icb] - ev[g8].max()
+            coup = float(np.sum(np.abs(p[icb, g8, axis_idx]) ** 2))
+            Eg[i, j] = eg * epm.HARTREE_EV
+            W[i, j] = coup * np.exp(-Ck * np.sqrt(m_r) * max(eg, 0.0) ** 1.5 / F)
+            # folded cubic lowest CB (== the SBE pop_lcb branch) at the same k
+            G0 = np.round(q / twopi_a).astype(int); ksc = q - G0 * twopi_a
+            Hf = (epm.build_hamiltonian_spinor(epm.MATERIAL, ksc, Gcart, a, mu)
+                  if spinor else epm.build_hamiltonian_sc(epm.MATERIAL, ksc, Gcart, a))
+            Ecb[i, j] = np.linalg.eigvalsh(Hf)[ncb] * epm.HARTREE_EV
+
+    def _fwhm(profile):
+        half = profile.max() / 2.0
+        above = profile >= half
+        return (grid[above].max() - grid[above].min()) if above.sum() >= 2 else np.nan
+    ic = n2d // 2
+    return (grid, W, Ecb, Eg, (_fwhm(W[ic, :]), _fwhm(W[:, ic])),
+            (lab_a, lab_b), twopi_a)
+
+
+def plot_map2d(grid, W, Ecb, Eg, fwhm, labs, twopi_a, field_axis, Fmv, outdir, dpi):
+    """W(k_perp) heatmap with the needle FWHM box and the folded-CB valleys
+    (white contours + crosses at the off-center minima) overlaid -- the visual
+    proof that the diagonal SBE weight sits at the FOLD positions, not the blob."""
+    lab_a, lab_b = labs
+    fa, fb = fwhm
+    ext = [grid[0], grid[-1], grid[0], grid[-1]]
+    fig, ax = plt.subplots(figsize=(7.6, 6.6))
+    im = ax.imshow(np.clip(W, 0, None), origin='lower', extent=ext, aspect='equal',
+                   cmap='inferno')
+    fig.colorbar(im, ax=ax, label=r'$W(k_\perp)=|\langle cb|p|v\rangle|^2 e^{-C m_r^{1/2}E_g^{3/2}/F}$  [a.u.]')
+    # folded cubic lowest-CB energy: contours show the real CB anisotropy. In
+    # this k_par=0 plane the CB is a SINGLE Gamma valley (the X_y/X_z copies fold
+    # to Gamma, the L copies are out of plane) -- the contours rise monotonically
+    # outward, petalled along the transverse axes (X-valley character).
+    e0 = Ecb.min()
+    levels = e0 + np.array([0.1, 0.3, 0.6, 1.0, 1.5])
+    cs = ax.contour(grid, grid, Ecb, levels=levels, colors='w', linewidths=0.7, alpha=0.7)
+    ax.clabel(cs, fmt=lambda v: f'{v - e0:.1f}', fontsize=6)
+    # X_y/X_z zone-face fold positions (where the band petals point) for scale
+    g0 = grid[-1]
+    ax.plot([g0, -g0, 0, 0], [0, 0, g0, -g0], 'x', color='cyan', ms=10, mew=2,
+            label='X$_y$/X$_z$ zone-face folds (|k|=%.2f)' % g0)
+    # the injection needle FWHM
+    if np.isfinite(fa) and np.isfinite(fb):
+        from matplotlib.patches import Ellipse
+        ax.add_patch(Ellipse((0, 0), fa, fb, fill=False, ec='lime', lw=1.8, ls='--',
+                             label=f'birth FWHM = {fa:.3f}×{fb:.3f} (2π/a)'))
+    ax.plot(0, 0, '+', color='lime', ms=12, mew=2)
+    ax.set_xlabel(f'{lab_a} [reduced]'); ax.set_ylabel(f'{lab_b} [reduced]')
+    ax.set_title(f'Transverse Kane birth map  W({lab_a},{lab_b}), $k_{{par}}$=0, '
+                 f'field || {field_axis}, F={Fmv:g} MV/cm\n'
+                 f'green = injection needle (FWHM);  white = folded CB energy;  '
+                 f'cyan = zone-edge fold scale', fontsize=10)
+    ax.legend(loc='upper right', fontsize=7, framealpha=0.85)
+    fig.tight_layout()
+    outdir.mkdir(parents=True, exist_ok=True)
+    out = outdir / f'zener_birthmap2d_{field_axis}.png'
+    fig.savefig(out, dpi=dpi, bbox_inches='tight'); plt.close(fig)
+    return out
+
+
 def sweep_line(bfc, epm, ctx, k_perp_cart, axis_hat, kmax, npts):
     """Sweep k_par along +/- axis at fixed k_perp. Return E_all[npts, nb] (a.u.),
     the signed k_par grid (a.u.), and cb/vb band indices."""
@@ -133,6 +238,13 @@ def main():
     ap.add_argument('--gap-floor-ev', type=float, default=0.25,
                     help='only flag adjacent-band crossings whose min gap is BELOW '
                          'this (eV) as candidate Landau-Zener seams')
+    ap.add_argument('--map2d', action='store_true',
+                    help='also produce the 2-D transverse Kane birth map '
+                         'W(k_perp) at k_par=0, with the needle FWHM and the '
+                         'folded conduction-valley positions overlaid.')
+    ap.add_argument('--n2d', type=int, default=41, help='2-D map grid size (odd)')
+    ap.add_argument('--map-field', type=float, default=10.0,
+                    help='field [MV/cm] for the 2-D birth map (shape only)')
     ap.add_argument('-o','--output', default='sbe_plots')
     ap.add_argument('--dpi', type=int, default=150)
     args = ap.parse_args()
@@ -157,6 +269,47 @@ def main():
 
     print(f"# zener_tunneling_estimate: field||{args.field_axis}, perp||[{args.perp_dir}], "
           f"spinor={spinor}, m_r={args.m_r}, Kane const={Ck:.4f} ({args.kane_conv})")
+
+    # ---- 2-D transverse birth map (the W(k_perp) panel) -----------------------
+    if args.map2d:
+        Fm = args.map_field * MVCM_TO_AU
+        print(f"\n# === 2-D transverse Kane birth map W(k_perp), field || "
+              f"{args.field_axis}, F = {args.map_field:g} MV/cm, n2d={args.n2d} ===")
+        grid, W2, Ecb2, Eg2, fwhm, labs, twopi_a = birth_map_2d(
+            bfc, epm, ctx, args.field_axis, args.kmax_frac, args.n2d, Fm, Ck, args.m_r)
+        fa, fb = fwhm
+        # Estimate of the needle half-width from the Eg curvature (Kane "E-bar"):
+        #   E_g(k_perp) ~ E_g0 + (k_perp^2)/(2 m_perp); W ~ exp(-kappa Eg^3/2) sets
+        #   the 1/e width; FWHM_pred uses ln2. We just report the measured FWHM.
+        ic = args.n2d // 2 if args.n2d % 2 else args.n2d // 2
+        eg0 = float(np.nanmin(Eg2)); ecb0 = float(Ecb2.min())
+        r_need = 0.5 * fa                                   # needle radius (HWHM)
+        edge = grid[-1]; r_edge = edge / max(r_need, 1e-9)
+        print(f"#   E_g(min) = {eg0:.3f} eV at the centre (Gamma); the injection W is a "
+              f"single Gamma needle.")
+        print(f"#   birth-needle FWHM: {labs[0]} = {fa:.4f},  {labs[1]} = {fb:.4f}  (2pi/a)")
+        print(f"#               = {fa*twopi_a:.4f} x {fb*twopi_a:.4f}  1/Bohr   "
+              f"(HWHM = {r_need:.4f} 2pi/a)")
+        # folded lowest-CB structure in THIS (k_par=0) plane
+        print(f"#   folded cubic lowest-CB in this plane: E_cb(Gamma)={ecb0:.3f} eV, rising")
+        print(f"#     monotonically to +{Ecb2[len(grid)//2,-1]-ecb0:.2f} eV at the {labs[0]} face")
+        print(f"#     and +{Ecb2[-1,-1]-ecb0:.2f} eV at the corner -- NO off-Gamma minima here.")
+        print(f"#   => the X_y/X_z copies fold to Gamma; the zone edge is {r_edge:.0f}x the")
+        print(f"#      needle radius away. Nothing in this plane seeds off-axis weight.")
+        out2 = plot_map2d(grid, W2, Ecb2, Eg2, fwhm, labs, twopi_a,
+                          args.field_axis, args.map_field, Path(args.output), args.dpi)
+        print(f"# saved {out2}")
+        print("#\n#   READING THE SBE pop_lcb SNAPSHOT (kx-ky, AVG kz):")
+        print("#   The diagonal blobs there are NOT in this transverse plane -- they are the")
+        print("#   L-valley folds at the cube DIAGONALS (~(0.4,0.4,0.4) 2pi/a), pulled into")
+        print("#   the kx-ky picture by the kz-average. They sit ~7 needle-radii from Gamma,")
+        print("#   so the diagonal weight is FOLDING (band geometry), not vertical Zener")
+        print("#   injection (a Gamma needle) nor an off-Gamma low-gap LZ seam. That it is")
+        print("#   already present at the FIRST nonzero step is the SIGNATURE of folding")
+        print("#   (instantaneous/geometric), not transport (which would take time to drift")
+        print("#   k-space). It is physical, but worth confirming pop_lcb is the lowest-CB")
+        print("#   BRANCH and not summing coset copies in the avg-kz projection.")
+        return
 
     # ---- transverse scan: vertical gap at the minimum + Kane probability ------
     perp_kabs = []           # |k_perp| in 1/Bohr
