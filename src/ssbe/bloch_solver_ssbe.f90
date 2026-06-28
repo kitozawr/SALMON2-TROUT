@@ -1933,21 +1933,28 @@ subroutine apply_damping_channel(nba, rho, i_src, i_dst, gamma_ch, tau)
 end subroutine apply_damping_channel
 
 
-! Population of band `ib_target` resolved per k-point, in the stationary
-! Bloch (crystal-gauge) eigenbasis.
+! Population of band `ib_target` resolved per k-point, in the instantaneous
+! Houston (adiabatic) eigenbasis -- the SAME basis the propagator and the
+! dissipation half-step use, so an unexcited adiabatically-following state
+! reports ZERO conduction population (no spurious gauge offset).
 !
 ! In the Velocity Gauge (VG) the SBE propagates rho(k,t) at the fixed grid
-! crystal momentum k, while the physical electrons are displaced to
-!   k'(t) = k - A(t)    (A in a.u., e/hbar = 1)
-! The crystal-gauge population at k requires projecting onto the eigenstates
-! of H_0(k'), the field-free Hamiltonian evaluated at the shifted momentum.
-! To first order in A(t) (valid when |A(t)| << BZ size):
-!   H_0(k - A(t)) ≈ H_0(k) + (k'-k)·∂H_0/∂k = H_0(k) - A(t)·p(k)
-!                 = diag(eigen) - A·p   (note: MINUS sign, unlike Houston + sign)
-! We diagonalise H_crystal to get U_shifted, apply a greedy bipartite match
-! on |U_shifted_ij| to correct the energy-sort ambiguity of ZHEEV at near-
-! degeneracies, then form rho_crystal = U_sorted^dagger rho_VG U_sorted and
-! return Re(rho_crystal[ia_target, ia_target]).
+! canonical crystal momentum k; the physical (kinetic) momentum of the carrier
+! is k + A(t) (A in a.u., e/hbar = 1). The state it occupies is therefore the
+! eigenstate of the instantaneous VG Hamiltonian
+!   H_VG(k,t) = H_0(k) + A(t)·p(k) ≈ H_0(k + A(t))            [build_HVG]
+! -- the field-free Hamiltonian at the SHIFTED kinetic momentum k + A. The
+! population at k must project onto THIS basis (the +A·p Houston basis), not
+! the opposite-shifted H_0(k - A) = H_0 - A·p: projecting onto the wrong-sign
+! basis leaves an unexcited valence state with a spurious, reversible CB weight
+! ~ (2 A·p / E_g)^2 (an O(A^2) offset that grows with the field envelope and is
+! largest where the interband coupling/gap is large -- e.g. the folded L-valley),
+! masking the genuine non-adiabatic (Zener/multiphoton) excitation.
+! We diagonalise H_VG to get U (the Houston rotation), apply a greedy bipartite
+! match on |U_ij| to correct the energy-sort ambiguity of ZHEEV at near-
+! degeneracies, then form rho_houston = U_sorted^dagger rho_VG U_sorted and
+! return Re(rho_houston[ia_target, ia_target]). The Coulomb HF self-energy is
+! added when active so the basis matches houston_dissipate exactly.
 subroutine calc_bloch_population_k(sbe, gs, Ac, ib_target, pop_k, icomm)
     use eigen_lapack, only: eigen_zheev
     implicit none
@@ -2000,18 +2007,20 @@ subroutine calc_bloch_population_k(sbe, gs, Ac, ib_target, pop_k, icomm)
             im = sbe%active_idx(j)
             do i = 1, nba
                 in = sbe%active_idx(i)
-                ! H_0(k') = H_0(k) - A·p  (crystal-gauge shift k' = k - A)
-                H(i, j) = -Ac(1)*p_k_full(in,im,1) &
-                          - Ac(2)*p_k_full(in,im,2) &
-                          - Ac(3)*p_k_full(in,im,3)
+                ! H_VG(k,t) = H_0(k) + A·p  (instantaneous Houston basis, k' = k + A)
+                H(i, j) = Ac(1)*p_k_full(in,im,1) &
+                          + Ac(2)*p_k_full(in,im,2) &
+                          + Ac(3)*p_k_full(in,im,3)
                 rho_a(i, j) = sbe%rho(in, im, ik)
             end do
         end do
         do i = 1, nba
             H(i, i) = H(i, i) + eigen_a(i)
         end do
+        ! Match houston_dissipate's basis exactly when the HF mean field is on.
+        if (sbe%flag_coulomb) H(:, :) = H(:, :) + sbe%sigma_hf(:, :, ik)
 
-        ! Diagonalize H_crystal = H_0(k-A): H = W Lambda W^dagger  (LAPACK ZHEEV)
+        ! Diagonalize H_VG = H_0(k+A): H = W Lambda W^dagger  (LAPACK ZHEEV)
         call eigen_zheev(H, evals, W)
 
         ! Overlap-tracking permutation (greedy bipartite match on |W_ij|).
@@ -2108,7 +2117,8 @@ subroutine calc_unfolded_population_k(sbe, gs, Ac, pop_lev, icomm)
     pop_local = 0d0
 
     do ik = sbe%ik_min, sbe%ik_max
-        ! Crystal-gauge projection: identical to calc_bloch_population_k
+        ! Instantaneous Houston projection: identical to calc_bloch_population_k
+        ! (H_VG = H_0(k) + A·p, the +A·p basis the propagator populates).
         p_k_full(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
         if (sbe%flag_vnl_correction) &
             p_k_full(:, :, :) = p_k_full(:, :, :) + gs%rvnl_tm_matrix(:, :, :, ik)
@@ -2120,15 +2130,16 @@ subroutine calc_unfolded_population_k(sbe, gs, Ac, pop_lev, icomm)
             im = sbe%active_idx(j)
             do i = 1, nba
                 in = sbe%active_idx(i)
-                H(i, j) = -Ac(1)*p_k_full(in,im,1) &
-                          - Ac(2)*p_k_full(in,im,2) &
-                          - Ac(3)*p_k_full(in,im,3)
+                H(i, j) = Ac(1)*p_k_full(in,im,1) &
+                          + Ac(2)*p_k_full(in,im,2) &
+                          + Ac(3)*p_k_full(in,im,3)
                 rho_a(i, j) = sbe%rho(in, im, ik)
             end do
         end do
         do i = 1, nba
             H(i, i) = H(i, i) + eigen_a(i)
         end do
+        if (sbe%flag_coulomb) H(:, :) = H(:, :) + sbe%sigma_hf(:, :, ik)
 
         call eigen_zheev(H, evals, W)
 

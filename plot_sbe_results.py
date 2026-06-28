@@ -543,40 +543,17 @@ def _wrap_to_fcc_bz(kpoints):
     return kpoints - cands[best]
 
 
-def _read_unfold_offsets(filepath):
-    """Parse the '# isub, offset G0 (sc reduced)' table from an unfold file.
-    Returns {isub: ndarray[3]}; falls back to the canonical FCC sublattice
-    offsets if the table is absent."""
-    offs = {}
-    with open(filepath, 'r') as f:
-        in_block = False
-        for line in f:
-            s = line.strip()
-            if s.startswith('# isub'):
-                in_block = True
-                continue
-            if in_block:
-                if s.startswith('#') or not s:
-                    break
-                p = s.split()
-                if len(p) == 4:
-                    offs[int(p[0])] = np.array([float(p[1]), float(p[2]), float(p[3])])
-                else:
-                    break
-    if len(offs) != 4:
-        offs = {1: np.zeros(3), 2: np.array([1., 0., 0.]),
-                3: np.array([0., 1., 0.]), 4: np.array([0., 0., 1.])}
-    return offs
-
-
-def _fold_to_cubic(kpoints_prim, sub, offsets):
-    """Recover the cubic supercell k (k_sc = k_prim - G0(isub)) and wrap it
-    into [-0.5, 0.5). Summing populations over the four sublattices at a fixed
-    k_sc collapses the FCC valleys (Gamma + the three X points) back onto the
-    regular cubic grid -- the clean single-zone view."""
-    g0 = np.array([offsets[int(s)] for s in sub])
-    ksc = kpoints_prim - g0
-    return ksc - np.round(ksc)
+def _fold_to_cubic(kpoints_prim):
+    """Recover the supercell k (k_sc = k_prim - G0(isub)) and wrap it into
+    [-0.5, 0.5). The coset offset G0 is a SUPERCELL reciprocal-lattice vector,
+    hence an integer triplet in sc-reduced units, so subtracting it then wrapping
+    is identical to wrapping k_prim directly: k_sc = k_prim - round(k_prim). This
+    needs neither the offset table (the *_sbe_nex_k_unfold.data output does not
+    carry one) nor the coset count, so it folds 2-coset (CdS/graphene), 4-coset
+    (cubic FCC) and any N-coset map alike. Summing the populations of the cosets
+    sharing a k_sc collapses the folded valleys back onto the single supercell
+    zone -- the clean per-k total of the lowest conduction band."""
+    return kpoints_prim - np.round(kpoints_prim)
 
 
 def _build_grid_info(kpoints):
@@ -701,12 +678,10 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
     if subtract_baseline:
         tag += '_db'
     # The unfolded primitive-zone map legitimately shows the CB1 population of
-    # every FCC valley (Gamma for sublattice 1, the X points for 2/3/4), so it
-    # carries satellite peaks at the zone boundary. The FOLDED view sums the
-    # four sublattices back onto the regular cubic grid (k_sc = k_prim - G0),
-    # collapsing the valleys into a single clean zone -- the per-cubic-k total
-    # of the lowest conduction band.
-    offsets = _read_unfold_offsets(filepath) if unfold else None
+    # every folded valley (each coset's offset G0), so it carries satellite peaks
+    # at the zone boundary. The FOLDED view sums the cosets sharing a supercell k
+    # (k_sc = k_prim - G0, an integer wrap) back onto the single supercell zone --
+    # the per-k total of the lowest conduction band (any coset count).
     ftag = 'nex_k_fold' + ('_db' if subtract_baseline else '')
 
     kx_u = ky_u = kz_u = ix = iy = iz = None
@@ -748,9 +723,9 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
         marg_ky.append(np.nanmean(pop3d, axis=(0, 2)))
         marg_kz.append(np.nanmean(pop3d, axis=(0, 1)))
 
-        # Folded cubic-zone view: sum the four sublattices at each k_sc.
+        # Folded supercell-zone view: sum the cosets sharing each k_sc.
         if unfold and sub is not None:
-            ksc = _fold_to_cubic(kpoints_prim, sub, offsets)
+            ksc = _fold_to_cubic(kpoints_prim)
             fpop = pop  # baseline (if any) already applied to `pop` above
             if fkx_u is None:
                 fkx_u, fky_u, fkz_u, fix, fiy, fiz = _build_grid_info(ksc)

@@ -155,9 +155,9 @@ subroutine write_sbe_nex_k_unfold_header(fh, nk)
     use inputoutput, only: t_unit_time
     implicit none
     integer, intent(in) :: fh, nk
-    write(fh,'(a)') "# Crystal-gauge population of the four PHYSICAL primitive bands"
-    write(fh,'(a)') "# (spins summed) closest to the gap -- VB-1, VB, CB1, CB2 -- of every"
-    write(fh,'(a)') "# folded primitive BZ point k_prim = k_sc + G0(isub)."
+    write(fh,'(a)') "# Houston-basis (instantaneous H_VG = H0 + A.p) population of the four"
+    write(fh,'(a)') "# PHYSICAL primitive bands (spins summed) closest to the gap -- VB-1, VB,"
+    write(fh,'(a)') "# CB1, CB2 -- of every folded primitive BZ point k_prim = k_sc + G0(isub)."
     write(fh,'(a)') "# (cubic-supercell EPM input; band assignment from SYSNAME_unfold.data)"
     write(fh,'(a)') "# Energies for the spectral plot come from SYSNAME_bandpath.data."
     write(fh,'(a,i0)') "# nk = ", nk
