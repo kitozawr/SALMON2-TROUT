@@ -1,17 +1,21 @@
 # SALMON-TROUT
 
-**Time-dependent Relaxation with Open-system Unified Treatment**
-
-A velocity-gauge semiconductor Bloch equation solver with many-body 
-CPTP Lindblad dissipation for strong-field THz/MIR physics.
+**T**ime-**R**esolved **O**pen-system **U**ltrafast **T**ransport — a velocity-gauge
+semiconductor Bloch equation solver with many-body CPTP Lindblad dissipation for
+strong-field THz/MIR physics, on EPM band structures (folded supercells **and**
+non-orthogonal primitive cells).
 
 ## Features
 - CF4/Magnus 4th-order unitary propagator
 - CPTP Lindblad channels: e-ph, e-e, impact ionization, Auger recombination
 - Systolic ring MPI for nonlocal collision integrals
-- Materials: Si, GaAs, CdS (wurtzite), Graphene (2D)
+- Materials: Si, GaAs (scalar + spin-orbit), CdS (wurtzite), Graphene (2D)
 - HHG with realistic scattering-limited coherence
 - Empirical Pseudopotential Method (EPM)
+- **Primitive-cell (non-orthogonal, no-folding) EPM→SBE** for every material —
+  removes the folded-supercell artifact (restores Kane valley ordering); see
+  [`samples/exercise_x7_primitive_cell_epm/`](samples/exercise_x7_primitive_cell_epm/)
+  and `wiki/00_implementation_status.md`
 
 ## Based on
 SALMON (Scalable Ab-initio Light-Matter simulator for Optics and Nanoscience). This repository is a fork of the original [SALMON project](http://salmon-tddft.jp/), an open-source software package for *ab-initio* quantum-mechanical calculations of light-matter interactions. 
