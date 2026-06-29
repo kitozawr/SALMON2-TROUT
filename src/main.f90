@@ -85,9 +85,13 @@ contains
     implicit none
     include 'versionf.h'
     print '(A)',         '##############################################################################'
-    print '(A)',         '#   SALMON2 - TROUT'
-    print '(A)',         '#   (Semiconductor-Bloch / EPM primitive-cell fork of SALMON)'
-    print '(A)',         '#'
+    print '(A)',         '#     _____ ____   ___  _   _ _____                                          #'
+    print '(A)',         '#    |_   _|  _ \ / _ \| | | |_   _|     ><(((o>   . o O ( unfolded BZ )      #'
+    print '(A)',         '#      | | | |_) | | | | | | | | |                                           #'
+    print '(A)',         '#      | | |  _ <| |_| | |_| | | |     SALMON2 - TROUT                        #'
+    print '(A)',         '#      |_| |_| \_\\___/ \___/  |_|     Time-Resolved Optics,                 #'
+    print '(A)',         '#                                      Unfolded-cell Transport               #'
+    print '(A)',         '##############################################################################'
     print '(A)',         '# SALMON: Scalable Ab-initio Light-Matter simulator for Optics and Nanoscience'
     print '(A,I1,".",I1,".",I1)', &
     &                    '#                             Version ', SALMON_VER_MAJOR, SALMON_VER_MINOR, SALMON_VER_MICRO
