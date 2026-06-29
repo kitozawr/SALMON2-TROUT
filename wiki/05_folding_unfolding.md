@@ -51,3 +51,38 @@ The unfold infrastructure of §3 is generalized from the hardcoded 4 FCC cosets 
 3. **The plotter** reads the cosets from the output and renders the unfolded + folded k–t maps for any N. The folded view recovers the supercell k as `k_sc = k_prim − round(k_prim)`: the coset offset G₀ is a supercell reciprocal-lattice vector (an **integer** triplet in sc-reduced units), so subtracting it then wrapping equals wrapping k_prim directly — **no offset table and no coset count are needed**, and 2-coset/4-coset/N-coset maps fold identically. *(Earlier `_fold_to_cubic` read an offset table from the `_sbe_nex_k_unfold.data` header — which that file never writes — and fell back to the canonical 4 FCC offsets, corrupting the **2-coset** CdS/graphene fold; the integer-wrap is offset-free and exact, verified to collapse every coset onto its isub=1 supercell k for both graphene (2) and GaAs (4).)* Verified end-to-end: the graphene 2-coset unfolded conduction population localizes at the **Dirac points** (zero near Γ) — the map correctly places carriers in the right primitive-BZ sectors.
 
 **HF sublattice projection for the 2-fold materials** (§4) is the open piece: the projector is wired for the cubic 4-fold cosets; the CdS/graphene 2-fold unfold weights must feed the same `apply_hf_sublattice_projection` for a folded-cell Coulomb run to be inter-coset-clean (TODO).
+
+## 8. Decisive test: primitive (unfolded) cell vs folded supercell ✅
+A clean-SBE artifact hunt converged here. Under a *proper multi-cycle 30 THz
+below-gap* drive (Keldysh γ≈0.2, the tunnelling regime), the **folded** cubic
+8-atom GaAs over-populates the L valley by ~760× relative to Γ — backwards for
+Zener tunnelling (L's gap 2.7 eV > Γ's 1.4 eV, so Γ should win). The
+inter-coset coupling projection (§4a) does **not** fix it: the dominant
+cube-corner k-points are coset-pure (coset 1) and `p_z`(VBM,LCB)=0 by symmetry,
+so band-17 fills through *intermediate bands that are all coset 1* — a dense
+**intra-coset multiband** cascade created by the folding (3–5 conduction bands
+within 1 eV of the LUMO at every supercell k).
+
+The primitive cell removes it at the source. [`../epm_gaas_primitive.py`](../epm_gaas_primitive.py)
+builds the 2-atom FCC zincblende GaAs on the **non-orthogonal** primitive cell
+(plane-wave basis = the all-same-parity / coset-0 G's = the BCC reciprocal
+lattice; no folding, no cosets). The clean SBE is **k-grid-agnostic** — it
+stores Cartesian k and couples via Cartesian p, so no metric tensor is needed
+in the propagator; only the EPM k-grid generation uses the general reciprocal
+basis. Running the *identical* 30 THz field:
+
+| valley | gap [eV] | FOLDED cubic, f_c/Γ | PRIMITIVE FCC, f_c/Γ | Kane f_c/Γ |
+|---|---|---|---|---|
+| Γ | 1.39 | 1   | 1            | 1 |
+| L | 2.68 | **760** | **7.5×10⁻³** | 9.3×10⁻⁴ |
+| X | 3.94 | 1.3 | 2.5×10⁻³ | 1.5×10⁻⁷ |
+
+The primitive result is **Zener-correct** (Γ≫L≫X, matching Kane's ordering;
+the residual factor ~10 vs Kane is the expected multiband/AC softening), while
+the folded result is inverted. Removing the folding swings L/Γ by **10⁵**. So
+the "L over-populates Γ" pattern was a **band-folding artifact**: the folded
+supercell's dense multiband manifold opens spurious intra-coset cascade paths
+that the (inter-coset) projections of §4/§4a cannot remove. **For clean
+valley/Zener physics, use the primitive (unfolded) cell.** Trace conserved
+(=8 electrons) on the non-orthogonal cell; gap validated (Γ 1.39, L 2.68,
+X 3.94 eV, textbook Cohen–Bergstresser GaAs).
