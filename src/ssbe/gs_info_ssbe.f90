@@ -38,10 +38,16 @@ module gs_info_ssbe
         ! energy-ordered supercell branches.
         logical :: have_unfold = .false.
         integer :: nv_prim = 0
-        integer, allocatable :: unfold_sub(:, :)     ! (nb, nk) dominant sublattice 1..4
+        ! Number of folding cosets/sublattices: 4 for the cubic FCC fold
+        ! (GaAs/Si), 2 for the wurtzite CdS / rectangular graphene folds. The
+        ! arrays below are dimensioned for the maximum (4); slots > n_coset are
+        ! left zero (so the 4-coset path is byte-unchanged) and the output/
+        ! population loops run only over 1..n_coset.
+        integer :: n_coset = 4
+        integer, allocatable :: unfold_sub(:, :)     ! (nb, nk) dominant coset 1..n_coset
         integer, allocatable :: unfold_prim(:, :)    ! (nb, nk) primitive band rank
         real(8), allocatable :: unfold_w(:, :, :)    ! (4, nb, nk) spectral weights, sum_s = 1
-        real(8) :: unfold_offset(1:3, 1:4)           ! G0 in sc reduced coords
+        real(8) :: unfold_offset(1:3, 1:4)           ! G0 in sc reduced coords (1..n_coset used)
     end type
 
 
@@ -122,6 +128,7 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     call comm_bcast(gs%have_unfold, icomm, 0)
     if (gs%have_unfold) then
         call comm_bcast(gs%nv_prim, icomm, 0)
+        call comm_bcast(gs%n_coset, icomm, 0)
         call comm_bcast(gs%unfold_sub, icomm, 0)
         call comm_bcast(gs%unfold_prim, icomm, 0)
         call comm_bcast(gs%unfold_w, icomm, 0)
@@ -180,23 +187,29 @@ contains
     end subroutine calc_lattice_info
 
 
-    ! Read k-point coordinates from SALMON's output file
+    ! Read k-point coordinates from SALMON's output file. Robustly skips ANY
+    ! number of leading comment ('#') / blank lines, so the EPM may add header
+    ! metadata (e.g. the non-orthogonal reciprocal vectors '# b1/# b2/# b3')
+    ! without breaking the reader -- the data rows start with the integer ik.
     subroutine read_k_data()
         implicit none
-        character(256) :: dummy
-        integer :: fh, ik, iik
+        character(256) :: line
+        integer :: fh, ik, iik, ios
         real(8) :: tmp(4)
         fh = open_filehandle(trim(gs_directory) // trim(sysname) // '_k.data', 'old')
-        read(fh, "(a)") dummy
-        read(fh, "(a)") dummy
-        read(fh, "(a)") dummy
-        read(fh, "(a)") dummy
-        read(fh, "(a)") dummy
-        do ik = 1, nk
-            read(fh, *) iik, tmp(1:4)
+        ik = 0
+        do
+            read(fh, "(a)", iostat=ios) line
+            if (ios /= 0) exit
+            line = adjustl(line)
+            if (len_trim(line) == 0) cycle
+            if (line(1:1) == '#') cycle
+            ik = ik + 1
+            read(line, *) iik, tmp(1:4)
             if (ik .ne. iik) stop "ik mismatch"
             gs%kpoint(1:3, ik) = tmp(1:3)
             gs%kweight(ik) = tmp(4)
+            if (ik == nk) exit
         end do
         close(fh)
     end subroutine read_k_data
@@ -281,7 +294,7 @@ contains
         character(256) :: dummy
         character(512) :: fpath
         logical :: exists
-        integer :: fh, ik, ib, iik, iib, isub, ibprim, i, nnk, nnb, ioff(3)
+        integer :: fh, ik, ib, iik, iib, isub, ibprim, i, nnk, nnb, ioff(3), ios
         real(8) :: w(4)
 
         fpath = trim(gs_directory) // trim(sysname) // '_unfold.data'
@@ -301,7 +314,18 @@ contains
         fh = open_filehandle(trim(fpath), 'old')
         read(fh, "(a)") dummy
         read(fh, "(a)") dummy
-        read(fh, *) nnk, nnb, gs%nv_prim
+        ! data header: "nk nb nv_prim [n_coset]". n_coset=4 (FCC cubic, GaAs/Si)
+        ! or 2 (wurtzite CdS / rectangular graphene). Legacy files omit it -> 4.
+        read(fh, "(a)") dummy
+        read(dummy, *, iostat=ios) nnk, nnb, gs%nv_prim, gs%n_coset
+        if (ios .ne. 0) then
+            read(dummy, *) nnk, nnb, gs%nv_prim
+            gs%n_coset = 4
+        end if
+        if (gs%n_coset < 1 .or. gs%n_coset > 4) then
+            write(*, '(a,i0)') "# read_unfold_data: unsupported n_coset = ", gs%n_coset
+            stop "unfold map: n_coset must be 1..4"
+        end if
         if (nnk .ne. nk) then
             write(*, '(a,i0,a,i0)') "# read_unfold_data: nk mismatch -- file has ", &
                 & nnk, ", SBE run expects ", nk
@@ -314,7 +338,7 @@ contains
             stop "unfold map: nb mismatch"
         end if
         read(fh, "(a)") dummy
-        do i = 1, 4
+        do i = 1, gs%n_coset
             read(fh, *) isub, ioff(1:3)
             if (isub .ne. i) stop "unfold map: offset index mismatch"
             gs%unfold_offset(1:3, i) = dble(ioff(1:3))
@@ -322,7 +346,8 @@ contains
         read(fh, "(a)") dummy
         do ik = 1, nk
             do ib = 1, nb
-                read(fh, *) iik, iib, isub, ibprim, w(1:4)
+                w = 0d0
+                read(fh, *) iik, iib, isub, ibprim, w(1:gs%n_coset)
                 if (ik .ne. iik) stop "unfold map: ik mismatch"
                 if (ib .ne. iib) stop "unfold map: ib mismatch"
                 gs%unfold_sub(ib, ik) = isub

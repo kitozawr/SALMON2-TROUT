@@ -1,6 +1,6 @@
 # Band Folding & Unfolding
 
-> Why the cubic-cell representation folds the primitive bands, why the folding is exact, how it is unfolded, and why it matters for Hartree-Fock. Applies identically to GaAs (zincblende) and Silicon (diamond) — both FCC. Folding/unfold pipeline ✅ implemented; HF sublattice projection (§4) 🚧 Part E.
+> Why a conventional-cell representation folds the primitive bands, why the folding is exact, how it is unfolded, and why it matters for Hartree-Fock. The **cubic 4-fold** fold (§1–5) applies identically to GaAs (zincblende) and Silicon (diamond) — both FCC. The **2-fold** folds (§6) cover wurtzite CdS (orthorhombic←hexagonal) and monolayer graphene (rectangular←hexagonal); the unfold pipeline is generalized from 4 to **N cosets** (§7). Folding/unfold pipeline ✅ implemented for all four; HF sublattice projection (§4) wired for the cubic 4-fold path.
 
 ## 1. The folding ✅
 The conventional cubic 8-atom cell is a supercell of 4 primitive FCC cells. The MP-grid band plot shows the primitive bands **folded 4-fold**: every cubic k-point carries the states of 4 primitive BZ points, and the conduction manifold appears as 4 overlaid copies of CB1/CB2/CB3. These dense crossings are an artifact of the supercell representation, not physics. [Popescu & Zunger, PRB 85, 085201 (2012)]
@@ -11,8 +11,14 @@ The cubic reciprocal lattice is an index-4 sublattice of the FCC reciprocal latt
 ## 3. Unfolding pipeline (does not require regenerating the ground state) ✅
 Three stages — EPM → SALMON → plotter — reusing the ground state as-is:
 1. **EPM builds the unfold map (once, cheap).** Re-diagonalize the MP-grid cubic Hamiltonians, assign every cubic band to the 4 FCC sublattices, write spectral weights w_s = |⟨ψ|P_s|ψ⟩|² (Σ_s w_s = 1) and the energy-ranked primitive-band index to `SYSNAME_unfold.data`. Must be on the same k-grid as the ground state. The GS dataset is NOT touched.
-2. **SALMON runs the dynamics.** With `SYSNAME_unfold.data` present, the SBE writes `SYSNAME_sbe_nex_k_unfold.data`: the crystal-gauge population of the physical levels (VB-1, VB, CB1, CB2; spins summed) at each primitive point k_prim = k_sc + G₀(s), distributed over sublattices by the spectral weights (not a hard argmax), so a symmetry degeneracy splits equally and the result is symmetric by construction.
+2. **SALMON runs the dynamics.** With `SYSNAME_unfold.data` present, the SBE writes `SYSNAME_sbe_nex_k_unfold.data`: the population of the physical levels (VB-1, VB, CB1, CB2; spins summed) at each primitive point k_prim = k_sc + G₀(s), distributed over sublattices by the spectral weights (not a hard argmax), so a symmetry degeneracy splits equally and the result is symmetric by construction.
 3. **Plotter visualizes** unfolded (primitive FCC BZ) and folded (cubic) k-maps, plus optional A(k,E) spectral views.
+
+**Projection basis (the `+A·p` Houston basis).** Both per-k population outputs (`_sbe_nex_k.data` and `_sbe_nex_k_unfold.data`) project ρ onto the **instantaneous Houston eigenbasis** — the eigenstates of `H_VG(k,t) = H₀(k) + A·p` (`build_HVG`; `+A·p` ⇒ kinetic momentum k+A), the *same* basis the propagator evolves in and the dissipation half-step (`houston_dissipate`, plus impact-ionization/Auger/e-ph/e-e) acts in, with the Coulomb HF self-energy added when active. This makes the reported CB population self-consistent with the population the dissipation channels see. *(Earlier the projection used the opposite shift `H₀(k−A) = H₀ − A·p`; the sign was inconsistent with the propagator. The post-pulse real excitation is sign-independent — at A=0 both bases are H₀(k) — but the during-pulse value now matches the dissipation basis.)*
+
+**Caveat — virtual polarization in the Houston per-k snapshots.** During the pulse, the *instantaneous Houston* population is dominated by the *reversible* virtual polarization: an unexcited valence state lags the field, so its projection onto any instantaneous basis carries an O(A²) admixture ∝ (A·p/E_g)², largest where the interband coupling/gap is large (e.g. the folded L-valley at the supercell-cube corner). This scales as A(t)² and **relaxes to zero as the field passes**; the genuine, irreversible excitation is the residual *after* the pulse (which for GaAs correctly peaks at Γ, the smallest gap). A weak-field Houston snapshot taken mid-pulse showing satellite weight at the zone corner is this virtual term, **not** a folding error. *(`--subtract-baseline` removes only the constant first-frame offset, not the time-varying A²(t) term.)*
+
+**Real-carrier map (the breathing-free observable).** To see *only* the real promoted carriers, the SBE also writes **`SYSNAME_sbe_nex_k_real.data`** (and the `_unfold_real` twin): the **fixed-basis (diabatic) occupation** Re ρ_cc(k) — the velocity-gauge diabatic transition probability, which is the k-resolved version of the standard excited count n_ex. It has **no A²(t) breathing**: it accumulates monotonically and freezes when the field passes. Verified on the sparse grids: GaAs Σ overshoot 0 % (vs Houston +85 %), graphene 0 % (vs Houston +312 %); the real carriers localize correctly (GaAs → Γ, graphene → the Dirac K points). A small residual (~20 %) survives only at the most strongly interband-coupled folds (the GaAs L-valley), and 0 % at Γ / in the BZ total. The plotter shows the real-carrier maps by default; `--instantaneous` adds the Houston (breathing) maps.
 
 ## 4. Why folding matters for Hartree-Fock (the bug and the fix) 🚧 Part E
 A Fock exchange Σ^HF that couples all bands at a given cubic k will **spuriously couple states belonging to different primitive-BZ sectors** (e.g. a Γ-derived state to an X-derived state). Physically this ejects an electron into the wrong valley even in weak fields (<100 kV/cm) — an artifact, because:
@@ -23,5 +29,60 @@ A Fock exchange Σ^HF that couples all bands at a given cubic k will **spuriousl
 
 **Validation:** with the projection ON, a weak-field run must show zero spurious Γ→X/Γ→L population transfer attributable to exchange. If inter-valley population appears in weak fields with HF on but not off, the projection is mis-applied.
 
+### 4a. Coset projection of the FIELD coupling (`yn_sbe_coset_proj`) ✅ + caveat
+The same argument applies to the *momentum* coupling p (hence H_VG, the Houston basis, the branch velocity): a translationally invariant perturbation conserves primitive crystal momentum, so ⟨coset s|p|coset s′⟩ = 0 for s≠s′. The EPM eigenvector mixing at folded-valley degeneracies makes these **spurious** — measured at ~0.7× the intra-coset coupling for GaAs (15–23 of 32 bands coset-mixed per k). `yn_sbe_coset_proj` (default-on, inert without an unfold map) block-diagonalizes p with the same soft projector Σ_s w_s(i)w_s(j) (off-diagonal only), so ρ stays block-diagonal over cosets. This is the core-propagator analogue of §4 and applies to all materials/mechanisms.
+
+**Empirical caveat (measured, GaAs 8×8×8, proper multi-cycle 30 THz below-gap drive):** removing the inter-coset coupling has **almost no effect** on the field-driven valley populations, and it does **not** explain the observed "L/corner dominance" in clean-SBE runs. Diagnostics show why: (i) the dominant cube-corner k-points are **coset-pure** (coset 1, w=1.00) — physically the primitive points near L; (ii) the direct VBM→LCB z-coupling p_z(16,17)=0 by symmetry, so band-17 is populated through **intermediate bands**, and at the corner **every** mediating band is also coset 1. The excitation is therefore **intra-coset multiband** dynamics, which the (inter-coset) projection correctly leaves untouched. So the coset projection is a correct fix for genuine inter-coset artifacts, but the valley-population pattern under a real below-gap drive is an intra-coset, multiband, large-k-sweep (Δk=E/ω≳BZ) effect — not a coset-folding hybridization artifact. (See §3 "Caveat — virtual polarization" and the real-carrier map discussion.)
+
 ## 5. Silicon vs GaAs ✅
 The folding/unfolding is **identical** for both — diamond and zincblende share the FCC Bravais lattice. The GaAs unfold machinery transfers to Si verbatim; only the EPM form-factor table changes (and V^A=0 for Si). High-symmetry valley positions differ (Si: 6 Δ-valleys near X at 0.85·2π/a along ⟨100⟩; GaAs: 4 L-valleys along ⟨111⟩), but the unfolding code finds sublattice character by spectral weight, not by hardcoded valley coordinates — no material-specific change needed.
+
+## 6. The 2-fold folds: CdS (wurtzite) and graphene ✅
+The non-cubic materials use a **2-fold** supercell instead of the cubic 4-fold, but the principle is identical: the supercell potential is primitive-periodic, so the supercell Hamiltonian is **block-diagonal over the 2 cosets** of the primitive reciprocal lattice (verified to machine precision, the analogue of §2's parity rule). Each coset block, diagonalized, returns the primitive bands at a shifted k.
+
+**CdS (wurtzite P6₃mc).** The SBE cell is the orthorhombic `al(1:3) = (a, a√3, c)` box — a √3×1×1 supercell of the hexagonal primitive cell (2 cosets). A plane wave G is coset 0 if `G·a_prim_i/2π` is integer for all primitive real vectors a_prim_i (it is a hexagonal reciprocal vector), else coset 1. At Γ the off-coset block is |H|≈8×10⁻¹⁷; coset 0 carries the 2.55 eV direct gap (Γ_hex), coset 1 the zone-edge partner (6.2 eV). Derivation + check: `orth_coset` / `orth_folding_check` in [`../epm_wurtzite_cds.py`](../epm_wurtzite_cds.py); the 2-fold coset offset is `[0, 1, 0]` (orthorhombic-reduced, the doubled a√3 direction).
+
+**graphene (monolayer).** The rectangular 4-atom cell — zigzag x (length a), armchair y (length √3a) — is a 2-fold supercell of the 2-atom hexagonal primitive cell. Coset classification (`rect_coset`) is the same primitive-reciprocal test; the cell reproduces the primitive **Dirac cone gaplessly** (the folded K lands gapless, verified) once the structure factor is normalized per primitive cell (`struct_norm` — the 4-atom sum is otherwise 2× too strong). `rect_folding_check` / `rect_atoms_ang` in [`../epm_graphene.py`](../epm_graphene.py); coset offset `[0, −1, 0]` (armchair direction).
+
+## 7. N-coset unfold pipeline (4 cosets cubic, 2 cosets wurtzite/rectangular) ✅
+The unfold infrastructure of §3 is generalized from the hardcoded 4 FCC cosets to **N cosets**, backward-compatibly:
+1. **The Python EPM emits the N-coset map** (`epm_io.compute_unfold_map` + `write_unfold_file`): per supercell band, the coset spectral weights `w_s` (Σ_s w_s = 1; exact folding ⇒ each band lives wholly in one coset), the dominant coset, and the primitive-band rank from that coset block's spectrum. `SYSNAME_unfold.data` carries `n_coset` as a 4th header field (4 = cubic, 2 = wurtzite/rectangular). CdS uses `orth_coset`, graphene `rect_coset`; GaAs/Si the 4-fold FCC map.
+2. **SALMON reads `n_coset`** (`gs_info_ssbe::read_unfold_data`; legacy 3-field GaAs headers fall back to 4), broadcasts it, and the population loop (`bloch_solver`) + the `_sbe_nex_k_unfold.data` writer (`datafile`/`realtime`) run over `1..n_coset`. The fixed-size (1:4) arrays are padded with zeros, so the **GaAs 4-coset path is byte-unchanged** (verified: legacy map → trace conserved, 4 cosets/k).
+3. **The plotter** reads the cosets from the output and renders the unfolded + folded k–t maps for any N. The folded view recovers the supercell k as `k_sc = k_prim − round(k_prim)`: the coset offset G₀ is a supercell reciprocal-lattice vector (an **integer** triplet in sc-reduced units), so subtracting it then wrapping equals wrapping k_prim directly — **no offset table and no coset count are needed**, and 2-coset/4-coset/N-coset maps fold identically. *(Earlier `_fold_to_cubic` read an offset table from the `_sbe_nex_k_unfold.data` header — which that file never writes — and fell back to the canonical 4 FCC offsets, corrupting the **2-coset** CdS/graphene fold; the integer-wrap is offset-free and exact, verified to collapse every coset onto its isub=1 supercell k for both graphene (2) and GaAs (4).)* Verified end-to-end: the graphene 2-coset unfolded conduction population localizes at the **Dirac points** (zero near Γ) — the map correctly places carriers in the right primitive-BZ sectors.
+
+**HF sublattice projection for the 2-fold materials** (§4) is the open piece: the projector is wired for the cubic 4-fold cosets; the CdS/graphene 2-fold unfold weights must feed the same `apply_hf_sublattice_projection` for a folded-cell Coulomb run to be inter-coset-clean (TODO).
+
+## 8. Decisive test: primitive (unfolded) cell vs folded supercell ✅
+A clean-SBE artifact hunt converged here. Under a *proper multi-cycle 30 THz
+below-gap* drive (Keldysh γ≈0.2, the tunnelling regime), the **folded** cubic
+8-atom GaAs over-populates the L valley by ~760× relative to Γ — backwards for
+Zener tunnelling (L's gap 2.7 eV > Γ's 1.4 eV, so Γ should win). The
+inter-coset coupling projection (§4a) does **not** fix it: the dominant
+cube-corner k-points are coset-pure (coset 1) and `p_z`(VBM,LCB)=0 by symmetry,
+so band-17 fills through *intermediate bands that are all coset 1* — a dense
+**intra-coset multiband** cascade created by the folding (3–5 conduction bands
+within 1 eV of the LUMO at every supercell k).
+
+The primitive cell removes it at the source. [`../epm_gaas_primitive.py`](../epm_gaas_primitive.py)
+builds the 2-atom FCC zincblende GaAs on the **non-orthogonal** primitive cell
+(plane-wave basis = the all-same-parity / coset-0 G's = the BCC reciprocal
+lattice; no folding, no cosets). The clean SBE is **k-grid-agnostic** — it
+stores Cartesian k and couples via Cartesian p, so no metric tensor is needed
+in the propagator; only the EPM k-grid generation uses the general reciprocal
+basis. Running the *identical* 30 THz field:
+
+| valley | gap [eV] | FOLDED cubic, f_c/Γ | PRIMITIVE FCC, f_c/Γ | Kane f_c/Γ |
+|---|---|---|---|---|
+| Γ | 1.39 | 1   | 1            | 1 |
+| L | 2.68 | **760** | **7.5×10⁻³** | 9.3×10⁻⁴ |
+| X | 3.94 | 1.3 | 2.5×10⁻³ | 1.5×10⁻⁷ |
+
+The primitive result is **Zener-correct** (Γ≫L≫X, matching Kane's ordering;
+the residual factor ~10 vs Kane is the expected multiband/AC softening), while
+the folded result is inverted. Removing the folding swings L/Γ by **10⁵**. So
+the "L over-populates Γ" pattern was a **band-folding artifact**: the folded
+supercell's dense multiband manifold opens spurious intra-coset cascade paths
+that the (inter-coset) projections of §4/§4a cannot remove. **For clean
+valley/Zener physics, use the primitive (unfolded) cell.** Trace conserved
+(=8 electrons) on the non-orthogonal cell; gap validated (Γ 1.39, L 2.68,
+X 3.94 eV, textbook Cohen–Bergstresser GaAs).

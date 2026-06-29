@@ -1,0 +1,59 @@
+!########################################################################################!
+! CdS (wurtzite) SBE real-time run on the Python-EPM ground state.                         !
+!----------------------------------------------------------------------------------------!
+! Step 2 of 2. Reads CdS_k.data / _eigen.data / _tm.data / _unfold.data written by the    !
+! Python EPM (step 1, see README -- the cubic Fortran EPM does NOT do wurtzite). The SBE  !
+! cell is the orthorhombic sqrt(3)x1x1 supercell al(1:3) = (a, a*sqrt3, c) [Bohr], a      !
+! 2-fold (2-coset) supercell of the hexagonal primitive cell. Plain dissipation-free run. !
+! sysname / al / num_kgrid / nstate / nelec MUST match the Python GS step.                !
+!----------------------------------------------------------------------------------------!
+! Units a.u.:  Length 1 [a.u.] = 0.52917721067 [Angstrom];  Energy 1 [a.u.] = 27.2114 eV  !
+!########################################################################################!
+
+&calculation
+    theory = 'sbe'
+/
+
+&control
+    sysname = 'CdS'
+/
+
+&units
+    unit_system = 'au'
+/
+
+&system
+    yn_periodic = 'y'
+    al(1:3) = 7.815907d0, 13.537548d0, 12.685217d0   ! orthorhombic (a, a*sqrt3, c) [Bohr]
+    nelec  = 32                                       ! 8-atom cell (4 CdS), 32 valence e
+    nstate = 32
+/
+
+&kgrid
+    num_kgrid(1:3) = 4, 4, 4
+/
+
+&tgrid
+    dt = 0.04d0
+    nt = 500
+/
+
+&emfield
+    ae_shape1      = 'Acos2'
+    epdir_re1(1:3) = 0.0d0, 0.0d0, 1.0d0   ! field || c (z); direct 2.5 eV gap at Gamma
+    I_wcm2_1       = 1.0d+11
+    tw1            = 20.0d0
+    omega1         = 0.06d0
+/
+
+&analysis
+    out_projection_step      = 20
+    out_projection_k_step    = 50          ! folded + 2-coset unfolded real-carrier maps
+    yn_out_intraband_current = 'y'
+/
+
+&sbe
+    ! all yn_sbe_* default OFF -> plain dissipation-free dynamics.
+    ! NOTE: CdS forbids the electron-hole carrier-carrier channel (yn_sbe_eeh) for
+    ! lack of a cited material constant; Auger (yn_sbe_auger) is available and CPTP.
+/

@@ -21,8 +21,14 @@ What is plotted
                              True THz resolution needs a ps-scale run.
   *_sbe_rt_energy.data   : total energy vs time
   *_sbe_nex.data         : excited electron count vs time
-  *_sbe_nex_k.data       : per-k Houston-basis LCB population:
-                             snapshot PNGs (3 projected planes) + time-k maps
+  *_sbe_nex_k_real.data  : per-k REAL-carrier LCB population (fixed-basis
+                             diabatic n_ex, no A^2 breathing) -- the default
+                             carrier map: snapshots + time-k maps. With
+                             *_unfold_real.data, also the primitive-BZ map.
+  *_sbe_nex_k.data       : per-k instantaneous Houston-basis LCB population
+                             (carries the reversible virtual breathing; plotted
+                             only with --instantaneous or if no _real file)
+  *_sbe_intra_current.data: intra-band (Houston) current vs the total current
   *_k.data + *_eigen.data: band structure along the requested path
                              k in reduced coords, energy shifted to VBM = 0 eV
   band.dat               : band structure from a theory='dft_band' run,
@@ -543,40 +549,17 @@ def _wrap_to_fcc_bz(kpoints):
     return kpoints - cands[best]
 
 
-def _read_unfold_offsets(filepath):
-    """Parse the '# isub, offset G0 (sc reduced)' table from an unfold file.
-    Returns {isub: ndarray[3]}; falls back to the canonical FCC sublattice
-    offsets if the table is absent."""
-    offs = {}
-    with open(filepath, 'r') as f:
-        in_block = False
-        for line in f:
-            s = line.strip()
-            if s.startswith('# isub'):
-                in_block = True
-                continue
-            if in_block:
-                if s.startswith('#') or not s:
-                    break
-                p = s.split()
-                if len(p) == 4:
-                    offs[int(p[0])] = np.array([float(p[1]), float(p[2]), float(p[3])])
-                else:
-                    break
-    if len(offs) != 4:
-        offs = {1: np.zeros(3), 2: np.array([1., 0., 0.]),
-                3: np.array([0., 1., 0.]), 4: np.array([0., 0., 1.])}
-    return offs
-
-
-def _fold_to_cubic(kpoints_prim, sub, offsets):
-    """Recover the cubic supercell k (k_sc = k_prim - G0(isub)) and wrap it
-    into [-0.5, 0.5). Summing populations over the four sublattices at a fixed
-    k_sc collapses the FCC valleys (Gamma + the three X points) back onto the
-    regular cubic grid -- the clean single-zone view."""
-    g0 = np.array([offsets[int(s)] for s in sub])
-    ksc = kpoints_prim - g0
-    return ksc - np.round(ksc)
+def _fold_to_cubic(kpoints_prim):
+    """Recover the supercell k (k_sc = k_prim - G0(isub)) and wrap it into
+    [-0.5, 0.5). The coset offset G0 is a SUPERCELL reciprocal-lattice vector,
+    hence an integer triplet in sc-reduced units, so subtracting it then wrapping
+    is identical to wrapping k_prim directly: k_sc = k_prim - round(k_prim). This
+    needs neither the offset table (the *_sbe_nex_k_unfold.data output does not
+    carry one) nor the coset count, so it folds 2-coset (CdS/graphene), 4-coset
+    (cubic FCC) and any N-coset map alike. Summing the populations of the cosets
+    sharing a k_sc collapses the folded valleys back onto the single supercell
+    zone -- the clean per-k total of the lowest conduction band."""
+    return kpoints_prim - np.round(kpoints_prim)
 
 
 def _build_grid_info(kpoints):
@@ -606,6 +589,64 @@ def _interp2d(grid2d, k_a, k_b, factor=8):
     return ka_f, kb_f, interp((KA, KB))
 
 
+def _read_bmatrix(kdata_path):
+    """Read the reciprocal vectors (# b1/# b2/# b3 [a.u.]) from a _k.data header,
+    written by the non-orthogonal EPM. Returns rows b1,b2,b3 (3x3) or None when
+    absent (orthogonal/legacy cubic dataset -> the reduced coords are already
+    axis-aligned and the standard heatmap is used)."""
+    try:
+        rows = {}
+        with open(kdata_path) as f:
+            for line in f:
+                s = line.strip()
+                if not s.startswith('#'):
+                    break
+                m = re.match(r'#\s*b([123])\s*=\s*([-\d.Ee+]+)\s+([-\d.Ee+]+)\s+([-\d.Ee+]+)', s)
+                if m:
+                    rows[int(m.group(1))] = [float(m.group(2)), float(m.group(3)), float(m.group(4))]
+        if len(rows) == 3:
+            return np.array([rows[1], rows[2], rows[3]])
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def _bmatrix_for(nex_file, suffix):
+    """Given a *_sbe_nex_k*.data file, return the reciprocal b_matrix from the
+    sibling ground-state {stem}_k.data, or None when it is absent / orthogonal.
+    Only the non-orthogonal (primitive) EPM writes the b1/b2/b3 header, so a
+    legacy cubic dataset transparently keeps the standard reduced-axis heatmap."""
+    stem = nex_file.name[:-len(suffix)] if nex_file.name.endswith(suffix) else nex_file.stem
+    kdata = nex_file.parent / f'{stem}_k.data'
+    return _read_bmatrix(kdata) if kdata.exists() else None
+
+
+def _cartesian_bz_grid(kfrac, pop, b_matrix, nbin):
+    """Un-shear a triclinic k-grid into a regular CARTESIAN heatmap volume.
+    kfrac (nk,3) reduced -> Cartesian k = kfrac @ b_matrix, wrapped into the
+    Wigner-Seitz BZ (nearest reciprocal-lattice vector), then averaged into an
+    nbin^3 regular Cartesian grid (NaN where no k falls -- the BZ corners). For
+    a dense input grid this gives a smooth heatmap of the true Brillouin zone.
+    Returns kx_u, ky_u, kz_u (bin centres, a.u.) and pop3d."""
+    kc = (kfrac - np.round(kfrac)) @ b_matrix          # into the reciprocal cell
+    # Wigner-Seitz wrap: subtract the nearest reciprocal lattice vector
+    ijk = np.array([[i, j, k] for i in (-1, 0, 1) for j in (-1, 0, 1) for k in (-1, 0, 1)])
+    G = ijk @ b_matrix                                  # (27,3) candidate G's
+    d2 = ((kc[:, None, :] - G[None, :, :]) ** 2).sum(axis=2)
+    kc = kc - G[np.argmin(d2, axis=1)]
+    kmax = np.abs(kc).max() * 1.0001
+    edges = np.linspace(-kmax, kmax, nbin + 1)
+    cen = 0.5 * (edges[1:] + edges[:-1])
+    ix = np.clip(np.digitize(kc[:, 0], edges) - 1, 0, nbin - 1)
+    iy = np.clip(np.digitize(kc[:, 1], edges) - 1, 0, nbin - 1)
+    iz = np.clip(np.digitize(kc[:, 2], edges) - 1, 0, nbin - 1)
+    ssum = np.zeros((nbin, nbin, nbin)); cnt = np.zeros((nbin, nbin, nbin))
+    np.add.at(ssum, (ix, iy, iz), pop)
+    np.add.at(cnt, (ix, iy, iz), 1.0)
+    pop3d = np.where(cnt > 0, ssum / np.maximum(cnt, 1.0), np.nan)
+    return cen, cen, cen, pop3d
+
+
 def _make_norm(vmin, vmax, log_scale):
     """Return a matplotlib Normalize or LogNorm for colormap scaling."""
     if log_scale and vmax > 0:
@@ -616,7 +657,7 @@ def _make_norm(vmin, vmax, log_scale):
 
 
 def _heatmap_ax(ax, k_a, k_b, grid2d, label_a, label_b, title,
-                vmin=None, vmax=None, factor=8, log_scale=False):
+                vmin=None, vmax=None, factor=8, log_scale=False, unit='reduced'):
     if grid2d.size == 0 or np.all(np.isnan(grid2d)):
         ax.set_title(title + " (no data)")
         return None
@@ -625,33 +666,35 @@ def _heatmap_ax(ax, k_a, k_b, grid2d, label_a, label_b, title,
                       vmax if vmax is not None else np.nanmax(gf),
                       log_scale)
     im = ax.imshow(
-        gf.T, origin='lower', aspect='auto',
+        gf.T, origin='lower', aspect='equal' if unit != 'reduced' else 'auto',
         extent=[ka_f[0], ka_f[-1], kb_f[0], kb_f[-1]],
         cmap=CMAP_POP, norm=norm, interpolation='nearest')
     plt.colorbar(im, ax=ax, shrink=0.8)
-    ax.set_xlabel(f'{label_a} [reduced]')
-    ax.set_ylabel(f'{label_b} [reduced]')
+    ax.set_xlabel(f'{label_a} [{unit}]')
+    ax.set_ylabel(f'{label_b} [{unit}]')
     ax.set_title(title)
     return im
 
 
 def _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi,
-                   log_scale=False, tag='nex_k'):
+                   log_scale=False, tag='nex_k', basis_label='Houston-basis',
+                   unit='reduced'):
     vmin = np.nanmin(pop3d)
     vmax = max(np.nanmax(pop3d), vmin + 1e-30)
 
     fig, axes = plt.subplots(1, 3, figsize=(19, 5.5))
     _heatmap_ax(axes[0], kx_u, ky_u, _project(pop3d, 2),
                 'kx', 'ky', 'pop_lcb: kx-ky (avg kz)',
-                vmin=vmin, vmax=vmax, log_scale=log_scale)
+                vmin=vmin, vmax=vmax, log_scale=log_scale, unit=unit)
     _heatmap_ax(axes[1], kx_u, kz_u, _project(pop3d, 1),
                 'kx', 'kz', 'pop_lcb: kx-kz (avg ky)',
-                vmin=vmin, vmax=vmax, log_scale=log_scale)
+                vmin=vmin, vmax=vmax, log_scale=log_scale, unit=unit)
     _heatmap_ax(axes[2], ky_u, kz_u, _project(pop3d, 0),
                 'ky', 'kz', 'pop_lcb: ky-kz (avg kx)',
-                vmin=vmin, vmax=vmax, log_scale=log_scale)
+                vmin=vmin, vmax=vmax, log_scale=log_scale, unit=unit)
 
-    fig.suptitle(f'Houston-basis LCB population,  t = {t_val:.6f} {t_unit}')
+    zone = 'Cartesian BZ (a.u.)' if unit != 'reduced' else 'reduced k'
+    fig.suptitle(f'{basis_label} LCB population [{zone}],  t = {t_val:.6f} {t_unit}')
     fig.tight_layout(rect=[0, 0, 1, 0.94])
     safe_t  = f'{t_val:.6f}'.replace('-', 'm').replace('+', 'p')
     out = output_dir / f'{tag}_snap_t{safe_t}{t_unit}.png'
@@ -690,24 +733,83 @@ def _save_kt_map(times, t_unit, k_vals, label_k, marginals, output_dir, dpi,
     print(f"  saved {out.name}")
 
 
+def _read_xy_data(filepath):
+    """Read a whitespace SALMON .data file -> ndarray (skip '#' comment lines)."""
+    rows = []
+    for line in open(filepath):
+        s = line.strip()
+        if not s or s.startswith('#'):
+            continue
+        try:
+            rows.append([float(x) for x in s.split()])
+        except ValueError:
+            continue
+    return np.array(rows) if rows else np.empty((0, 0))
+
+
+def plot_intra_current(filepath, rt_filepath, output_dir, dpi=150):
+    """Intra-band (Houston-basis) current J_intra(t), overlaid with the total
+    gauge-invariant current J_tot(t) from *_sbe_rt.data when available. In the
+    velocity gauge only J_tot is physical; J_intra is the physical drift part in
+    the Houston basis and J_inter = J_tot - J_intra the interband polarization."""
+    print(f"Processing {filepath.name} (intra-band Houston current) ...")
+    a = _read_xy_data(filepath)
+    if a.size == 0 or a.shape[1] < 4:
+        print("  (skip) no data")
+        return
+    t = a[:, 0]
+    Ji = a[:, 1:4]
+    Jt = None
+    if rt_filepath is not None:
+        rt = _read_xy_data(rt_filepath)
+        # *_sbe_rt.data total current Jm = columns 14:16 (1-indexed) -> 13:16
+        if rt.size and rt.shape[1] >= 16:
+            Jt = np.array([np.interp(t, rt[:, 0], rt[:, 13 + d]) for d in range(3)]).T
+
+    labels = ['x', 'y', 'z']
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4.6), sharex=True)
+    for d in range(3):
+        ax = axes[d]
+        if Jt is not None:
+            ax.plot(t, Jt[:, d], color='gray', lw=1.4, label='J_total (gauge-inv.)')
+            ax.plot(t, Jt[:, d] - Ji[:, d], color='steelblue', lw=1.0,
+                    alpha=0.8, label='J_inter (= tot - intra)')
+        ax.plot(t, Ji[:, d], color='crimson', lw=1.6, label='J_intra (Houston)')
+        ax.axhline(0, color='k', lw=0.5, ls=':')
+        ax.set_xlabel('time [a.u.]')
+        ax.set_ylabel(f'J_{labels[d]} [a.u.]')
+        ax.set_title(f'current {labels[d]}')
+        ax.legend(fontsize=8)
+    fig.suptitle('Intra-band (Houston-basis) vs total current  '
+                 '— intra = Boltzmann drift, vanishes when the field is off')
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    out = output_dir / 'sbe_intra_current.png'
+    fig.savefig(out, dpi=dpi, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  saved {out.name}")
+
+
 def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
-               unfold=False, subtract_baseline=False):
+               unfold=False, subtract_baseline=False, real=False, b_matrix=None):
     print(f"Processing {filepath.name}  "
           f"(cmap={'log' if log_scale else 'linear'}, "
           f"snapshots={'on' if snapshots else 'off'}"
+          f"{', REAL carriers' if real else ''}"
           f"{', unfolded primitive BZ' if unfold else ''}"
           f"{', baseline-subtracted' if subtract_baseline else ''}) ...")
-    tag = 'nex_k_unfold' if unfold else 'nex_k'
+    # real = fixed-basis diabatic (real carriers, no A^2 breathing);
+    # else = instantaneous Houston-basis population.
+    basis_label = 'real-carrier (diabatic)' if real else 'Houston-basis'
+    suff = '_real' if real else ''
+    tag = ('nex_k_unfold' if unfold else 'nex_k') + suff
     if subtract_baseline:
         tag += '_db'
     # The unfolded primitive-zone map legitimately shows the CB1 population of
-    # every FCC valley (Gamma for sublattice 1, the X points for 2/3/4), so it
-    # carries satellite peaks at the zone boundary. The FOLDED view sums the
-    # four sublattices back onto the regular cubic grid (k_sc = k_prim - G0),
-    # collapsing the valleys into a single clean zone -- the per-cubic-k total
-    # of the lowest conduction band.
-    offsets = _read_unfold_offsets(filepath) if unfold else None
-    ftag = 'nex_k_fold' + ('_db' if subtract_baseline else '')
+    # every folded valley (each coset's offset G0), so it carries satellite peaks
+    # at the zone boundary. The FOLDED view sums the cosets sharing a supercell k
+    # (k_sc = k_prim - G0, an integer wrap) back onto the single supercell zone --
+    # the per-k total of the lowest conduction band (any coset count).
+    ftag = 'nex_k_fold' + suff + ('_db' if subtract_baseline else '')
 
     kx_u = ky_u = kz_u = ix = iy = iz = None
     pop3d = None
@@ -738,19 +840,30 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
         if kx_u is None:
             kx_u, ky_u, kz_u, ix, iy, iz = _build_grid_info(kpoints)
             pop3d = np.empty((len(kx_u), len(ky_u), len(kz_u)))
+            # For a non-orthogonal (triclinic) grid the reduced axes are sheared,
+            # so the per-axis heatmap is geometrically misleading. With the
+            # reciprocal vectors (b_matrix) we un-shear into a regular CARTESIAN
+            # Wigner-Seitz volume -- a true picture of the Brillouin zone that
+            # gets smoother the denser the k-grid is.
+            cnbin = max(len(kx_u), len(ky_u), len(kz_u))
         pop3d.fill(np.nan)
         pop3d[ix, iy, iz] = pop
         if snapshots:
             _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi,
-                           log_scale=log_scale, tag=tag)
+                           log_scale=log_scale, tag=tag, basis_label=basis_label)
+            if b_matrix is not None:
+                cx, cy, cz, cpop3d = _cartesian_bz_grid(kpoints, pop, b_matrix, cnbin)
+                _save_snapshot(cpop3d, cx, cy, cz, t_val, t_unit, output_dir, dpi,
+                               log_scale=log_scale, tag=tag + '_cart',
+                               basis_label=basis_label, unit='a.u.')
         times.append(t_val)
         marg_kx.append(np.nanmean(pop3d, axis=(1, 2)))
         marg_ky.append(np.nanmean(pop3d, axis=(0, 2)))
         marg_kz.append(np.nanmean(pop3d, axis=(0, 1)))
 
-        # Folded cubic-zone view: sum the four sublattices at each k_sc.
+        # Folded supercell-zone view: sum the cosets sharing each k_sc.
         if unfold and sub is not None:
-            ksc = _fold_to_cubic(kpoints_prim, sub, offsets)
+            ksc = _fold_to_cubic(kpoints_prim)
             fpop = pop  # baseline (if any) already applied to `pop` above
             if fkx_u is None:
                 fkx_u, fky_u, fkz_u, fix, fiy, fiz = _build_grid_info(ksc)
@@ -759,7 +872,7 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
             np.add.at(fpop3d, (fix, fiy, fiz), fpop)
             if snapshots:
                 _save_snapshot(fpop3d, fkx_u, fky_u, fkz_u, t_val, t_unit, output_dir,
-                               dpi, log_scale=log_scale, tag=ftag)
+                               dpi, log_scale=log_scale, tag=ftag, basis_label=basis_label)
             fmarg_kx.append(np.nanmean(fpop3d, axis=(1, 2)))
             fmarg_ky.append(np.nanmean(fpop3d, axis=(0, 2)))
             fmarg_kz.append(np.nanmean(fpop3d, axis=(0, 1)))
@@ -861,6 +974,130 @@ def _map_path_population(qred, grid_kpts, grid_pop, max_dist=None):
     pop = grid_pop[j].astype(float)
     pop[np.sqrt(d2[np.arange(len(j)), j]) > max_dist] = np.nan
     return pop
+
+
+def _map_primitive_population(qred, gridk, gpop, spacing, tol=1.3):
+    """Map the per-k LCB population (gpop on the MP grid gridk) onto each
+    band-path point qred by nearest k in the native fractional convention
+    (wrapped mod 1 -- works for any, incl. the non-orthogonal FCC, lattice).
+    Points farther than tol*spacing from any grid k get NaN."""
+    P = np.full(len(qred), np.nan)
+    for i, q in enumerate(qred):
+        d = gridk - q[None, :]
+        d -= np.round(d)                       # wrap mod 1 (umklapp)
+        d2 = (d ** 2).sum(axis=1)
+        j = int(np.argmin(d2))
+        if np.sqrt(d2[j]) <= tol * spacing:
+            P[i] = gpop[j]
+    return P
+
+
+def plot_primitive_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=150):
+    """A(k,E) spectral movie for a PRIMITIVE (unfolded) cell -- no cosets, no
+    unfold file -- ONE FRAME PER TIME STEP.
+
+    Skeleton: the clean primitive-cell dispersion from *_bandpath.data, drawn as
+    thin grey lines (VB-1, VB, CB1, CB2). Decoration: at every output time the
+    lowest conduction band (CB1, the only band the folded-format nex_k file
+    resolves) is coloured by the per-k LCB population mapped onto the path
+    (nearest k, wrapped mod 1) and broadened by the carrier kinetic energy. Two
+    views per frame go into a `spectral_frames/` subfolder -- along the high-
+    symmetry path and projected onto kx -- so the electron's motion through the
+    primitive BZ can be watched frame by frame (assemble into a movie with e.g.
+    `ffmpeg -i nex_k_prim_spectral_path_f%04d*.png movie.mp4`). The colour scale
+    is fixed across all frames (global CB peak) so frames are comparable."""
+    from matplotlib.collections import LineCollection
+    print(f"Processing {filepath.name}  (primitive spectral A(k,E) per frame, "
+          f"skeleton {bpfile.name}) ...")
+    dist, eig_ha, nv, spinor, nodes, qred = _load_bandpath(bpfile)
+    if not nv:
+        print("  (skip) band path has no nv header — cannot identify levels")
+        return
+    levels = _bandpath_level_energies(eig_ha, nv, spinor)
+    e_cb1, kin = levels['cb1']
+    kx_path = qred[:, 0]                         # native FCC-reduced kx
+    ke_max = max(np.nanmax(kin), 1e-9)
+    lw_cb1 = 1.0 + 6.0 * np.nan_to_num(kin) / ke_max
+
+    # Pass 1: global colour scale (peak LCB population over all frames) + grid.
+    cb_peak, n_frames, gridk = 0.0, 0, None
+    for _t, _tu, kpts, pop, _lev, _sub in _iter_nex_k_blocks(filepath, unfold=False):
+        if gridk is None:
+            gridk = kpts
+        n_frames += 1
+        cb_peak = max(cb_peak, float(np.nanmax(pop)) if pop.size else 0.0)
+    if n_frames == 0:
+        print("  (skip) no data blocks found")
+        return
+    spacing = _grid_spacing(gridk)
+    norm = mcolors.Normalize(vmin=0.0, vmax=max(cb_peak, 1e-12))
+    stride = max(1, n_frames // max_frames)
+    node_lbl = [n[0] for n in nodes]
+    node_dst = [n[1] for n in nodes]
+
+    frame_dir = output_dir / 'spectral_frames'
+    frame_dir.mkdir(parents=True, exist_ok=True)
+
+    # Pass 2: render every (strided) frame.
+    n_written = 0
+    for iframe, (t_val, t_unit, kpts, pop, _lev, _sub) in enumerate(
+            _iter_nex_k_blocks(filepath, unfold=False)):
+        if iframe % stride != 0:
+            continue
+        P = _map_primitive_population(qred, kpts, pop, spacing)
+        good = np.isfinite(P)
+        safe_t = f'{t_val:.4f}'.replace('-', 'm').replace('+', 'p')
+        tag = f'f{iframe:04d}_t{safe_t}{t_unit}'
+
+        # view 1: along the high-symmetry path (thin skeleton + coloured CB1)
+        fig, ax = plt.subplots(figsize=(8, 6))
+        for name in UNFOLD_LEVELS:              # vbm1, vb, cb1, cb2 skeleton
+            if name in levels:
+                ax.plot(dist, levels[name][0], color='0.75', lw=0.6, zorder=1)
+        pts = np.column_stack([dist, e_cb1])
+        segs = np.stack([pts[:-1], pts[1:]], axis=1)
+        seg_pop = 0.5 * (np.nan_to_num(P[:-1]) + np.nan_to_num(P[1:]))
+        seg_lw  = 0.5 * (lw_cb1[:-1] + lw_cb1[1:])
+        lc = LineCollection(segs, cmap=CMAP_POP, norm=norm, zorder=3)
+        lc.set_array(seg_pop); lc.set_linewidths(seg_lw)
+        ax.add_collection(lc)
+        for d in node_dst:
+            ax.axvline(d, color='#888888', linestyle='--', lw=0.7)
+        ax.set_xticks(node_dst)
+        ax.set_xticklabels([r'$\Gamma$' if l == 'Gamma' else f'${l}$' for l in node_lbl])
+        ax.set_xlim(dist[0], dist[-1]); ax.set_ylim(-6, 8)
+        ax.axhline(0.0, color='tab:red', lw=0.8, alpha=0.7)
+        ax.set_ylabel('Energy [eV]  (VBM = 0)')
+        ax.set_title(f'Primitive A(k,E): CB1 coloured by population,  '
+                     f't = {t_val:.3f} {t_unit}\n'
+                     f'colour = population, width = carrier kinetic energy')
+        plt.colorbar(lc, ax=ax, label='CB1 real population')
+        fig.tight_layout()
+        fig.savefig(frame_dir / f'nex_k_prim_spectral_path_{tag}.png',
+                    dpi=dpi, bbox_inches='tight'); plt.close(fig)
+
+        # view 2: projected onto kx (scatter)
+        fig, ax = plt.subplots(figsize=(8, 6))
+        for name in UNFOLD_LEVELS:
+            if name in levels:
+                ax.plot(kx_path, levels[name][0], color='0.85', lw=0.4,
+                        zorder=1, marker='.', ms=1.5, ls='none')
+        im = ax.scatter(kx_path[good], e_cb1[good], c=P[good],
+                        s=8 + 60 * lw_cb1[good], cmap=CMAP_POP, norm=norm,
+                        edgecolors='none', alpha=0.85, zorder=3)
+        ax.axhline(0.0, color='tab:red', lw=0.8, alpha=0.7)
+        ax.set_xlabel('kx [reduced, primitive BZ]')
+        ax.set_ylabel('Energy [eV]  (VBM = 0)')
+        ax.set_title(f'Primitive population vs (kx, E),  t = {t_val:.3f} {t_unit}\n'
+                     f'(band-path points; colour = population, size = kinetic energy)')
+        plt.colorbar(im, ax=ax, label='CB1 real population')
+        fig.tight_layout()
+        fig.savefig(frame_dir / f'nex_k_prim_spectral_kx_{tag}.png',
+                    dpi=dpi, bbox_inches='tight'); plt.close(fig)
+        n_written += 1
+
+    print(f"  saved {n_written} frame(s) x 2 views into {frame_dir.name}/ "
+          f"(of {n_frames} time steps, stride {stride})")
 
 
 def plot_unfold_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=150):
@@ -1617,6 +1854,12 @@ def main():
                         help='Also write an A(kx,E)-style spectral map of the '
                              'unfolded CB1 population (needs the 7-column '
                              '*_sbe_nex_k_unfold.data with the e_cb1 column).')
+    parser.add_argument('--instantaneous', action='store_true',
+                        help='Also plot the instantaneous Houston-basis nex_k '
+                             'maps (*_sbe_nex_k.data / *_unfold.data). These carry '
+                             'the reversible A^2(t) virtual-polarization breathing. '
+                             'By default only the REAL-carrier maps '
+                             '(*_sbe_nex_k_real.data) are plotted when present.')
     parser.add_argument('--no-conductivity', action='store_true',
                         help='Skip the optical-conductivity sigma(w)=J/E plots '
                              '(global Re/Im spectrum + STFT Re-sigma map) from '
@@ -1665,33 +1908,78 @@ def main():
                 except Exception as exc:
                     print(f"  ERROR in conductivity for {f.name}: {exc}")
 
-        for f in sorted(input_dir.glob('*_sbe_nex_k.data')):
+        # Intra-band (Houston-basis) current vs the total current
+        for f in sorted(input_dir.glob('*_sbe_intra_current.data')):
+            found_any = True
+            rt = f.parent / (f.name[:-len('_sbe_intra_current.data')] + '_sbe_rt.data')
+            plot_intra_current(f, rt if rt.exists() else None, output_dir, dpi=args.dpi)
+
+        # REAL-carrier maps (default): fixed-basis diabatic population, the
+        # k-resolved n_ex -- no reversible A^2(t) virtual breathing.
+        real_k  = sorted(input_dir.glob('*_sbe_nex_k_real.data'))
+        real_uk = sorted(input_dir.glob('*_sbe_nex_k_unfold_real.data'))
+        for f in real_k:
             found_any = True
             plot_nex_k(f, output_dir, dpi=args.dpi,
-                       log_scale=args.log_cmap, snapshots=args.snapshots)
-            if args.subtract_baseline:
-                plot_nex_k(f, output_dir, dpi=args.dpi,
-                           log_scale=args.log_cmap, snapshots=args.snapshots,
-                           subtract_baseline=True)
-
-        # Physical (unfolded) CB1 populations on the primitive BZ
-        for f in sorted(input_dir.glob('*_sbe_nex_k_unfold.data')):
+                       log_scale=args.log_cmap, snapshots=args.snapshots, real=True,
+                       b_matrix=_bmatrix_for(f, '_sbe_nex_k_real.data'))
+        for f in real_uk:
             found_any = True
             plot_nex_k(f, output_dir, dpi=args.dpi,
                        log_scale=args.log_cmap, snapshots=args.snapshots,
-                       unfold=True)
-            if args.subtract_baseline:
+                       unfold=True, real=True)
+
+        # Instantaneous Houston-basis maps (carry the virtual breathing): only
+        # when --instantaneous is set, or when no REAL file is present (old runs).
+        if args.instantaneous or not real_k:
+            for f in sorted(input_dir.glob('*_sbe_nex_k.data')):
+                found_any = True
                 plot_nex_k(f, output_dir, dpi=args.dpi,
                            log_scale=args.log_cmap, snapshots=args.snapshots,
-                           unfold=True, subtract_baseline=True)
-            if args.spectral:
-                stem = f.name[:-len('_sbe_nex_k_unfold.data')]
+                           b_matrix=_bmatrix_for(f, '_sbe_nex_k.data'))
+                if args.subtract_baseline:
+                    plot_nex_k(f, output_dir, dpi=args.dpi,
+                               log_scale=args.log_cmap, snapshots=args.snapshots,
+                               subtract_baseline=True)
+
+        # Physical (unfolded) CB1 populations on the primitive BZ
+        unfold_for_spectral = real_uk or sorted(input_dir.glob('*_sbe_nex_k_unfold.data'))
+        if args.instantaneous or not real_uk:
+            for f in sorted(input_dir.glob('*_sbe_nex_k_unfold.data')):
+                found_any = True
+                plot_nex_k(f, output_dir, dpi=args.dpi,
+                           log_scale=args.log_cmap, snapshots=args.snapshots,
+                           unfold=True)
+                if args.subtract_baseline:
+                    plot_nex_k(f, output_dir, dpi=args.dpi,
+                               log_scale=args.log_cmap, snapshots=args.snapshots,
+                               unfold=True, subtract_baseline=True)
+
+        # Optional spectral A(kx,E) map (one, from whichever unfold file exists)
+        if args.spectral and unfold_for_spectral:
+            for f in unfold_for_spectral[:1]:
+                suffix = ('_sbe_nex_k_unfold_real.data' if f.name.endswith('_real.data')
+                          else '_sbe_nex_k_unfold.data')
+                stem = f.name[:-len(suffix)]
                 bpfile = f.parent / f'{stem}_bandpath.data'
                 if bpfile.exists():
                     plot_unfold_spectral(f, bpfile, output_dir, dpi=args.dpi)
                 else:
                     print(f"  (skip spectral) {bpfile.name} not found "
                           f"(generate it with: epm_gaas_reference.py bandpath)")
+        elif args.spectral:
+            # PRIMITIVE (unfolded) cell: no unfold file. Use the folded-format
+            # LCB population (real preferred) + the primitive bandpath.
+            prim = (real_k or sorted(input_dir.glob('*_sbe_nex_k.data')))
+            for f in prim[:1]:
+                suffix = ('_sbe_nex_k_real.data' if f.name.endswith('_real.data')
+                          else '_sbe_nex_k.data')
+                stem = f.name[:-len(suffix)]
+                bpfile = f.parent / f'{stem}_bandpath.data'
+                if bpfile.exists():
+                    plot_primitive_spectral(f, bpfile, output_dir, dpi=args.dpi)
+                else:
+                    print(f"  (skip spectral) {bpfile.name} not found")
 
     # --- Band structure -------------------------------------------------
     if not args.no_bands:

@@ -49,9 +49,11 @@ General form: **γ_II(ε_kin) = P (ε_kin − E_th)^a Θ(ε_kin − E_th)**, ε_
 
 **Cost:** non-k-local, O(N_k²)/step, one MPI all-gather/step. In super-compute mode the exchange folds into the ring pipeline (§7).
 
-## 6. Electron-phonon scattering as a population-relaxing Lindblad (super-compute) 🚧
+## 6. Electron-phonon scattering as a population-relaxing Lindblad (super-compute) ✅
 
 Unlike Kuhn-Zurek, this channel **relaxes populations** (Γ_aa ≠ 0) and reproduces THz bleaching; replaces (user toggles off) Zurek in super-mode. Built as a **sum of explicit channels with smoothed thresholds**:
+
+> **Note (gate fix):** the dissipative half-step that applies this channel and the carrier-carrier channel (§10) is now entered whenever **any** dissipator is on (`flag_decoh ∨ flag_impact ∨ flag_eph ∨ flag_eeh ∨ flag_auger`). A previous gate checked only `decoh ∨ impact`, so a run with **only** `yn_sbe_eph='y'` (or only `yn_sbe_eeh='y'`) silently did nothing. Both now work standalone (verified scalar GaAs); clean/decoh/impact configs are byte-unchanged.
 
 > ν_total(ε) = ν_intra(ε) + Σ_iv ν_iv(ε) Θ_smooth(ε − E_iv)
 
@@ -72,13 +74,15 @@ For the population-relaxing e-ph channel, coherence ρ̃_if decays at
 
 The **½ applies ONLY to the population-relaxation (T1) contribution** (from −½{L†L,ρ}). The Hermitian pure-dephasing Kuhn-Zurek channel enters at **FULL strength** (rate from (X_a−X_b)², no extra ½). **Do NOT apply a blanket γ_deph=½ν to all channels.** Unit test: a Hermitian-only dissipator conserves all populations (Γ_aa=0). [Breuer & Petruccione, OUP 2002]
 
+**Occupation-max Pauli normalization (scalar vs spinor).** The diagonal density-matrix entries run in **[0, occ_max]** with occ_max = 2 for scalar bands (`yn_sbe_spinor='n'`, two electrons/band) or 1 for spinor bands. **Every** population-changing channel — e-ph (§6), impact ionization (§3), carrier-carrier (§10), Auger (§12) — therefore builds its Pauli factors as the **fractional** occupation `ρ/occ_max` (presence) and `1 − ρ/occ_max` (blocking), each clamped to [0,1] (`sbe%occ_max = merge(1,2, spinor)`). A bare `1−ρ` would wrongly clamp a half-full scalar band (ρ=1.5) to a zero blocking factor; `1−ρ/2 = 0.25` correctly keeps the room. The **off-diagonal (coherence) damping is occupation-independent** (the GKLS √(e^{−Γτ}) factor / the `(1−α)` convex weight), as it must be — coherence damping is not Pauli-blocked.
+
 ## 9. Bandgap renormalization coupling to the II threshold 🚧
 E_th is tied to the gap; Σ^HF shrinks the gap with density. Make E_th density-dependent **only above n > 5e18 cm⁻³**:
 > E_th(t) = E_th0 − |ΔE_BGR(n(t))|, ΔE_gap[eV] = −1.9e-8 (n[cm⁻³])^(1/3)
 
 −19 meV at 1e18, −41 meV at 1e19 (~2–5% of a ~1.1 eV Si threshold). [Vashishta & Kalia, PRB 25, 6492 (1982)]. Distinct from dopant BGN (√n) [Lanyon & Tuft, IEEE TED ED-26, 1014 (1979)]. K carries a factor-~2 ambiguity; treat [1.9, 3.8]e-8 eV·cm as tunable.
 
-## 10. Carrier-carrier (e-e / e-h) scattering — Part F (channel 🚧, screening G ✅)
+## 10. Carrier-carrier (e-e / e-h) scattering — Part F (channel ✅, screening G ✅)
 A **second-Born / GW statically-(or dynamically-)screened-Coulomb collision integral cast into CPTP Lindblad form**. The diagonal (population) part is the in−out screened-Coulomb collision integral with (1−f) Pauli factors and a **direct−exchange** matrix element
 
 > Γ_cc(k₁) = (2π/ħ) Σ_{k₂,q,λ} |W̃(q)|² { f_{k₂}(1−f_{k₁+q})(1−f_{k₂−q}) − (1−f_{k₂}) f_{k₁+q} f_{k₂−q} } δ(E_{k₁}+E_{k₂}−E_{k₁+q}−E_{k₂−q}),  |W̃|² = W(W*_dir − W*_exch),
@@ -98,3 +102,14 @@ W(q)=V(q)/ε(q[,ω]); three selectable models (pure functions in `sbe_superres_s
 - **(c) dynamic Lindhard / LOPC — GaAs only, n≳5e17:** ω_{L±}²=½[(ω_p²+ω_LO²)±√((ω_p²+ω_LO²)²−4ω_p²ω_TO²)], ω_p²=4πn/(ε_∞m*), single-plasmon-pole. **Disabled for Si** (non-polar). [Varga PR 137, A1896; Mooradian-McWhorter PR 177, 1231 (1969)]
 
 Static screening under-estimates the rate; dynamic (LOPC) is needed for sub-100-fs thermalization (Elsaesser/Shah).
+
+## 12. Auger recombination as a number-conserving CPTP Lindblad ✅ (CdS; `yn_sbe_auger`)
+The inverse of impact ionization (§3): instead of a hot carrier creating an e–h pair, two carriers + a hole give one hot carrier and a destroyed pair. It is a **3-body, density-gated** process whose recombination rate goes as **R = C·n³** (the per-carrier rate is γ = C·n²), with the cited coefficient C and an activation density n_gate (CdS: C=2.0×10⁻³⁰ cm⁶/s [Haury et al., PRB 57, 11513 (1998)], n_gate=1×10¹⁸ cm⁻³ [Shah et al., IEEE JQE 22, 1728 (1986)]).
+
+**Gap-edge mean-field (HF-factorized) closure**, in the Houston/adiabatic basis on the gap-edge branches (top valence iv1, lowest conduction ic1, hot target ic_hot energy-matched to E(ic1)+E_g):
+- **recombination** ic1 → iv1: a conduction electron fills a valence hole, destroying an e–h pair;
+- **promotion** ic1 → ic_hot: the released gap energy E_g lifts a second conduction electron to the hot state.
+
+Both are realized as the **exact finite-time amplitude-damping GKLS map** `amp_damp_channel` (the same CPTP primitive as §6 e-ph), at the rate γ carrying the occ_max-normalized, [0,1]-clamped Pauli factors (CB electron present `f_c/occ`, VB hole present `1−f_v/occ`, hot target empty `1−f_hot/occ`). Because `amp_damp` is trace-preserving, the **total carrier number is conserved** (Auger rearranges, it does not remove electrons); energy is conserved to the mean-field order (same as §3 impact ionization). Recombination self-limits — as the holes fill, `1−f_v/occ → 0` and the rate vanishes.
+
+**It is a RARE channel.** Auger acts on the **real (Houston/adiabatic) populations**, not the virtual driving polarization, and C is tiny — so at ordinary fields the dynamics are essentially unchanged with the channel on vs off; it only becomes visible at very high real carrier density / strong fields. Its role is to be present and exactly CPTP, density-gated, with the cited n³ law. **Provenance-gated:** only materials with a cited C may enable it (CdS); GaAs/Si/graphene `error stop`. The graphene gapless carrier-multiplication variant (nearly thresholdless) is a separate, model-dependent channel (TODO, with the graphene registry entry). [GKLS: Lindblad 1976; Taj-Rossi PRA 78, 052113 (2008). CPTP invariants: `tests/test_auger_cptp.f90`.]

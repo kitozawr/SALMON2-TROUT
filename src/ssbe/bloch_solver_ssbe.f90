@@ -9,7 +9,8 @@ module bloch_solver_ssbe
     private
     public :: s_sbe_bloch_solver, init_sbe_bloch_solver, calc_current_bloch, &
               dt_evolve_bloch_cf4, calc_trace, calc_energy, calc_bloch_population_k, &
-              calc_unfolded_population_k
+              calc_unfolded_population_k, calc_diabatic_population_k, &
+              calc_diabatic_unfolded_population_k, calc_intraband_current_houston
 
     type s_sbe_bloch_solver
         !k-points for real-time SBE calculation
@@ -70,6 +71,15 @@ module bloch_solver_ssbe
         logical :: flag_eeh   = .false.
         real(8) :: eeh_nu_au  = 0d0     ! carrier-carrier rate [1/a.u.time]
 
+        ! Auger recombination (Sec 13): density-gated, number-conserving CPTP
+        ! channel. Per-carrier rate gamma = auger_c_au * n^2 (n in cm^-3), so the
+        ! total recombination rate is R = C n^3. Inert below auger_n_gate_cm3.
+        logical :: flag_auger      = .false.
+        real(8) :: auger_c_au      = 0d0   ! C[cm^6/s]*(au_fs*1e-15): gamma=auger_c_au*n_cm3^2
+        real(8) :: auger_n_gate_cm3 = 0d0  ! activation density [cm^-3]
+        real(8) :: auger_eg_au     = 0d0   ! band gap E_g [Ha] (hot-carrier target offset)
+        real(8) :: n_exc_cm3       = 0d0   ! running excited-carrier density [cm^-3]
+
         ! Nonlocal impact ionization (Part C4): the hot electron ionizes a
         ! valence partner drawn from the WHOLE BZ (momentum exchange), so the
         ! partner-population / Pauli factors use the global BZ-averaged active-
@@ -101,6 +111,7 @@ module bloch_solver_ssbe
         ! von Neumann commutator. Frozen over a dt step (mean-field predictor).
         logical :: flag_coulomb = .false.
         logical :: flag_hf_subproj = .false. ! project Sigma^HF onto FCC sublattice blocks
+        logical :: flag_coset_proj = .false. ! project the momentum coupling p block-diagonal over cosets
 
         ! Population-relaxing electron-phonon Lindblad (Part C5, super-mode).
         ! k-local skeleton: each adiabatic level relaxes toward an energy-matched
@@ -221,11 +232,12 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
                              sbe_ii_form, sbe_ii_exponent, &
                              yn_sbe_coulomb, sbe_coulomb_epsilon, &
                              sbe_coulomb_strength, sbe_coulomb_screen_au, &
-                             yn_sbe_hf_sublattice_proj, &
+                             yn_sbe_hf_sublattice_proj, yn_sbe_coset_proj, &
                              yn_sbe_eph, sbe_eph_temperature_k, sbe_eph_nu_sat, &
                              sbe_eph_eps0_ev, sbe_eph_n, sbe_search_sigma_e_ev, &
                              yn_sbe_bgr_threshold, sbe_bgr_n_gate, sbe_bgr_coeff, &
-                             yn_sbe_superres, yn_sbe_eeh, sbe_eeh_nu_sat, epm_material
+                             yn_sbe_superres, yn_sbe_eeh, sbe_eeh_nu_sat, epm_material, &
+                             yn_sbe_auger, sbe_auger_c_cm6s, sbe_auger_n_gate_cm3
     use sbe_superres_ssbe, only: bose_factor, s_material_params, &
                                  get_material_params, MAT_SUPPORTED
     use math_constants, only: pi
@@ -401,6 +413,16 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     ! k-local impact-ionization channel (optional, yn_sbe_impact_ionization)
     ! =========================================================================
     sbe%occ_max = merge(1d0, 2d0, yn_sbe_spinor == 'y')
+
+    ! Active-subspace valence-branch count (gap edge: v1 = nv_act, c1 = nv_act+1
+    ! in energy-ordered active indexing). Needed by BOTH the impact-ionization
+    ! and the Auger channels, so compute it unconditionally here (not inside the
+    ! impact block -- an Auger-only run must still have it set).
+    sbe%nv_act = 0
+    do ib = 1, sbe%n_active_bands
+        if (sbe%active_idx(ib) <= homo_idx) sbe%nv_act = sbe%nv_act + 1
+    end do
+
     sbe%flag_impact = (yn_sbe_impact_ionization == 'y')
     if (sbe%flag_impact .and. .not. mp%ii_ok) &
         call stop_forbidden_channel(epm_material, 'impact ionization (yn_sbe_impact_ionization)')
@@ -442,12 +464,8 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
         if (homo_idx + 1 > gs%nb) stop "impact ionization: no conduction bands"
         sbe%ii_ecbm_au = minval(gs%eigen(homo_idx + 1, :))
         sbe%ii_eg_au   = gs%eg_au
-        ! Valence branches inside the active subspace: v1 = sbe%nv_act,
-        ! c1 = sbe%nv_act + 1 in active (energy-ordered Houston) indexing.
-        sbe%nv_act = 0
-        do ib = 1, sbe%n_active_bands
-            if (sbe%active_idx(ib) <= homo_idx) sbe%nv_act = sbe%nv_act + 1
-        end do
+        ! (sbe%nv_act -- the gap-edge valence-branch count -- is set
+        !  unconditionally above, before the channel blocks.)
         ! Sublattice resolution is enabled iff the unfolding weights were
         ! loaded (gs%unfold_w not all zero). When absent, the channel falls
         ! back to the original folded (single-pool) treatment.
@@ -539,6 +557,28 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     end if
 
     ! =========================================================================
+    ! Coset block-diagonal projection of the FIELD coupling (momentum matrix p).
+    ! A translationally invariant perturbation conserves primitive crystal
+    ! momentum, so <coset s|p|coset s'> = 0 for s/=s'; the EPM eigenvector
+    ! mixing at folded-valley degeneracies makes these spurious (here ~0.7x the
+    ! intra-coset coupling), artificially hybridizing the valleys. Projecting p
+    ! block-diagonal over the cosets (off-diagonal elements x sum_s w_s(i)w_s(j),
+    ! same soft projector as the HF fix) keeps rho block-diagonal and restores
+    ! the per-valley (primitive) Zener physics. Needs the unfold weights; inert
+    ! otherwise. Applied to p_active in the propagator (hence H_VG, the Houston
+    ! basis and the branch velocity) -- the core of the dynamics.
+    sbe%flag_coset_proj = (yn_sbe_coset_proj == 'y')
+    if (sbe%flag_coset_proj) then
+        if (.not. allocated(gs%unfold_w)) then
+            sbe%flag_coset_proj = .false.
+        else if (maxval(abs(gs%unfold_w)) <= 1d-12) then
+            sbe%flag_coset_proj = .false.
+        end if
+    end if
+    if (lprint .and. sbe%flag_coset_proj) &
+        write(*, '(a)') '# Coset projection ON: inter-coset momentum coupling p block-diagonalized (folding fix)'
+
+    ! =========================================================================
     ! Population-relaxing electron-phonon Lindblad (Part C5, super-mode).
     ! k-local skeleton with a single effective optical phonon. Off by default.
     ! [Jacoboni-Reggiani RMP 55, 645 (1983); nu saturation: Meng et al.,
@@ -601,6 +641,41 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
             write(*, '(a)') '# carrier-carrier (e-e/e-h) thermalization (Part F) enabled:'
             write(*, '(a,ES12.5,a)') '#   nu_cc = ', sbe%eeh_nu_au, &
                 ' 1/a.u.t; CPTP relax to Fermi-Dirac (conserves number+energy)'
+        end if
+    end if
+
+    ! =========================================================================
+    ! Auger recombination (Sec 13): density-gated, number-conserving CPTP
+    ! channel. A conduction electron recombines with a valence hole and the
+    ! released gap energy promotes a second conduction electron to a hot state
+    ! (gap-edge mean-field closure). Per-carrier rate gamma = C n^2 (R = C n^3).
+    ! Provenance-gated: the material must supply a cited C (CdS: Haury 1998).
+    ! =========================================================================
+    sbe%flag_auger = (yn_sbe_auger == 'y')
+    if (sbe%flag_auger) then
+        if (.not. mp%found) call stop_unknown_material(epm_material, 'Auger (yn_sbe_auger)')
+        if (.not. mp%auger_ok .and. sbe_auger_c_cm6s <= 0d0) &
+            call stop_forbidden_channel(epm_material, 'Auger recombination (yn_sbe_auger, no cited C)')
+        ! C [cm^6/s]: explicit override, else the cited material default.
+        if (sbe_auger_c_cm6s > 0d0) then
+            sbe%auger_c_au = sbe_auger_c_cm6s * (au_fs * 1d-15)
+        else
+            sbe%auger_c_au = mp%auger_c_cm6s * (au_fs * 1d-15)
+        end if
+        if (sbe_auger_n_gate_cm3 > 0d0) then
+            sbe%auger_n_gate_cm3 = sbe_auger_n_gate_cm3
+        else
+            sbe%auger_n_gate_cm3 = mp%auger_n_gate_cm3
+        end if
+        sbe%auger_eg_au = gs%eg_au
+        if (homo_idx + 1 > gs%nb) stop "Auger: no conduction bands"
+        if (lprint) then
+            write(*, '(a)') '# Auger recombination (Sec 13, density-gated CPTP) enabled:'
+            write(*, '(a,ES12.5,a,ES12.5,a)') '#   C = ', &
+                sbe%auger_c_au / (au_fs * 1d-15), ' cm^6/s, n_gate = ', &
+                sbe%auger_n_gate_cm3, ' cm^-3'
+            write(*, '(a,ES12.5,a)') '#   E_g = ', sbe%auger_eg_au, &
+                ' Ha; number-conserving (recombination + hot-carrier promotion)'
         end if
     end if
 
@@ -784,6 +859,7 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     real(8) :: t_node(2, 3), s_node
     real(8) :: Ac_node(1:3, 2, 3)
     integer :: isub
+    real(8) :: pcoset
 
     integer :: ik, nb, nba, i, j, idir, in, im
 
@@ -842,12 +918,17 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     ! running excited-carrier density (global reduction; once per step).
     if (sbe%flag_bgr) call update_bgr_threshold(sbe, gs)
 
+    ! Auger recombination (Sec 13): the per-carrier rate gamma = C n^2 needs the
+    ! running excited-carrier density n(t); compute it once per step (same global
+    ! reduction as BGR) and store it for apply_auger_recombination.
+    if (sbe%flag_auger) call update_excited_density(sbe, gs)
+
     ! Nonlocal impact ionization (Part C4): gather the BZ-averaged active-band
     ! occupations once per step (the valence partner is sourced from anywhere).
     if (sbe%flag_nl_ii .and. nba > 0) call gather_global_occupation(sbe, gs)
 
     !$omp parallel default(shared) &
-    !$omp    private(ik, i, j, idir, in, im, isub, s) &
+    !$omp    private(ik, i, j, idir, in, im, isub, s, pcoset) &
     !$omp    private(p_active, rho_a, H1, H2, HVG, eigen_active, V_begin, V_end, X_a, w_act_sub) &
     !$omp    private(p_k_full, rho_n_full)
 
@@ -877,6 +958,24 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
                     end do
                 end do
             end do
+            ! Coset block-diagonal projection of the field coupling: suppress the
+            ! spurious inter-coset momentum matrix elements (folding artifact).
+            ! Off-diagonal only; intra-band (i=j) velocity untouched. Same soft
+            ! projector sum_s w_s(i)w_s(j) as apply_hf_sublattice_projection.
+            if (sbe%flag_coset_proj) then
+                do j = 1, nba
+                    im = sbe%active_idx(j)
+                    do i = 1, nba
+                        if (i == j) cycle
+                        in = sbe%active_idx(i)
+                        pcoset = 0d0
+                        do s = 1, 4
+                            pcoset = pcoset + gs%unfold_w(s, in, ik) * gs%unfold_w(s, im, ik)
+                        end do
+                        p_active(i, j, 1:3) = p_active(i, j, 1:3) * pcoset
+                    end do
+                end do
+            end if
             do i = 1, nba
                 eigen_active(i) = gs%eigen(sbe%active_idx(i), ik)
             end do
@@ -907,7 +1006,7 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
             ! Kuhn-Zurek dephasing and/or impact-ionization channels, both in
             ! the same Houston basis (one shared ZHEEV), tau = +h/2 > 0
             !-----------------------------------------------------------------
-            if (sbe%flag_decoh .or. sbe%flag_impact) then
+            if (sbe%flag_decoh .or. sbe%flag_impact .or. sbe%flag_eph .or. sbe%flag_eeh .or. sbe%flag_auger) then
                 call build_HVG(nba, eigen_active, p_active, Ac_begin, HVG)
                 if (sbe%flag_coulomb) HVG = HVG + sbe%sigma_hf(:, :, ik)
                 call houston_dissipate(sbe, nba, rho_a, HVG, p_active, Ac_begin, X_a, &
@@ -936,7 +1035,7 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
             !-----------------------------------------------------------------
             ! Step 3: D(h/2) -- Strang dissipative half-step (see Step 1)
             !-----------------------------------------------------------------
-            if (sbe%flag_decoh .or. sbe%flag_impact) then
+            if (sbe%flag_decoh .or. sbe%flag_impact .or. sbe%flag_eph .or. sbe%flag_eeh .or. sbe%flag_auger) then
                 call build_HVG(nba, eigen_active, p_active, Ac_end, HVG)
                 if (sbe%flag_coulomb) HVG = HVG + sbe%sigma_hf(:, :, ik)
                 call houston_dissipate(sbe, nba, rho_a, HVG, p_active, Ac_end, X_a, &
@@ -1048,6 +1147,27 @@ subroutine update_bgr_threshold(sbe, gs)
         sbe%ii_eth_au = sbe%ii_eth0_au
     end if
 end subroutine update_bgr_threshold
+
+
+! Running excited-carrier density n(t) [cm^-3] for the Auger rate (same global
+! reduction / normalization as update_bgr_threshold). Stored in sbe%n_exc_cm3.
+subroutine update_excited_density(sbe, gs)
+    use communication, only: comm_summation
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info),      intent(in)    :: gs
+    integer :: ik, ib
+    real(8) :: loc, glob
+
+    loc = 0d0
+    do ik = sbe%ik_min, sbe%ik_max
+        do ib = sbe%homo_idx + 1, sbe%nb
+            loc = loc + real(sbe%rho(ib, ib, ik)) * gs%kweight(ik)
+        end do
+    end do
+    call comm_summation(loc, glob, sbe%icomm)
+    sbe%n_exc_cm3 = (glob / sum(gs%kweight)) / gs%volume * sbe%au_dens_cm3
+end subroutine update_excited_density
 
 
 ! Build the instantaneous velocity-gauge Hamiltonian in the active subspace:
@@ -1392,7 +1512,7 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
     ! the Pauli factors (a built-in predictor-corrector). Each sub-step is CPTP,
     ! so positivity is never threatened. m_sub = 1 unless e-ph is active, so
     ! impact-ionization-only runs are byte-for-byte unchanged.
-    if (sbe%flag_impact .or. sbe%flag_eph .or. sbe%flag_eeh) then
+    if (sbe%flag_impact .or. sbe%flag_eph .or. sbe%flag_eeh .or. sbe%flag_auger) then
         ! field-aware Houston-branch sublattice weights for the unfolding-aware
         ! impact ionization (computed once; field-frozen over the half-step)
         if (sbe%flag_impact .and. sbe%flag_unfold_ii) then
@@ -1414,6 +1534,9 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
             m_sub = max(m_sub, min(20, max(1, ceiling(10d0 * sbe%eph_numax_au * tau))))
         if (sbe%flag_eeh) &
             m_sub = max(m_sub, min(20, max(1, ceiling(10d0 * sbe%eeh_nu_au * tau))))
+        if (sbe%flag_auger) &
+            m_sub = max(m_sub, min(20, max(1, ceiling(10d0 * &
+                    sbe%auger_c_au * sbe%n_exc_cm3**2 * tau))))
         tau_sub_d = tau / dble(m_sub)
         do isub_d = 1, m_sub
             if (sbe%flag_impact) &
@@ -1423,6 +1546,8 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
                 call apply_eph_relaxation(sbe, nba, t2, evals, Ac, tau_sub_d)
             if (sbe%flag_eeh) &
                 call apply_carrier_carrier(sbe, nba, t2, evals, tau_sub_d)
+            if (sbe%flag_auger) &
+                call apply_auger_recombination(sbe, nba, t2, evals, tau_sub_d)
         end do
     end if
 
@@ -1754,6 +1879,69 @@ subroutine apply_carrier_carrier(sbe, nba, rho_ad, evals, tau)
 end subroutine apply_carrier_carrier
 
 
+!=============================================================================
+! Auger recombination (Sec 13): density-gated, number-conserving CPTP channel.
+! Gap-edge mean-field closure: a conduction electron (lowest CB branch ic1)
+! recombines with a valence hole (top VB branch iv1) -- destroying an e-h pair
+! -- and the released gap energy E_g promotes a SECOND ic1 electron to the
+! conduction state ic_hot energy-matched to E(ic1)+E_g. Both transfers run at
+! the per-carrier Auger rate gamma = C n^2 (so the recombination rate is C n^3),
+! gated to switch on only above n_gate. Realized as two amplitude-damping maps
+! (amp_damp_channel), each trace-preserving -> TOTAL carrier number conserved;
+! the Pauli factors (CB electron present, VB hole present, hot target empty) are
+! normalized by occ_max and clamped to [0,1], so the map is exactly CPTP and
+! recombination stops as the holes fill (hv1 -> 0). Energy is conserved to the
+! mean-field (HF-factorization) order, like the impact-ionization channel.
+!
+! NOTE: this acts on the HOUSTON/adiabatic (real-carrier) populations, not the
+! virtual driving polarization, and the rate is C n^2 with the tiny cited C
+! (CdS 2e-30 cm^6/s) -- so Auger is a RARE event that only becomes visible at
+! very high real carrier density / strong fields. Its job here is to be present
+! and exactly CPTP, not to dominate the dynamics.
+! [Auger coeff Haury PRB 57, 11513 (1998); GKLS: Taj-Rossi PRA 78, 052113 (2008)]
+!=============================================================================
+subroutine apply_auger_recombination(sbe, nba, rho_ad, evals, tau)
+    use sbe_superres_ssbe, only: amp_damp_channel
+    implicit none
+    type(s_sbe_bloch_solver), intent(in)    :: sbe
+    integer,                  intent(in)    :: nba
+    complex(8),               intent(inout) :: rho_ad(nba, nba)
+    real(8),                  intent(in)    :: evals(nba)
+    real(8),                  intent(in)    :: tau
+
+    integer :: iv1, ic1, ic_hot, a
+    real(8) :: gamma0, f, etgt, fc1, hv1, bhot, g_rec, g_prom
+
+    if (sbe%nv_act < 1 .or. sbe%nv_act >= nba) return
+    if (sbe%n_exc_cm3 < sbe%auger_n_gate_cm3) return        ! density gate
+    iv1 = sbe%nv_act          ! top valence branch (energy-ordered)
+    ic1 = sbe%nv_act + 1      ! lowest conduction branch
+    f = sbe%occ_max
+
+    ! per-carrier Auger rate gamma = C n^2 [1/a.u.t]
+    gamma0 = sbe%auger_c_au * sbe%n_exc_cm3**2
+    if (gamma0 * tau < 1d-14) return
+
+    ! hot-carrier target: conduction state energy-matched to E(ic1) + E_g
+    etgt = evals(ic1) + sbe%auger_eg_au
+    ic_hot = ic1
+    do a = ic1, nba
+        if (abs(evals(a) - etgt) < abs(evals(ic_hot) - etgt)) ic_hot = a
+    end do
+
+    ! Pauli factors (normalized by occ_max, clamped to [0,1])
+    fc1  = min(max(real(rho_ad(ic1,   ic1  )) / f, 0d0), 1d0)   ! CB electron present
+    hv1  = min(max(1d0 - real(rho_ad(iv1, iv1)) / f, 0d0), 1d0) ! VB hole present
+    bhot = min(max(1d0 - real(rho_ad(ic_hot, ic_hot)) / f, 0d0), 1d0) ! hot target empty
+
+    g_rec  = gamma0 * fc1 * hv1            ! recombination: needs CB e- + VB hole
+    g_prom = gamma0 * fc1 * hv1 * bhot     ! promotion: + hot target empty (Pauli)
+    if (ic_hot /= ic1) &
+        call amp_damp_channel(nba, rho_ad, ic1, ic_hot, g_prom, tau)
+    call amp_damp_channel(nba, rho_ad, ic1, iv1, g_rec, tau)
+end subroutine apply_auger_recombination
+
+
 ! Exact finite-time map of a single Lindblad jump channel L = sqrt(Gamma)|f><i|
 ! (amplitude damping i -> f) in the basis where i, f are basis states; O(N):
 !   rho_ii -> e^{-G tau} rho_ii
@@ -1788,21 +1976,28 @@ subroutine apply_damping_channel(nba, rho, i_src, i_dst, gamma_ch, tau)
 end subroutine apply_damping_channel
 
 
-! Population of band `ib_target` resolved per k-point, in the stationary
-! Bloch (crystal-gauge) eigenbasis.
+! Population of band `ib_target` resolved per k-point, in the instantaneous
+! Houston (adiabatic) eigenbasis -- the SAME basis the propagator and the
+! dissipation half-step use, so an unexcited adiabatically-following state
+! reports ZERO conduction population (no spurious gauge offset).
 !
 ! In the Velocity Gauge (VG) the SBE propagates rho(k,t) at the fixed grid
-! crystal momentum k, while the physical electrons are displaced to
-!   k'(t) = k - A(t)    (A in a.u., e/hbar = 1)
-! The crystal-gauge population at k requires projecting onto the eigenstates
-! of H_0(k'), the field-free Hamiltonian evaluated at the shifted momentum.
-! To first order in A(t) (valid when |A(t)| << BZ size):
-!   H_0(k - A(t)) ≈ H_0(k) + (k'-k)·∂H_0/∂k = H_0(k) - A(t)·p(k)
-!                 = diag(eigen) - A·p   (note: MINUS sign, unlike Houston + sign)
-! We diagonalise H_crystal to get U_shifted, apply a greedy bipartite match
-! on |U_shifted_ij| to correct the energy-sort ambiguity of ZHEEV at near-
-! degeneracies, then form rho_crystal = U_sorted^dagger rho_VG U_sorted and
-! return Re(rho_crystal[ia_target, ia_target]).
+! canonical crystal momentum k; the physical (kinetic) momentum of the carrier
+! is k + A(t) (A in a.u., e/hbar = 1). The state it occupies is therefore the
+! eigenstate of the instantaneous VG Hamiltonian
+!   H_VG(k,t) = H_0(k) + A(t)·p(k) ≈ H_0(k + A(t))            [build_HVG]
+! -- the field-free Hamiltonian at the SHIFTED kinetic momentum k + A. The
+! population at k must project onto THIS basis (the +A·p Houston basis), not
+! the opposite-shifted H_0(k - A) = H_0 - A·p: projecting onto the wrong-sign
+! basis leaves an unexcited valence state with a spurious, reversible CB weight
+! ~ (2 A·p / E_g)^2 (an O(A^2) offset that grows with the field envelope and is
+! largest where the interband coupling/gap is large -- e.g. the folded L-valley),
+! masking the genuine non-adiabatic (Zener/multiphoton) excitation.
+! We diagonalise H_VG to get U (the Houston rotation), apply a greedy bipartite
+! match on |U_ij| to correct the energy-sort ambiguity of ZHEEV at near-
+! degeneracies, then form rho_houston = U_sorted^dagger rho_VG U_sorted and
+! return Re(rho_houston[ia_target, ia_target]). The Coulomb HF self-energy is
+! added when active so the basis matches houston_dissipate exactly.
 subroutine calc_bloch_population_k(sbe, gs, Ac, ib_target, pop_k, icomm)
     use eigen_lapack, only: eigen_zheev
     implicit none
@@ -1855,18 +2050,20 @@ subroutine calc_bloch_population_k(sbe, gs, Ac, ib_target, pop_k, icomm)
             im = sbe%active_idx(j)
             do i = 1, nba
                 in = sbe%active_idx(i)
-                ! H_0(k') = H_0(k) - A·p  (crystal-gauge shift k' = k - A)
-                H(i, j) = -Ac(1)*p_k_full(in,im,1) &
-                          - Ac(2)*p_k_full(in,im,2) &
-                          - Ac(3)*p_k_full(in,im,3)
+                ! H_VG(k,t) = H_0(k) + A·p  (instantaneous Houston basis, k' = k + A)
+                H(i, j) = Ac(1)*p_k_full(in,im,1) &
+                          + Ac(2)*p_k_full(in,im,2) &
+                          + Ac(3)*p_k_full(in,im,3)
                 rho_a(i, j) = sbe%rho(in, im, ik)
             end do
         end do
         do i = 1, nba
             H(i, i) = H(i, i) + eigen_a(i)
         end do
+        ! Match houston_dissipate's basis exactly when the HF mean field is on.
+        if (sbe%flag_coulomb) H(:, :) = H(:, :) + sbe%sigma_hf(:, :, ik)
 
-        ! Diagonalize H_crystal = H_0(k-A): H = W Lambda W^dagger  (LAPACK ZHEEV)
+        ! Diagonalize H_VG = H_0(k+A): H = W Lambda W^dagger  (LAPACK ZHEEV)
         call eigen_zheev(H, evals, W)
 
         ! Overlap-tracking permutation (greedy bipartite match on |W_ij|).
@@ -1908,6 +2105,38 @@ subroutine calc_bloch_population_k(sbe, gs, Ac, ib_target, pop_k, icomm)
     deallocate(pop_local, evals, H, W, W_sorted, t1, t2, rho_a, p_k_full, eigen_a)
     deallocate(zone_map, row_used, col_used)
 end subroutine calc_bloch_population_k
+
+
+! Real-carrier (diabatic) population of band ib_target, per k-point, in the
+! FIXED field-free Bloch basis -- the k-resolved analogue of the standard
+! excited-electron count n_ex (_sbe_nex.data, calc_trace over the conduction
+! bands). rho is stored in this basis, so NO field-dependent projection is
+! applied: pop = Re(rho_{ib,ib}(k)). This drops the reversible virtual
+! polarization (the A^2(t) "breathing" that the instantaneous-Houston
+! projection carries) and reports only the real promoted carriers. The
+! velocity-gauge diagonal population is the diabatic transition probability:
+! it accumulates monotonically and freezes when the field passes, matching
+! n_ex exactly when summed over the conduction bands.
+subroutine calc_diabatic_population_k(sbe, ib_target, pop_k, icomm)
+    implicit none
+    type(s_sbe_bloch_solver), intent(in)  :: sbe
+    integer,                  intent(in)  :: ib_target
+    real(8),                  intent(out) :: pop_k(1:sbe%nk)
+    integer,                  intent(in)  :: icomm
+
+    integer :: ik
+    real(8), allocatable :: pop_local(:)
+
+    allocate(pop_local(1:sbe%nk))
+    pop_local = 0d0
+    if (ib_target >= 1 .and. ib_target <= sbe%nb) then
+        do ik = sbe%ik_min, sbe%ik_max
+            pop_local(ik) = real(sbe%rho(ib_target, ib_target, ik))
+        end do
+    end if
+    call comm_summation(pop_local, pop_k, sbe%nk, icomm)
+    deallocate(pop_local)
+end subroutine calc_diabatic_population_k
 
 
 ! Population of the PHYSICAL lowest conduction band (CB1) of each folded
@@ -1963,7 +2192,8 @@ subroutine calc_unfolded_population_k(sbe, gs, Ac, pop_lev, icomm)
     pop_local = 0d0
 
     do ik = sbe%ik_min, sbe%ik_max
-        ! Crystal-gauge projection: identical to calc_bloch_population_k
+        ! Instantaneous Houston projection: identical to calc_bloch_population_k
+        ! (H_VG = H_0(k) + A·p, the +A·p basis the propagator populates).
         p_k_full(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
         if (sbe%flag_vnl_correction) &
             p_k_full(:, :, :) = p_k_full(:, :, :) + gs%rvnl_tm_matrix(:, :, :, ik)
@@ -1975,15 +2205,16 @@ subroutine calc_unfolded_population_k(sbe, gs, Ac, pop_lev, icomm)
             im = sbe%active_idx(j)
             do i = 1, nba
                 in = sbe%active_idx(i)
-                H(i, j) = -Ac(1)*p_k_full(in,im,1) &
-                          - Ac(2)*p_k_full(in,im,2) &
-                          - Ac(3)*p_k_full(in,im,3)
+                H(i, j) = Ac(1)*p_k_full(in,im,1) &
+                          + Ac(2)*p_k_full(in,im,2) &
+                          + Ac(3)*p_k_full(in,im,3)
                 rho_a(i, j) = sbe%rho(in, im, ik)
             end do
         end do
         do i = 1, nba
             H(i, i) = H(i, i) + eigen_a(i)
         end do
+        if (sbe%flag_coulomb) H(:, :) = H(:, :) + sbe%sigma_hf(:, :, ik)
 
         call eigen_zheev(H, evals, W)
 
@@ -2025,7 +2256,7 @@ subroutine calc_unfolded_population_k(sbe, gs, Ac, pop_lev, icomm)
         do i = 1, nba
             in = sbe%active_idx(i)
             isub = gs%unfold_sub(in, ik)
-            if (isub < 1 .or. isub > 4) cycle
+            if (isub < 1 .or. isub > gs%n_coset) cycle
             irank_prim = gs%unfold_prim(in, ik)
             if (irank_prim < 1) cycle
             if (irank_prim <= gs%nv_prim) then
@@ -2052,7 +2283,7 @@ subroutine calc_unfolded_population_k(sbe, gs, Ac, pop_lev, icomm)
                 end if
             end if
             popi = real(t2(i, i))
-            do s = 1, 4
+            do s = 1, gs%n_coset
                 pop_local(islot, s, ik) = pop_local(islot, s, ik) &
                     & + gs%unfold_w(s, in, ik) * popi
             end do
@@ -2063,6 +2294,167 @@ subroutine calc_unfolded_population_k(sbe, gs, Ac, pop_lev, icomm)
     deallocate(pop_local, evals, H, W, W_sorted, t1, t2, rho_a, p_k_full, eigen_a)
     deallocate(zone_map, row_used, col_used)
 end subroutine calc_unfolded_population_k
+
+
+! Real-carrier (diabatic) twin of calc_unfolded_population_k: same band ->
+! {VB-1,VB,CB1,CB2} x coset distribution from the unfold map, but the per-band
+! weight is the FIXED-basis occupation Re(rho_{in,in}(k)) instead of the
+! instantaneous-Houston projection -- no field-dependent diagonalization, no
+! A^2(t) breathing. Reports the real promoted carriers per primitive point.
+subroutine calc_diabatic_unfolded_population_k(sbe, gs, pop_lev, icomm)
+    use salmon_global, only: yn_sbe_spinor
+    implicit none
+    type(s_sbe_bloch_solver), intent(in)  :: sbe
+    type(s_sbe_gs_info),      intent(in)  :: gs
+    real(8),                  intent(out) :: pop_lev(1:4, 1:4, 1:sbe%nk)
+    integer,                  intent(in)  :: icomm
+
+    integer :: nba, ik, i, in, isub, irank_prim, n_spin, nv_phys, pphys, off, islot, s
+    real(8) :: popi
+    real(8), allocatable :: pop_local(:, :, :)
+
+    nba = sbe%n_active_bands
+    pop_lev = 0d0
+    if (.not. gs%have_unfold .or. nba == 0) return
+
+    n_spin  = merge(2, 1, yn_sbe_spinor == 'y')
+    nv_phys = gs%nv_prim / n_spin
+
+    allocate(pop_local(1:4, 1:4, 1:sbe%nk))
+    pop_local = 0d0
+
+    do ik = sbe%ik_min, sbe%ik_max
+        do i = 1, nba
+            in = sbe%active_idx(i)
+            isub = gs%unfold_sub(in, ik)
+            if (isub < 1 .or. isub > gs%n_coset) cycle
+            irank_prim = gs%unfold_prim(in, ik)
+            if (irank_prim < 1) cycle
+            if (irank_prim <= gs%nv_prim) then
+                pphys = (irank_prim + n_spin - 1) / n_spin
+                off   = pphys - nv_phys
+                if (off == 0) then
+                    islot = 2
+                else if (off == -1) then
+                    islot = 1
+                else
+                    cycle
+                end if
+            else
+                pphys = (irank_prim - gs%nv_prim + n_spin - 1) / n_spin
+                if (pphys == 1) then
+                    islot = 3
+                else if (pphys == 2) then
+                    islot = 4
+                else
+                    cycle
+                end if
+            end if
+            popi = real(sbe%rho(in, in, ik))      ! diabatic (fixed-basis) occupation
+            do s = 1, gs%n_coset
+                pop_local(islot, s, ik) = pop_local(islot, s, ik) &
+                    & + gs%unfold_w(s, in, ik) * popi
+            end do
+        end do
+    end do
+
+    call comm_summation(pop_local, pop_lev, 16 * sbe%nk, icomm)
+    deallocate(pop_local)
+end subroutine calc_diabatic_unfolded_population_k
+
+
+! Intra-band (group-velocity) current in the instantaneous Houston basis.
+! In the velocity gauge only the TOTAL current J = Tr[(p + A + v_nl) rho] is
+! gauge invariant; its intra/inter split is basis dependent and is physical in
+! the Houston (adiabatic) basis, where the diagonal carries the Boltzmann drift
+! of each populated band and the off-diagonal the interband polarization:
+!   J_intra = sum_k w_k sum_a f^H_a v^H_aa,   f^H_a = (U^dagger rho U)_aa,
+!             v^H_aa = (U^dagger (p + A + v_nl) U)_aa,
+! with U diagonalizing H_VG = H_0(k) + A.p (+ Sigma_HF) -- the same Houston
+! basis the propagator and dissipation use. Summing J_intra + J_inter recovers
+! the gauge-invariant total. [intra/inter decomposition: T. Otobe, PRB 94,
+! 235152 (2016)]
+subroutine calc_intraband_current_houston(sbe, gs, Ac, jmat_intra, icomm)
+    use eigen_lapack, only: eigen_zheev
+    implicit none
+    type(s_sbe_bloch_solver), intent(in)  :: sbe
+    type(s_sbe_gs_info),      intent(in)  :: gs
+    real(8),                  intent(in)  :: Ac(3)
+    real(8),                  intent(out) :: jmat_intra(3)
+    integer,                  intent(in)  :: icomm
+
+    integer :: nba, ik, i, j, idir, in, im, a
+    real(8) :: tmp1(3), tmp(3)
+    real(8),    allocatable :: evals(:), eigen_a(:)
+    complex(8), allocatable :: p_k_full(:,:,:), p_active(:,:,:), H(:,:), W(:,:)
+    complex(8), allocatable :: rho_a(:,:), t1(:,:), rhoH(:,:), vH(:,:)
+
+    nba = sbe%n_active_bands
+    tmp1 = 0d0
+    if (nba == 0) then
+        call comm_summation(tmp1, tmp, 3, icomm)
+        jmat_intra = tmp / (sum(gs%kweight) * gs%volume)
+        return
+    end if
+
+    allocate(evals(nba), eigen_a(nba), p_k_full(sbe%nb, sbe%nb, 3))
+    allocate(p_active(nba, nba, 3), H(nba, nba), W(nba, nba))
+    allocate(rho_a(nba, nba), t1(nba, nba), rhoH(nba, nba), vH(nba, nba))
+
+    do ik = sbe%ik_min, sbe%ik_max
+        p_k_full(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
+        if (sbe%flag_vnl_correction) &
+            p_k_full(:, :, :) = p_k_full(:, :, :) + gs%rvnl_tm_matrix(:, :, :, ik)
+        do idir = 1, 3
+            do j = 1, nba
+                im = sbe%active_idx(j)
+                do i = 1, nba
+                    in = sbe%active_idx(i)
+                    p_active(i, j, idir) = p_k_full(in, im, idir)
+                end do
+            end do
+        end do
+        do i = 1, nba
+            eigen_a(i) = gs%eigen(sbe%active_idx(i), ik)
+        end do
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                rho_a(i, j) = sbe%rho(in, im, ik)
+            end do
+        end do
+
+        ! Houston basis: diagonalize H_VG = H_0(k) + A.p (+ Sigma_HF)
+        H(:, :) = Ac(1)*p_active(:,:,1) + Ac(2)*p_active(:,:,2) + Ac(3)*p_active(:,:,3)
+        do i = 1, nba
+            H(i, i) = H(i, i) + eigen_a(i)
+        end do
+        if (sbe%flag_coulomb) H(:, :) = H(:, :) + sbe%sigma_hf(:, :, ik)
+        call eigen_zheev(H, evals, W)
+
+        ! f^H = U^dagger rho U  (diagonal = Houston populations)
+        call ZGEMM('C','N', nba,nba,nba, dcmplx(1d0,0d0), W, nba, rho_a, nba, dcmplx(0d0,0d0), t1, nba)
+        call ZGEMM('N','N', nba,nba,nba, dcmplx(1d0,0d0), t1, nba, W, nba, dcmplx(0d0,0d0), rhoH, nba)
+
+        do idir = 1, 3
+            ! velocity operator v = p + A + v_nl (A on the diagonal), rotate to Houston
+            H(:, :) = p_active(:, :, idir)
+            do i = 1, nba
+                H(i, i) = H(i, i) + Ac(idir)
+            end do
+            call ZGEMM('C','N', nba,nba,nba, dcmplx(1d0,0d0), W, nba, H, nba, dcmplx(0d0,0d0), t1, nba)
+            call ZGEMM('N','N', nba,nba,nba, dcmplx(1d0,0d0), t1, nba, W, nba, dcmplx(0d0,0d0), vH, nba)
+            do a = 1, nba
+                tmp1(idir) = tmp1(idir) + gs%kweight(ik) * real(rhoH(a, a)) * real(vH(a, a))
+            end do
+        end do
+    end do
+
+    call comm_summation(tmp1, tmp, 3, icomm)
+    jmat_intra(:) = tmp(:) / (sum(gs%kweight) * gs%volume)
+    deallocate(evals, eigen_a, p_k_full, p_active, H, W, rho_a, t1, rhoH, vH)
+end subroutine calc_intraband_current_houston
 
 
 end module

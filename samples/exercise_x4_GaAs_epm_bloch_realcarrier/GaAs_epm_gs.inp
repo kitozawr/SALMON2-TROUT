@@ -1,0 +1,42 @@
+!########################################################################################!
+! GaAs EPM ground state (self-contained local Empirical Pseudopotential Method).          !
+!----------------------------------------------------------------------------------------!
+! Step 1 of 2. Generates GaAs_epm_k.data / _eigen.data / _tm.data read by the SBE step.   !
+! (The cubic Fortran EPM does NOT emit the FCC unfold map -- for the per-coset UNFOLDED    !
+! maps use the Python EPM; see the README and the 2-coset examples x5/x6.) No             !
+! pseudopotential file and no atomic coordinates are needed -- the zincblende structure   !
+! (V^S and V^A Cohen-Bergstresser form factors) is built from the lattice constant alone. !
+! The cubic Fortran EPM is verified                                                       !
+! byte-equivalent to the Python reference (epm_gaas_reference.py) for the scalar bands.   !
+!----------------------------------------------------------------------------------------!
+! Units a.u.:  Length 1 [a.u.] = 0.52917721067 [Angstrom];  Energy 1 [a.u.] = 27.2114 eV  !
+!########################################################################################!
+
+&calculation
+    theory = 'epm'
+/
+
+&control
+    sysname = 'GaAs_epm'
+/
+
+&units
+    unit_system = 'au'
+/
+
+&system
+    yn_periodic = 'y'
+    al(1:3) = 10.68d0, 10.68d0, 10.68d0   ! GaAs lattice constant a = 5.653 Angstrom
+    nelec  = 32                            ! 8-atom cubic cell, 4 valence e/atom
+    nstate = 32
+/
+
+&kgrid
+    num_kgrid(1:3) = 4, 4, 4               ! scalar 4x4x4 validation grid
+/
+
+&epm
+    epm_material            = 'GaAs'       ! zincblende, V^A != 0, Cohen-Bergstresser FFs
+    epm_lattice_constant_au = 10.68d0      ! must match al(1:3) above
+    epm_pw_cutoff_ry        = 11.1d0       ! |G|^2 cutoff in (2pi/a)^2 units
+/

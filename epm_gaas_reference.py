@@ -203,38 +203,40 @@ def monkhorst_pack_grid(b_matrix, num_kgrid):
 # Hamiltonian with Parity Selection Rule (The Band-Folding Trick)
 # =============================================================================
 def build_hamiltonian_sc(material, kvec, Gcart, a_lattice):
+    """Cohen-Bergstresser local EPM on the simple-cubic supercell basis.
+    Vectorized over the plane-wave PAIRS (identical result to the former scalar
+    i<j double loop, just O(npw^2) numpy instead of O(npw^2) Python -- the win
+    matters for dense grids). The off-diagonal element for the integer index
+    difference dG=(h,k,l) is VS(|dG|^2) cos(pi/4 (h+k+l)) + i VA(|dG|^2)
+    sin(pi/4 (h+k+l)); negating dG (the j,i entry) flips only the sin, so the
+    full matrix is Hermitian by construction."""
     npw = Gcart.shape[0]
-    H = np.zeros((npw, npw), dtype=complex)
-
     twopi_over_a = 2.0 * np.pi / a_lattice
-    # Extract integer (h,k,l) indices for all G vectors
-    G_indices = np.round(Gcart / twopi_over_a).astype(int)
+    G_idx = np.round(Gcart / twopi_over_a).astype(int)        # (npw,3) integer hkl
 
+    # Pairwise integer index differences dG = G_i - G_j.
+    dG = G_idx[:, None, :] - G_idx[None, :, :]                 # (npw,npw,3)
+    h, k, l = dG[..., 0], dG[..., 1], dG[..., 2]
+    # PARITY SELECTION RULE: FCC-in-cubic structure factor is EXACTLY ZERO unless
+    # h,k,l are all even or all odd (forces the band folding, no 8-atom sum).
+    parity = ((h - k) % 2 == 0) & ((k - l) % 2 == 0)
+    dG2 = h * h + k * k + l * l                                # (npw,npw) integer shells
+
+    # Vectorized form-factor lookup: fill VS/VA per nonzero shell (a handful).
+    VS = np.zeros((npw, npw))
+    VA = np.zeros((npw, npw))
+    for g2 in np.unique(dG2[parity]):
+        vs, va = form_factors(material, int(g2))
+        if vs == 0.0 and va == 0.0:
+            continue
+        m = parity & (dG2 == g2)
+        VS[m] = vs
+        VA[m] = va
+
+    phase = (np.pi / 4.0) * (h + k + l)                        # tau = (a/8)(1,1,1)
+    H = VS * np.cos(phase) + 1j * (VA * np.sin(phase))
     kpg = kvec[None, :] + Gcart
-    diag = 0.5 * np.einsum('ij,ij->i', kpg, kpg)
-    np.fill_diagonal(H, diag)
-
-    for i in range(npw):
-        for j in range(i + 1, npw):
-            dG_idx = G_indices[i] - G_indices[j]
-            h, k, l = dG_idx
-
-            # PARITY SELECTION RULE:
-            # For an FCC lattice embedded in a simple cubic supercell, the structure
-            # factor is EXACTLY ZERO unless h, k, l are all even or all odd.
-            # This naturally forces the band folding without manual 8-atom summation!
-            if (h % 2 == k % 2) and (k % 2 == l % 2):
-                dG2 = h**2 + k**2 + l**2
-                VS, VA = form_factors(material, dG2)
-                if VS == 0.0 and VA == 0.0:
-                    continue
-
-                # Phase corresponds to tau = (a/8)(1,1,1)
-                phase = np.pi / 4.0 * (h + k + l)
-                val = complex(VS * np.cos(phase), VA * np.sin(phase))
-                H[i, j] = val
-                H[j, i] = np.conj(val)
-
+    H[np.diag_indices(npw)] = 0.5 * np.einsum('ij,ij->i', kpg, kpg)   # kinetic on diag
     return H
 
 def momentum_matrix(kvec, Gcart, evec):

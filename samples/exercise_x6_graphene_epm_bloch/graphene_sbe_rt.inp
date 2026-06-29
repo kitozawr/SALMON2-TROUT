@@ -1,0 +1,61 @@
+!########################################################################################!
+! Monolayer graphene SBE real-time run on the Python-EPM ground state.                    !
+!----------------------------------------------------------------------------------------!
+! Step 2 of 2. Reads graphene_k/_eigen/_tm/_unfold.data written by the Python EPM (step 1,!
+! see README -- the cubic Fortran EPM does NOT do the rectangular graphene cell). The SBE !
+! cell is the rectangular 4-atom cell (zigzag x = a, armchair y = sqrt(3) a, plus vacuum  !
+! along z), a 2-fold (2-coset) supercell of the 2-atom hexagonal primitive cell.          !
+!                                                                                          !
+! The field is IN-PLANE (epdir || x): an out-of-plane (z) field does not couple to the    !
+! in-plane pi bands and gives ZERO excitation. sysname/al/num_kgrid/nstate/nelec MUST     !
+! match the Python GS step (note nelec=4, nstate=8: graphene is a pi-band model).         !
+!----------------------------------------------------------------------------------------!
+! Units a.u.:  Length 1 [a.u.] = 0.52917721067 [Angstrom];  Energy 1 [a.u.] = 27.2114 eV  !
+!########################################################################################!
+
+&calculation
+    theory = 'sbe'
+/
+
+&control
+    sysname = 'graphene'
+/
+
+&units
+    unit_system = 'au'
+/
+
+&system
+    yn_periodic = 'y'
+    al(1:3) = 4.648726d0, 8.051830d0, 37.794523d0   ! a, sqrt(3)a, vacuum [Bohr]
+    nelec  = 4                                        ! pi-band model (4 valence e)
+    nstate = 8
+/
+
+&kgrid
+    num_kgrid(1:3) = 4, 4, 1                          ! 2D: single k_z (vacuum axis)
+/
+
+&tgrid
+    dt = 0.04d0
+    nt = 400
+/
+
+&emfield
+    ae_shape1      = 'Acos2'
+    epdir_re1(1:3) = 1.0d0, 0.0d0, 0.0d0   ! IN-PLANE field (|| zigzag x). NOT z!
+    I_wcm2_1       = 1.0d+12
+    tw1            = 15.0d0
+    omega1         = 0.06d0
+/
+
+&analysis
+    out_projection_step      = 20
+    out_projection_k_step    = 40          ! folded + 2-coset unfolded real-carrier maps
+    yn_out_intraband_current = 'y'
+/
+
+&sbe
+    ! all yn_sbe_* default OFF -> plain dissipation-free dynamics.
+    ! Graphene is gapless (Dirac); carriers appear at the Dirac K points.
+/

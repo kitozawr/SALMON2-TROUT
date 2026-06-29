@@ -34,8 +34,10 @@ at Gamma). Form factors are interpolated onto the hexagonal G-shells from the
 zinc-blende shells of a_ZB = sqrt(2) a_W (BC1967 Sec. II).
 """
 
+import sys
+
 import numpy as np
-from numpy.linalg import eigvalsh
+from numpy.linalg import eigh, eigvalsh
 
 RY_TO_HA = 0.5
 HA_TO_EV = 27.211386245988
@@ -156,25 +158,21 @@ def structure_factors(dG, atoms_pos, atoms_spec):
 
 def build_hamiltonian(kvec, Gcart, atoms_pos, atoms_spec):
     """H(k) [Hartree] = |k+G|^2 (Ry) + S^S V^S + iS^A V^A, normalized by TOTAL
-    atoms. Hermitian; complex because wurtzite breaks inversion."""
+    atoms. Hermitian; complex because wurtzite breaks inversion. Vectorized over
+    the plane-wave pairs (identical result to the scalar double loop; the cited
+    form factors are zero beyond shell 16, so no explicit g2 cut is needed)."""
     npw = len(Gcart)
-    H = np.zeros((npw, npw), dtype=complex)
-    g2cut = 17.0 * (2.0 * np.pi / _azb_bohr()) ** 2
-    for i in range(npw):
-        kg = kvec + Gcart[i]
-        H[i, i] += (kg @ kg) * RY_TO_HA
-        for j in range(npw):
-            if i == j:
-                continue
-            dG = Gcart[i] - Gcart[j]
-            g2 = dG @ dG
-            if g2 > g2cut:
-                continue
-            VS, VA = form_factor_phys(g2)
-            if VS == 0.0 and VA == 0.0:
-                continue
-            Ssym, Sasym = structure_factors(dG, atoms_pos, atoms_spec)
-            H[i, j] += (Ssym * VS + Sasym * VA) * RY_TO_HA
+    n = len(atoms_pos)
+    dG = Gcart[:, None, :] - Gcart[None, :, :]            # (npw, npw, 3)
+    g2 = np.einsum('ijd,ijd->ij', dG, dG)
+    VS, VA = form_factor_phys(g2)                          # array-safe (np.interp)
+    ph = np.exp(-1j * np.einsum('ijd,ad->ija', dG, atoms_pos))   # (npw, npw, n)
+    Ssym  = ph.sum(axis=2) / n
+    Sasym = (ph * atoms_spec[None, None, :]).sum(axis=2) / n
+    H = (Ssym * VS + Sasym * VA) * RY_TO_HA
+    np.fill_diagonal(H, 0.0)                               # diagonal is kinetic only
+    kg = kvec[None, :] + Gcart
+    H[np.diag_indices(npw)] = np.einsum('id,id->i', kg, kg) * RY_TO_HA
     return 0.5 * (H + H.conj().T)
 
 def bands_at_k(kvec, Gcart, atoms_pos, atoms_spec, nb):
@@ -249,7 +247,109 @@ def validate_against_paper(cutoff_ry=12.0, tol_ev=0.1):
     return abs(gap - CDS_GAP_PAPER_EV) <= tol_ev, gap, npw
 
 
-if __name__ == '__main__':
+# =============================================================================
+# SBE ground-state emission (scalar, NO spinor) on the FOLDED orthorhombic cell
+# =============================================================================
+# The SBE runs on the orthorhombic 8-atom al(1:3)=(a,a*sqrt3,c) cell, whose bands
+# are the hexagonal-primitive bands FOLDED 2-fold (verified exact by
+# orth_folding_check). This emits SYSNAME_k/_eigen/_tm.data in the SBE read
+# contract (via epm_io), so theory='sbe' can run CdS end-to-end. The local
+# pseudopotential has no nonlocal velocity term -> rvnl_tm = 0.
+CDS_SYSNAME      = 'CdS'
+CDS_NELEC        = 32           # 8 atoms * 4 valence e-/formula-pair = 32
+CDS_NSTATE       = 32           # 16 valence (folded) + 16 conduction
+CDS_NUM_KGRID    = (4, 4, 4)
+CDS_GS_CUTOFF_RY = 9.0          # |G|^2 [a.u.^2]; 2-fold folding is exact here
+
+
+def main_gs(sysname=CDS_SYSNAME, num_kgrid=CDS_NUM_KGRID, nstate=CDS_NSTATE,
+            nelec=CDS_NELEC, cutoff_ry=CDS_GS_CUTOFF_RY, outdir='./'):
+    """Emit the scalar SBE ground-state files for CdS on the orthorhombic cell."""
+    import epm_io
+    a_au, c_au = CDS_A_ANG * ANG_TO_BOHR, CDS_C_ANG * ANG_TO_BOHR
+    A, B, C = orthorhombic_vectors_au(a_au, c_au)
+    Brec, _ = reciprocal(A, B, C)
+    pos, spec = wurtzite_atoms_orth(a_au, c_au)
+    Gcart, _ = build_pw_basis(Brec, cutoff_ry)
+    npw = len(Gcart)
+    if nstate > npw:
+        raise ValueError(f'nstate={nstate} exceeds npw={npw}; raise cutoff')
+    kpoint, kweight = epm_io.monkhorst_pack(Brec, num_kgrid)
+    nk = kpoint.shape[0]
+    nocc = nelec // 2
+
+    print(f'# EPM CdS (wurtzite, orthorhombic 8-atom cell, 2-fold folded) -- scalar')
+    print(f'#   al(1:3) = {np.round(cds_cell_au(), 4)} Bohr  (a, a*sqrt3, c)')
+    print(f'#   plane waves = {npw}, k-points = {nk}, bands = {nstate}, '
+          f'valence e- = {nelec} (occ 2/band)')
+
+    eigen = np.zeros((nstate, nk))
+    occup = np.zeros((nstate, nk))
+    p_tm = np.zeros((nstate, nstate, 3, nk), dtype=complex)
+    rvnl_tm = np.zeros((nstate, nstate, 3, nk), dtype=complex)   # local -> 0
+    for ik in range(nk):
+        H = build_hamiltonian(kpoint[ik], Gcart, pos, spec)
+        ev, evec = eigh(H)
+        eigen[:, ik] = ev[:nstate]
+        occup[:nocc, ik] = 2.0
+        p_tm[:, :, :, ik] = epm_io.momentum_matrix(kpoint[ik], Gcart, evec[:, :nstate])
+        if (ik + 1) % max(1, nk // 8) == 0 or ik == nk - 1:
+            print(f'#   ... diagonalized k-point {ik + 1}/{nk}')
+
+    b_matrix = np.array(Brec)
+    epm_io.write_epm_gs_files(sysname, outdir, 'CdS', kpoint, b_matrix, kweight,
+                              eigen, occup, p_tm, rvnl_tm,
+                              extra_note='wurtzite orthorhombic 2-fold folded')
+    return eigen, occup
+
+
+# Hexagonal-BZ high-symmetry points (reduced coords of the hex reciprocal) and
+# a primitive band path for the clean (unfolded) level-structure plot.
+CDS_HS_HEX = {'Gamma': (0, 0, 0), 'M': (0.5, 0, 0), 'K': (1/3, 1/3, 0),
+              'A': (0, 0, 0.5), 'L': (0.5, 0, 0.5), 'H': (1/3, 1/3, 0.5)}
+CDS_BANDPATH = ['A', 'Gamma', 'M', 'K', 'Gamma']
+CDS_BANDPATH_NB = 14            # 8 valence + 6 conduction
+CDS_BANDPATH_NDIV = 40
+CDS_BANDPATH_CUTOFF_RY = 12.0
+
+
+def main_bandpath(sysname=CDS_SYSNAME, outdir='./'):
+    """Emit SYSNAME_bandpath.data: the clean primitive (hexagonal-cell) bands
+    along CDS_BANDPATH, for the unfolded level-structure plot."""
+    import epm_io
+    a_au, c_au = CDS_A_ANG * ANG_TO_BOHR, CDS_C_ANG * ANG_TO_BOHR
+    a1, a2, a3 = hexagonal_vectors_au(a_au, c_au)
+    Brec, _ = reciprocal(a1, a2, a3)
+    pos, spec = hex_primitive_atoms(a_au, c_au)
+    Gcart, _ = build_pw_basis(Brec, CDS_BANDPATH_CUTOFF_RY)
+    qreds, kcarts, dists, node_d = epm_io.build_path(CDS_HS_HEX, CDS_BANDPATH,
+                                                     CDS_BANDPATH_NDIV, Brec)
+    eig = np.array([bands_at_k(kc, Gcart, pos, spec, CDS_BANDPATH_NB) for kc in kcarts])
+    epm_io.write_bandpath_file(sysname, outdir, 'CdS', CDS_BANDPATH, node_d,
+                               dists, qreds, eig, nv=CDS_NVAL_PRIM, spinor=0)
+
+
+def main_unfoldmap(sysname=CDS_SYSNAME, num_kgrid=CDS_NUM_KGRID, nstate=CDS_NSTATE,
+                   cutoff_ry=CDS_GS_CUTOFF_RY, outdir='./'):
+    """Emit SYSNAME_unfold.data: the 2-coset (orthorhombic<-hexagonal) band ->
+    coset spectral-weight map for the SBE's unfolded-population output. Same
+    k-grid / cutoff / nstate as main_gs (the SBE checks nk and nb match)."""
+    import epm_io
+    a_au, c_au = CDS_A_ANG * ANG_TO_BOHR, CDS_C_ANG * ANG_TO_BOHR
+    A, B, C = orthorhombic_vectors_au(a_au, c_au)
+    Brec, _ = reciprocal(A, B, C)
+    pos, spec = wurtzite_atoms_orth(a_au, c_au)
+    Gcart, hkls = build_pw_basis(Brec, cutoff_ry)
+    coset = orth_coset(Gcart, a_au, c_au)        # 0/1 (2-fold)
+    kpoint, _ = epm_io.monkhorst_pack(Brec, num_kgrid)
+    offsets, isub, ibprim, wsub = epm_io.compute_unfold_map(
+        lambda k: build_hamiltonian(k, Gcart, pos, spec),
+        kpoint, Gcart, np.array(hkls), coset, n_coset=2, nstate=nstate)
+    epm_io.write_unfold_file(sysname, outdir, 'CdS', 2, CDS_NVAL_PRIM,
+                             offsets, isub, ibprim, wsub)
+
+
+def _print_validation():
     print('CdS wurtzite EPM (BC1967 local form factors):')
     print(f'  SBE cell al(1:3) = {np.round(cds_cell_au(),3)} Bohr  (a, a*sqrt3, c)')
     print('  -- hexagonal primitive cell (band validation) --')
@@ -263,3 +363,23 @@ if __name__ == '__main__':
     print(f'     orthorhombic gap@Gamma = {gorth:.3f} eV  (== primitive: folding OK)')
     print(f'     coset0 Gamma_hex gap = {g0:.3f} eV (the direct gap); '
           f'coset1 partner gap = {g1:.3f} eV')
+
+
+if __name__ == '__main__':
+    mode = sys.argv[1] if len(sys.argv) > 1 else ''
+    if mode == 'validate':
+        _print_validation()            # band/folding validation only (no files)
+    elif mode == 'bandpath':
+        main_bandpath()                # clean primitive band path only
+    elif mode == 'unfoldmap':
+        main_unfoldmap()               # 2-coset unfold map only
+    elif mode == 'gs':
+        main_gs()                      # SBE ground-state files (k/eigen/tm)
+        main_bandpath()                # + the clean primitive band path
+        main_unfoldmap()               # + the 2-coset unfold map (no slow validation)
+    else:
+        _print_validation()
+        print()
+        main_gs()                      # emit the scalar SBE ground-state files
+        main_bandpath()                # + the clean primitive band path
+        main_unfoldmap()               # + the 2-coset unfold map
