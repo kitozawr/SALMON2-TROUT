@@ -10,12 +10,13 @@ Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #
 The primitive-cell work was **merged to `develop-2.0.0`** (branch `claude/sbe-nonorthogonal` closed). **Commit small changes directly to `develop-2.0.0` now** (maintainer's instruction — no more feature branch). All four primitive materials run end-to-end: **GaAs (scalar+spinor), Si, CdS, graphene** (GS+SBE+maps); Si & CdS also have dissipators+super-mode (CPTP). Example set: `samples/exercise_x7_primitive_cell_epm/` (commented).
 
 **Open tasks, priority order** (details in the TODO list + decision blocks below):
-1. **inter-k e-ph THROUGH THE RING** (TODO-4 decision) — gated on `yn_sbe_superres`; CPTP net-Δf algorithm + insertion point (`compute_coulomb_selfenergy_ring` hop loop) are locked below. Needed for primitive Si/GaAs intervalley e-ph. *(big, delicate — the main physics gap.)*
+1. **inter-k e-ph WIRING** — the CPTP core `eph_interk_dpop` is ✅ DONE+tested (`test_eph_interk_cptp.f90`); remaining = wire the one-step-lagged Houston-spectrum all-gather + per-k apply of `dpop`/`gout` in `houston_dissipate`, gated `flag_eph.and.flag_ring` (ring-off byte-unchanged). Precise plan in the TODO-4 block below. *(touches the live propagator — verify end-to-end on primitive Si.)*
 2. **graphene dissipators** — add the `epm_material='graphene'` registry entry (E2g 196 meV, A1′ 160 meV, gapless-CM Auger, no-Kuhn-Zurek) so graphene gets e-ph (folded-era item 3).
 3. **Fortran EPM for CdS/graphene** (TODO-2) — extend `src/epm` to the non-cubic primitive cells (no folding).
 4. **`--spectral` 4-level colouring** (TODO-3) — needs the SBE to emit VB-1/VB/CB1/CB2 primitive populations (currently only LCB); then colour all four in `plot_primitive_spectral`.
 5. **deeppseudodot DFT→EPM** (TODO-7) — branch `claude/dft-epm-coefficients-pdvguw`.
-6. **SBE console banner** refresh (TODO-8, cosmetic).
+
+✅ Done this session beyond the materials: EPM vectorization (TODO-1), conductivity/STFT verified (TODO-6), inter-k e-ph CPTP core (TODO-4 core), TROUT banner + SBE run-config header (TODO-8), exercise_x7 examples.
 
 ---
 
@@ -65,7 +66,7 @@ The primitive-cell work was **merged to `develop-2.0.0`** (branch `claude/sbe-no
 5. Keep working examples + docs updated (long-term memory).
 6. ✅ **VERIFIED (already implemented).** `plot_conductivity` = σ(ω)=J(ω)·conj(E)/(|E|²+floor) (`_sigma_ratio`), Hann-windowed, **default 0–4 THz**, Re+Im. `plot_conductivity_stft` = Re σ(ω,t) 2-D map, **hop defaults to 1 sample → N−1 of N overlap** (the requested smoothness), 0–4 THz; effective hop only rises for the render cap (max_cols) while keeping overlap maximal. Note: needs a ps-scale run for true THz resolution (short test runs warn "trace too short for 0–4 THz").
 7. **deeppseudodot / DFT→deep-EPM (branch found: `claude/dft-epm-coefficients-pdvguw`, un-merged).** Set up DFT(primitive cell, in-salmon, Si example)→deep-EPM coefficient fitting; drop a ready Si example in `samples/` with a DFT-compatibility layer (user runs the long calc; EPM-compat not yet). Start by `git checkout claude/dft-epm-coefficients-pdvguw` (or cherry-pick its deeppseudodot copy) and wire the Si primitive DFT GS → EPM-form-factor fit. Si only, possibly no NN training.
-8. Refresh the **SBE console output header/banner** (outdated).
+8. ✅ **DONE.** Startup `#####` banner now brands **SALMON2-TROUT** (`src/main.f90`); the SBE init diagnostic prints a run-config header (k-points/bands/active, scalar-vs-spinor basis + occ/band, PRIMITIVE-vs-FOLDED cell). Verified on the graphene primitive run.
 
 **PRE-LIST material-pipeline tasks (predate the 8-item list, still open — order: map → physics → next material):**
 - **A. GaAs (reference, 100% done):** scalar + spinor GS/SBE/maps/dissipators+super-mode all ✅.
