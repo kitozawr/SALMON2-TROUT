@@ -6,6 +6,41 @@ Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #
 
 ---
 
+## ⭐ CURRENT WORK — PRIMITIVE-CELL (non-orthogonal, NO folding) pivot — branch `claude/sbe-nonorthogonal`
+
+**Read this block FIRST on resume — it is the live frontier.** Off merged `develop-2.0.0` (PR #46 merged the plotter/real-carrier/intra-current work). All runs are in the session scratchpad `…/scratchpad/{gaas_prim,gaas_prim_odd,gaas_prim_so,gaas_prim_so7,si_prim,cds_prim}`; the SALMON binary is `build/salmon`.
+
+**WHY the pivot:** the "L over-populates Γ" pattern was proven a **band-folding artifact**. Folded cubic gives L/Γ≈760 (anti-Zener); the **primitive FCC** gives Γ≫L≫X (correct Kane ordering, L/Γ≈0.01, matches Zener P). Removing folding swings L/Γ by 10⁵. So we now run the SBE on the **primitive cell directly** (non-orthogonal, no cosets, no unfold map, no sublattice projection — the primitive cell IS the irreducible problem).
+
+**DONE & verified (this branch):**
+- `epm_gaas_primitive.py` — FCC 2-atom non-orthogonal (plane waves = all-same-parity G's = BCC reciprocal). Reuses `epm_gaas_reference` H/momentum. Scalar: Γ 1.386 / L 2.677 / X 3.943 eV. **Spinor** via `INCLUDE_SPIN_ORBIT=True` (reuses ref SO machinery, mu calibrated on the primitive basis): Δ₀=0.341 eV, gap 1.273 eV, Kramers doublets, spin-split zero along ⟨100⟩/⟨111⟩ (Dresselhaus). Scalar path byte-identical when SO off. CLI: `gap`/`gs`/`bandpath`.
+- `epm_si_primitive.py` — reconfigures `epm_gaas_primitive` for Si (V^A=0, Kunikiyo, a=10.26). **Cutoff RAISED to 27 Ry** (Si Δ-valley camel-back needs it; 11.1 mislands CBM at X) → indirect 1.059 eV @ 0.850·X. Cutoff only sizes GS, not the SBE.
+- `epm_cds_primitive.py` — **4-atom HEXAGONAL wurtzite** primitive (genuinely new non-orthogonal geometry, a1/a2 at 120°). Reuses `epm_wurtzite_cds` geometry/H/BC1967 form factors + the proven non-orthogonal GS writer. Gap 2.547 eV vs BC1967 2.58. nelec=16, nstate=16.
+- `plot_sbe_results.py` — **(a)** Cartesian-BZ heatmap (`_cartesian_bz_grid` un-shears the triclinic grid into a Wigner-Seitz Cartesian volume; reads `# b1/# b2/# b3` from the GS `k.data` header via `_read_bmatrix`/`_bmatrix_for`; only the non-orthogonal datasets get it, cubic legacy untouched). **(b)** `plot_primitive_spectral` = per-frame **movie** into `spectral_frames/` (thin skeleton, fixed colour scale, for ffmpeg). **(c)** spinor auto-detect + spin-splitting plot already worked.
+- `src/ssbe/gs_info_ssbe.f90 read_k_data` — now skips **any** number of `#`/blank header lines (was hard-coded 5) so the EPM can write the reciprocal vectors into `k.data`. **Backward-compatible; GaAs reference re-verified intact** (8³ rerun: Γ dominates ~128×). This is the ONLY SBE/Fortran change on the branch.
+- SBE runs verified end-to-end on the primitive cells: GaAs scalar (8³, **9³ odd → explicit Γ**), GaAs spinor (4³, **7³ odd**), Si (8³ + **dissipators+super-mode**: electrons=8.0000 exact CPTP, energy relaxes 12.5% post-pulse), CdS (7×7×5).
+
+**KEY GOTCHAS (do not relitigate):**
+- **`yn_sbe_spinor='y'` is MANDATORY in `&sbe` for a spinor GS dataset.** Default 'n' makes the solver read the 16-band spinor GS as scalar (`nb_vb=nelec/2=4`, `ib_lcb=5` = a *valence* band, `occ_max=2`) → garbage population (the bogus fc=1.59). With the flag: `nb_vb=nelec=8`, `ib_lcb=9`, `occ_max=1` → physical (fc≤1).
+- **ODD k-grids sample Γ explicitly** (even grids straddle it at e.g. 0.1875); use odd (7³,9³) for a clean Γ spot. The odd grid resolves the sharp near-Γ excitation pocket the even grid misses (so totals rise but converge).
+- **CdS with a c-axis (E∥c) field:** the top valence Γ9→CB transition is **dipole-forbidden at Γ** (only Γ7 couples to E∥c) → excitation is suppressed at Γ and peaks off-axis. This is real wurtzite selection-rule physics, NOT an artifact. (Use E⊥c to populate Γ.)
+- **MPI load balance:** `split_num` (util_ssbe) gives a contiguous partition, max imbalance = 1 k-point/rank (`P/nk`). Non-orthogonality is balance-neutral (per-k cost is geometry-independent); odd cubes just factor awkwardly vs power-of-2 ranks. Super-mode ring sizes buffers to `maxn` (comm balanced); `n_active_bands` is global so dissipator cost is data-independent (no carrier-pileup imbalance). Pick nproc | nk.
+
+**STANDING TODOs from the maintainer (2026-06-29, verbatim intent — sync target of this block):**
+0. **Keep THIS wiki block + tasks in sync** so a fresh session resumes after a context/limit cutover. (readme+wiki = long-term memory.)
+1. Verify **all** material EPMs are vectorized (not just GaAs) — Si/CdS/graphene `build_hamiltonian`.
+2. Add **Fortran EPM for CdS and graphene** — *without folding* (primitive cell) it should work.
+3. `--spectral` must colour the **FOUR** levels (VB-1,VB,CB1,CB2) on the bandmap, not just one — needs the SBE to emit the 4-level primitive populations (currently only LCB).
+4. Verify the **e-ph intervalley transfer point** is found correctly in the **primitive** zone (valley coords differ from the folded/cubic hardcoded ones).
+5. Keep working examples + docs updated (long-term memory).
+6. Verify the plotter builds σ(ω)=J(ω)/E(ω) **and** the time-resolved conductivity map (short-time Fourier, window N pts, **N-1 overlap** for smoothness), **0–4 THz**.
+7. Find the un-merged branch with **deeppseudodot** copied in; set up DFT(primitive, in-salmon, Si example)→deep-EPM coefficient fitting; drop a ready Si example in `samples/` with a DFT-compatibility layer (user runs the long calc; EPM-compat not yet).
+8. Refresh the **SBE console output header/banner** (outdated).
+
+---
+
+---
+
 ## Legend
 ✅ done & tested  · 🚧 in progress · ⬜ not started · 🔭 future / out of current scope
 
