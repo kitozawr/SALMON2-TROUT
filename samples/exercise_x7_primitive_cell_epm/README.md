@@ -24,6 +24,7 @@ no special handling — the reduced k it stores are only labels.
 | GaAs (spin-orbit) | same + SO | `epm_gaas_primitive.py` (`INCLUDE_SPIN_ORBIT`) | Δ₀=0.341 eV, gap 1.27 eV |
 | Si | FCC 2-atom (diamond, V^A=0) | `epm_si_primitive.py` | indirect 1.06 eV @ 0.85·X |
 | CdS | wurtzite 4-atom **hexagonal** | `epm_cds_primitive.py` | direct 2.55 eV (BC1967 2.58) |
+| graphene | 2-atom **hexagonal** (2D-in-vacuum) | `epm_graphene_primitive.py` | gapless Dirac at K |
 
 ## Build
 
@@ -63,6 +64,12 @@ python3 plot_sbe_results.py -i . -o plots --snapshots --spectral
 python3 -c "import epm_cds_primitive as c; c.main_gs(); c.main_bandpath()"
 ./build/salmon < CdS_prim_sbe_rt.inp
 python3 plot_sbe_results.py -i . -o plots --snapshots
+
+# --- graphene (12x12x1 hexagonal, 2D + vacuum; gapless Dirac) ---------------
+python3 -c "import epm_graphene_primitive as g; g.main_gs(); g.main_bandpath()"
+./build/salmon < graphene_prim_sbe_rt.inp    # in-plane field; trace=2 conserved
+python3 plot_sbe_results.py -i . -o plots --snapshots
+# -> the kx-ky Cartesian heatmap shows carriers at the six K/K' Dirac corners.
 ```
 
 ## What to look at

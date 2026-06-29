@@ -1,0 +1,61 @@
+!########################################################################################!
+! graphene PRIMITIVE-CELL SBE — 2-atom HEXAGONAL, 2D-in-vacuum, NO folding (minimal pi).  !
+!----------------------------------------------------------------------------------------!
+! Generate the GS first:                                                                  !
+!   python3 -c "import epm_graphene_primitive as g; g.main_gs(); g.main_bandpath()"       !
+! 2-atom hexagonal primitive embedded in a 3D box with 20 A of c-axis vacuum; the lattice !
+! vectors below are that 3D cell in Bohr. Minimal Ramanujam pi-EPM: the Dirac cone is the !
+! lowest band pair, 1 pi e-/atom -> nelec=2 (1 filled valence pi), nstate=2 (pi/pi*).     !
+! num_kgrid is a multiple of 3 so the K Dirac point (2/3,1/3) is on the mesh; kz=1 (no    !
+! dispersion along vacuum). In-plane field (epdir 1,0,0); graphene is GAPLESS so any      !
+! field excites -- carriers populate the six K/K' Dirac corners (see the Cartesian map).  !
+!########################################################################################!
+
+&calculation
+  theory = 'sbe'
+/
+
+&control
+  sysname = 'graphene_prim'
+/
+
+&units
+  unit_system = 'au'
+/
+
+&system
+  yn_periodic  = 'y'
+  al_vec1(1:3) = 4.64873d0, 0.00000d0,  0.00000d0
+  al_vec2(1:3) = 2.32436d0, 4.02592d0,  0.00000d0
+  al_vec3(1:3) = 0.00000d0, 0.00000d0, 37.79452d0     ! 20 A vacuum
+  nelec  = 2
+  nstate = 2
+/
+
+&kgrid
+  num_kgrid(1:3) = 12, 12, 1          ! multiple of 3 -> K on the mesh; 1 along vacuum
+/
+
+&tgrid
+  dt = 0.2d0
+  nt = 3000
+/
+
+&emfield
+  ae_shape1      = 'Acos2'
+  epdir_re1(1:3) = 1.0d0, 0.0d0, 0.0d0    ! in-plane (zigzag x)
+  I_wcm2_1       = 1.0d+11
+  tw1            = 400.0d0
+  omega1         = 0.02d0
+/
+
+&analysis
+  out_projection_k_step = 1500
+/
+
+&sbe
+  ! all yn_sbe_* default OFF -> clean dynamics (trace = 2 conserved).
+  ! Dissipators for graphene are NOT yet available: the e-ph/Auger registry entry
+  ! epm_material='graphene' (E2g 196 meV, A1' 160 meV, gapless-CM) is pending --
+  ! see wiki/00 standing TODO (folded-era item 3).
+/
