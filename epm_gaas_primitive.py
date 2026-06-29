@@ -144,6 +144,42 @@ def main_gs(outdir='./'):
     print(f'# EPM (GaAs primitive): wrote {SYSNAME}_k/_eigen/_tm.data (nk={nk}, nb={NSTATE})')
 
 
+# FCC Brillouin-zone high-symmetry points, Cartesian in units of (2pi/a)
+FCC_HS = {'L': (0.5, 0.5, 0.5), 'Gamma': (0.0, 0.0, 0.0),
+          'X': (1.0, 0.0, 0.0), 'W': (1.0, 0.5, 0.0), 'K': (0.75, 0.75, 0.0)}
+FCC_PATH = ['L', 'Gamma', 'X', 'W', 'K', 'Gamma']
+
+
+def main_bandpath(outdir='./', ndiv=60):
+    """Emit SYSNAME_bandpath.data: the clean PRIMITIVE bands along the FCC path
+    L-Gamma-X-W-K-Gamma. Cartesian path length (correct for the non-orthogonal
+    cell). Read directly by plot_sbe_results.py."""
+    a = A_LATTICE_AU
+    twopi_a = 2.0 * np.pi / a
+    b_matrix, _ = reciprocal_vectors(*fcc_primitive_vectors_au(a))
+    binv = np.linalg.inv(b_matrix)
+    Gcart, _ = build_pw_basis_fcc(a, PW_CUTOFF_RY)
+    nv = NELEC // 2
+    qreds, dists, node_d, eig = [], [], [0.0], []
+    cum = 0.0
+    nodes = FCC_PATH
+    for iseg in range(len(nodes) - 1):
+        ca = twopi_a * np.array(FCC_HS[nodes[iseg]])
+        cb = twopi_a * np.array(FCC_HS[nodes[iseg + 1]])
+        seg = np.linalg.norm(cb - ca)
+        last = (iseg == len(nodes) - 2)
+        for s in range(ndiv + (1 if last else 0)):
+            t = s / ndiv
+            kc = ca + t * (cb - ca)
+            ev = np.linalg.eigvalsh(ref.build_hamiltonian_sc(MATERIAL, kc, Gcart, a))
+            eig.append(ev[:NSTATE]); qreds.append(kc @ binv)
+            dists.append(cum + t * seg)
+        cum += seg
+        node_d.append(cum)
+    epm_io.write_bandpath_file(SYSNAME, outdir, MATERIAL, nodes, node_d,
+                               np.array(dists), np.array(qreds), np.array(eig), nv, spinor=0)
+
+
 def report_gap():
     """Print the Gamma direct gap and the L-point gap (validation)."""
     a = A_LATTICE_AU
@@ -163,7 +199,13 @@ if __name__ == '__main__':
     mode = sys.argv[1] if len(sys.argv) > 1 else ''
     if mode == 'gap':
         report_gap()
+    elif mode == 'bandpath':
+        main_bandpath()
+    elif mode == 'gs':
+        main_gs()
+        main_bandpath()
     else:
         report_gap()
         print()
         main_gs()
+        main_bandpath()
