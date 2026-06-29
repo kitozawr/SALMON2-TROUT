@@ -33,7 +33,7 @@ Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #
 3. `--spectral` must colour the **FOUR** levels (VB-1,VB,CB1,CB2) on the bandmap, not just one — needs the SBE to emit the 4-level primitive populations (currently only LCB).
 4. Verify the **e-ph intervalley transfer point** is found correctly in the **primitive** zone (valley coords differ from the folded/cubic hardcoded ones).
 5. Keep working examples + docs updated (long-term memory).
-6. Verify the plotter builds σ(ω)=J(ω)/E(ω) **and** the time-resolved conductivity map (short-time Fourier, window N pts, **N-1 overlap** for smoothness), **0–4 THz**.
+6. ✅ **VERIFIED (already implemented).** `plot_conductivity` = σ(ω)=J(ω)·conj(E)/(|E|²+floor) (`_sigma_ratio`), Hann-windowed, **default 0–4 THz**, Re+Im. `plot_conductivity_stft` = Re σ(ω,t) 2-D map, **hop defaults to 1 sample → N−1 of N overlap** (the requested smoothness), 0–4 THz; effective hop only rises for the render cap (max_cols) while keeping overlap maximal. Note: needs a ps-scale run for true THz resolution (short test runs warn "trace too short for 0–4 THz").
 7. Find the un-merged branch with **deeppseudodot** copied in; set up DFT(primitive, in-salmon, Si example)→deep-EPM coefficient fitting; drop a ready Si example in `samples/` with a DFT-compatibility layer (user runs the long calc; EPM-compat not yet).
 8. Refresh the **SBE console output header/banner** (outdated).
 
