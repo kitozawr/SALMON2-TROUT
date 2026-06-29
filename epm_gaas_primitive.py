@@ -37,6 +37,13 @@ SYSNAME = 'GaAs_prim'
 NUM_KGRID = (8, 8, 8)            # MP mesh on the FCC reciprocal lattice
 NELEC = 8                        # 2 atoms (Ga 3 + As 5) -> 8 valence e- -> 4 filled bands
 NSTATE = 8                       # 4 valence + 4 conduction
+# Spin-orbit (spinor) mode. False = scalar (npw problem, NSTATE bands, occ 2);
+# True = spinor (2*npw problem, 2*NSTATE spin-orbit-split bands, occ 1, with the
+# nonlocal SO velocity correction in tm block 2). The SO machinery (kappa.sigma
+# kernel, mu calibration to the Gamma8-Gamma7 splitting) is reused verbatim from
+# epm_gaas_reference; on the single-parity primitive basis dG is always all-even,
+# so the SO structure factor is fully active -- the genuine primitive SO problem.
+INCLUDE_SPIN_ORBIT = False
 
 
 def fcc_primitive_vectors_au(a):
@@ -122,33 +129,59 @@ def main_gs(outdir='./'):
     kfrac = kpoint @ np.linalg.inv(b_matrix)        # Cartesian -> fractional (reduced)
     nk = len(kpoint)
     npw = len(Gcart)
+    spinor = INCLUDE_SPIN_ORBIT
+    if spinor:
+        nb, nocc, occ_val = 2 * NSTATE, NELEC, 1.0
+    else:
+        nb, nocc, occ_val = NSTATE, NELEC // 2, 2.0
     print(f'# EPM {MATERIAL} PRIMITIVE FCC (2-atom, non-orthogonal, NO folding)')
     print(f'#   a = {a} Bohr,  V_cell = {V:.3f} Bohr^3 (= a^3/4 = {a**3/4:.3f})')
-    print(f'#   plane waves = {npw} (all-same-parity), k-points = {nk}, bands = {NSTATE}')
-    print(f'#   valence e- = {NELEC} (occ 2/band -> {NELEC//2} filled)')
+    print(f'#   plane waves = {npw} (all-same-parity){" -> spinor dim "+str(2*npw) if spinor else ""}'
+          f', k-points = {nk}, bands = {nb}')
+    print(f'#   spin-orbit (spinor) = {spinor}; valence e- = {NELEC} '
+          f'(occ {occ_val:g}/band -> {nocc} filled)')
 
-    eigen = np.zeros((NSTATE, nk))
-    occup = np.zeros((NSTATE, nk))
-    p_tm = np.zeros((NSTATE, NSTATE, 3, nk), dtype=complex)
-    rvnl_tm = np.zeros((NSTATE, NSTATE, 3, nk), dtype=complex)   # local potential -> 0
-    nocc = NELEC // 2
+    mu = 0.0
+    if spinor:
+        # Calibrate mu to Delta0 (Gamma8-Gamma7) on the PRIMITIVE basis. The ref
+        # calibrator indexes the valence manifold by its NELEC, so point it at the
+        # primitive electron count for the duration of the calibration.
+        ref.MATERIAL, ref_nelec_saved = MATERIAL, ref.NELEC
+        ref.NELEC = NELEC
+        mu = ref.calibrate_so_mu(Gcart, a)
+        ref.NELEC = ref_nelec_saved
+
+    eigen = np.zeros((nb, nk))
+    occup = np.zeros((nb, nk))
+    p_tm = np.zeros((nb, nb, 3, nk), dtype=complex)
+    rvnl_tm = np.zeros((nb, nb, 3, nk), dtype=complex)   # scalar: 0; spinor: SO velocity
     for ik in range(nk):
-        H = ref.build_hamiltonian_sc(MATERIAL, kpoint[ik], Gcart, a)
-        ev, evec = np.linalg.eigh(H)
-        eigen[:, ik] = ev[:NSTATE]
-        occup[:nocc, ik] = 2.0
-        p_tm[:, :, :, ik] = ref.momentum_matrix(kpoint[ik], Gcart, evec[:, :NSTATE])
+        if spinor:
+            H, v_so = ref.build_hamiltonian_spinor(MATERIAL, kpoint[ik], Gcart, a,
+                                                   mu, with_velocity=True)
+            ev, evec = np.linalg.eigh(H)
+            evec_nb = evec[:, :nb]
+            p_tm[:, :, :, ik] = ref.momentum_matrix_spinor(kpoint[ik], Gcart, evec_nb)
+            for idir in range(3):
+                rvnl_tm[:, :, idir, ik] = evec_nb.conj().T @ (v_so[idir] @ evec_nb)
+        else:
+            H = ref.build_hamiltonian_sc(MATERIAL, kpoint[ik], Gcart, a)
+            ev, evec = np.linalg.eigh(H)
+            p_tm[:, :, :, ik] = ref.momentum_matrix(kpoint[ik], Gcart, evec[:, :nb])
+        eigen[:, ik] = ev[:nb]
+        occup[:nocc, ik] = occ_val
         if (ik + 1) % 64 == 0:
             print(f'#   ... diagonalized k-point {ik+1}/{nk}')
 
+    note = ('PRIMITIVE FCC (2-atom, non-orthogonal, unfolded -- no cosets'
+            + (', spin-orbit' if spinor else '') + ')')
     _write_gs_files_nonorth(
         outdir, kfrac, kpoint, kweight, eigen, occup, p_tm, rvnl_tm,
-        note='PRIMITIVE FCC (2-atom, non-orthogonal, unfolded -- no cosets)',
-        b_matrix=b_matrix)
+        note=note, b_matrix=b_matrix)
     # Cartesian k saved separately for the valley analysis (k_cart = kfrac @ b_matrix).
     np.savez(f'{outdir}{SYSNAME}_kcart.npz', kcart=kpoint, b_matrix=b_matrix,
              a=A_LATTICE_AU)
-    print(f'# EPM ({MATERIAL} primitive): wrote {SYSNAME}_k/_eigen/_tm.data (nk={nk}, nb={NSTATE})')
+    print(f'# EPM ({MATERIAL} primitive): wrote {SYSNAME}_k/_eigen/_tm.data (nk={nk}, nb={nb})')
 
 
 # FCC Brillouin-zone high-symmetry points, Cartesian in units of (2pi/a)
@@ -166,7 +199,15 @@ def main_bandpath(outdir='./', ndiv=60):
     b_matrix, _ = reciprocal_vectors(*fcc_primitive_vectors_au(a))
     binv = np.linalg.inv(b_matrix)
     Gcart, _ = build_pw_basis_fcc(a, PW_CUTOFF_RY)
-    nv = NELEC // 2
+    spinor = INCLUDE_SPIN_ORBIT
+    nb = 2 * NSTATE if spinor else NSTATE
+    nv = NELEC if spinor else NELEC // 2
+    mu = 0.0
+    if spinor:
+        ref.MATERIAL, saved = MATERIAL, ref.NELEC
+        ref.NELEC = NELEC
+        mu = ref.calibrate_so_mu(Gcart, a)
+        ref.NELEC = saved
     qreds, dists, node_d, eig = [], [], [0.0], []
     cum = 0.0
     nodes = FCC_PATH
@@ -178,28 +219,44 @@ def main_bandpath(outdir='./', ndiv=60):
         for s in range(ndiv + (1 if last else 0)):
             t = s / ndiv
             kc = ca + t * (cb - ca)
-            ev = np.linalg.eigvalsh(ref.build_hamiltonian_sc(MATERIAL, kc, Gcart, a))
-            eig.append(ev[:NSTATE]); qreds.append(kc @ binv)
+            if spinor:
+                ev = np.linalg.eigvalsh(ref.build_hamiltonian_spinor(MATERIAL, kc, Gcart, a, mu))
+            else:
+                ev = np.linalg.eigvalsh(ref.build_hamiltonian_sc(MATERIAL, kc, Gcart, a))
+            eig.append(ev[:nb]); qreds.append(kc @ binv)
             dists.append(cum + t * seg)
         cum += seg
         node_d.append(cum)
     epm_io.write_bandpath_file(SYSNAME, outdir, MATERIAL, nodes, node_d,
-                               np.array(dists), np.array(qreds), np.array(eig), nv, spinor=0)
+                               np.array(dists), np.array(qreds), np.array(eig), nv,
+                               spinor=1 if spinor else 0)
 
 
 def report_gap():
-    """Print the Gamma direct gap and the L-point gap (validation)."""
+    """Print the Gamma/X/L vertical gaps (validation). With spin-orbit on, the
+    valence top is the Gamma8 manifold and the gap is measured to it."""
     a = A_LATTICE_AU
     Gcart, _ = build_pw_basis_fcc(a, PW_CUTOFF_RY)
     twopi_a = 2.0 * np.pi / a
     HA = 27.211386245988
+    spinor = INCLUDE_SPIN_ORBIT
+    nocc = NELEC if spinor else NELEC // 2     # filled bands (occ 1 spinor / 2 scalar)
+    mu = 0.0
+    if spinor:
+        ref.MATERIAL, saved = MATERIAL, ref.NELEC
+        ref.NELEC = NELEC
+        mu = ref.calibrate_so_mu(Gcart, a)
+        ref.NELEC = saved
     pts = {'Gamma': np.zeros(3),
            'X': twopi_a * np.array([1.0, 0.0, 0.0]),
            'L': twopi_a * np.array([0.5, 0.5, 0.5])}
     for name, kv in pts.items():
-        ev = np.linalg.eigvalsh(ref.build_hamiltonian_sc(MATERIAL, kv, Gcart, a))
-        gap = (ev[4] - ev[3]) * HA          # 4 valence bands -> band index 3->4
-        print(f'  {name:6s}: E_v={ev[3]*HA:7.3f}  E_c={ev[4]*HA:7.3f}  vertical gap = {gap:6.3f} eV')
+        if spinor:
+            ev = np.linalg.eigvalsh(ref.build_hamiltonian_spinor(MATERIAL, kv, Gcart, a, mu))
+        else:
+            ev = np.linalg.eigvalsh(ref.build_hamiltonian_sc(MATERIAL, kv, Gcart, a))
+        gap = (ev[nocc] - ev[nocc - 1]) * HA
+        print(f'  {name:6s}: E_v={ev[nocc-1]*HA:7.3f}  E_c={ev[nocc]*HA:7.3f}  vertical gap = {gap:6.3f} eV')
 
 
 if __name__ == '__main__':
