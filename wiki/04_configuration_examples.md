@@ -66,12 +66,21 @@
 |---|---|---|
 | out_rt_energy_step | 10 | Stride for SYSNAME_sbe_rt_energy.data + stdout. |
 | out_projection_step | 100 | Stride for SYSNAME_sbe_nex.data (excited e/h, summed over k). |
-| out_projection_k_step | 1000 | Stride for SYSNAME_sbe_nex_k.data (k-resolved Houston-basis lowest-CB), and SYSNAME_sbe_nex_k_unfold.data when a `_unfold.data` map is present (unfolded primitive-BZ populations; N cosets — 4 cubic / 2 wurtzite-rectangular). |
+| out_projection_k_step | 1000 | Stride for the k-resolved population maps (below). |
+| yn_out_intraband_current | n | If `y`, write SYSNAME_sbe_intra_current.data: the intra-band (drift) current in the Houston basis, every step. |
+
+**Per-k population maps** (written every `out_projection_k_step`):
+- **SYSNAME_sbe_nex_k_real.data** — *real carriers only*: the fixed-basis (diabatic) lowest-CB occupation, i.e. the k-resolved excited-electron count n_ex. No reversible A²(t) virtual-polarization breathing; accumulates monotonically and freezes when the field passes. **This is the carrier map to use.** (`_unfold_real` twin per primitive BZ point when a `_unfold.data` map is present; N cosets — 4 cubic / 2 wurtzite-rectangular.) A small residual (~20 %) can remain at the most strongly interband-coupled folds (e.g. the GaAs L-valley); it is 0 % at Γ and 0 % in the BZ total.
+- **SYSNAME_sbe_nex_k.data** — instantaneous Houston-basis lowest-CB population (`_unfold` twin). Physical *during* the pulse but carries the reversible virtual breathing (∝A(t)²); equals the real map after the pulse. Kept for diagnostics.
+
+**Intra-band current** (`yn_out_intraband_current='y'`): in the velocity gauge only the total current (SYSNAME_sbe_rt.data) is gauge invariant; its intra/inter split is physical in the Houston basis. J_intra is the Boltzmann drift (vanishes when the field is off); J_inter = J_total − J_intra is the interband polarization. [T. Otobe, PRB 94, 235152 (2016)]
 
 **Plotting:** `python3 plot_sbe_results.py -i <dir> -o <outdir>` renders the RT
-observables, conductivity, k–t population maps (folded + unfolded), and band
-structure. Use `--lattice wurtzite` for CdS; the clean primitive band path
-(`SYSNAME_bandpath.data`, material-agnostic) plots directly via `--only-bands`.
+observables, conductivity, the intra-band current, the **real-carrier** k–t
+population maps (folded + unfolded), and band structure. The instantaneous
+(breathing) Houston maps are plotted only with `--instantaneous` (or when no
+`_real` file is present). Use `--lattice wurtzite` for CdS; the clean primitive
+band path (`SYSNAME_bandpath.data`, material-agnostic) plots via `--only-bands`.
 
 ## Example: GaAs EPM → SBE pipeline ✅
 ```fortran

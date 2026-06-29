@@ -9,7 +9,8 @@ module bloch_solver_ssbe
     private
     public :: s_sbe_bloch_solver, init_sbe_bloch_solver, calc_current_bloch, &
               dt_evolve_bloch_cf4, calc_trace, calc_energy, calc_bloch_population_k, &
-              calc_unfolded_population_k
+              calc_unfolded_population_k, calc_diabatic_population_k, &
+              calc_diabatic_unfolded_population_k, calc_intraband_current_houston
 
     type s_sbe_bloch_solver
         !k-points for real-time SBE calculation
@@ -2064,6 +2065,38 @@ subroutine calc_bloch_population_k(sbe, gs, Ac, ib_target, pop_k, icomm)
 end subroutine calc_bloch_population_k
 
 
+! Real-carrier (diabatic) population of band ib_target, per k-point, in the
+! FIXED field-free Bloch basis -- the k-resolved analogue of the standard
+! excited-electron count n_ex (_sbe_nex.data, calc_trace over the conduction
+! bands). rho is stored in this basis, so NO field-dependent projection is
+! applied: pop = Re(rho_{ib,ib}(k)). This drops the reversible virtual
+! polarization (the A^2(t) "breathing" that the instantaneous-Houston
+! projection carries) and reports only the real promoted carriers. The
+! velocity-gauge diagonal population is the diabatic transition probability:
+! it accumulates monotonically and freezes when the field passes, matching
+! n_ex exactly when summed over the conduction bands.
+subroutine calc_diabatic_population_k(sbe, ib_target, pop_k, icomm)
+    implicit none
+    type(s_sbe_bloch_solver), intent(in)  :: sbe
+    integer,                  intent(in)  :: ib_target
+    real(8),                  intent(out) :: pop_k(1:sbe%nk)
+    integer,                  intent(in)  :: icomm
+
+    integer :: ik
+    real(8), allocatable :: pop_local(:)
+
+    allocate(pop_local(1:sbe%nk))
+    pop_local = 0d0
+    if (ib_target >= 1 .and. ib_target <= sbe%nb) then
+        do ik = sbe%ik_min, sbe%ik_max
+            pop_local(ik) = real(sbe%rho(ib_target, ib_target, ik))
+        end do
+    end if
+    call comm_summation(pop_local, pop_k, sbe%nk, icomm)
+    deallocate(pop_local)
+end subroutine calc_diabatic_population_k
+
+
 ! Population of the PHYSICAL lowest conduction band (CB1) of each folded
 ! primitive BZ point, resolved per cubic k-point.
 !
@@ -2219,6 +2252,167 @@ subroutine calc_unfolded_population_k(sbe, gs, Ac, pop_lev, icomm)
     deallocate(pop_local, evals, H, W, W_sorted, t1, t2, rho_a, p_k_full, eigen_a)
     deallocate(zone_map, row_used, col_used)
 end subroutine calc_unfolded_population_k
+
+
+! Real-carrier (diabatic) twin of calc_unfolded_population_k: same band ->
+! {VB-1,VB,CB1,CB2} x coset distribution from the unfold map, but the per-band
+! weight is the FIXED-basis occupation Re(rho_{in,in}(k)) instead of the
+! instantaneous-Houston projection -- no field-dependent diagonalization, no
+! A^2(t) breathing. Reports the real promoted carriers per primitive point.
+subroutine calc_diabatic_unfolded_population_k(sbe, gs, pop_lev, icomm)
+    use salmon_global, only: yn_sbe_spinor
+    implicit none
+    type(s_sbe_bloch_solver), intent(in)  :: sbe
+    type(s_sbe_gs_info),      intent(in)  :: gs
+    real(8),                  intent(out) :: pop_lev(1:4, 1:4, 1:sbe%nk)
+    integer,                  intent(in)  :: icomm
+
+    integer :: nba, ik, i, in, isub, irank_prim, n_spin, nv_phys, pphys, off, islot, s
+    real(8) :: popi
+    real(8), allocatable :: pop_local(:, :, :)
+
+    nba = sbe%n_active_bands
+    pop_lev = 0d0
+    if (.not. gs%have_unfold .or. nba == 0) return
+
+    n_spin  = merge(2, 1, yn_sbe_spinor == 'y')
+    nv_phys = gs%nv_prim / n_spin
+
+    allocate(pop_local(1:4, 1:4, 1:sbe%nk))
+    pop_local = 0d0
+
+    do ik = sbe%ik_min, sbe%ik_max
+        do i = 1, nba
+            in = sbe%active_idx(i)
+            isub = gs%unfold_sub(in, ik)
+            if (isub < 1 .or. isub > gs%n_coset) cycle
+            irank_prim = gs%unfold_prim(in, ik)
+            if (irank_prim < 1) cycle
+            if (irank_prim <= gs%nv_prim) then
+                pphys = (irank_prim + n_spin - 1) / n_spin
+                off   = pphys - nv_phys
+                if (off == 0) then
+                    islot = 2
+                else if (off == -1) then
+                    islot = 1
+                else
+                    cycle
+                end if
+            else
+                pphys = (irank_prim - gs%nv_prim + n_spin - 1) / n_spin
+                if (pphys == 1) then
+                    islot = 3
+                else if (pphys == 2) then
+                    islot = 4
+                else
+                    cycle
+                end if
+            end if
+            popi = real(sbe%rho(in, in, ik))      ! diabatic (fixed-basis) occupation
+            do s = 1, gs%n_coset
+                pop_local(islot, s, ik) = pop_local(islot, s, ik) &
+                    & + gs%unfold_w(s, in, ik) * popi
+            end do
+        end do
+    end do
+
+    call comm_summation(pop_local, pop_lev, 16 * sbe%nk, icomm)
+    deallocate(pop_local)
+end subroutine calc_diabatic_unfolded_population_k
+
+
+! Intra-band (group-velocity) current in the instantaneous Houston basis.
+! In the velocity gauge only the TOTAL current J = Tr[(p + A + v_nl) rho] is
+! gauge invariant; its intra/inter split is basis dependent and is physical in
+! the Houston (adiabatic) basis, where the diagonal carries the Boltzmann drift
+! of each populated band and the off-diagonal the interband polarization:
+!   J_intra = sum_k w_k sum_a f^H_a v^H_aa,   f^H_a = (U^dagger rho U)_aa,
+!             v^H_aa = (U^dagger (p + A + v_nl) U)_aa,
+! with U diagonalizing H_VG = H_0(k) + A.p (+ Sigma_HF) -- the same Houston
+! basis the propagator and dissipation use. Summing J_intra + J_inter recovers
+! the gauge-invariant total. [intra/inter decomposition: T. Otobe, PRB 94,
+! 235152 (2016)]
+subroutine calc_intraband_current_houston(sbe, gs, Ac, jmat_intra, icomm)
+    use eigen_lapack, only: eigen_zheev
+    implicit none
+    type(s_sbe_bloch_solver), intent(in)  :: sbe
+    type(s_sbe_gs_info),      intent(in)  :: gs
+    real(8),                  intent(in)  :: Ac(3)
+    real(8),                  intent(out) :: jmat_intra(3)
+    integer,                  intent(in)  :: icomm
+
+    integer :: nba, ik, i, j, idir, in, im, a
+    real(8) :: tmp1(3), tmp(3)
+    real(8),    allocatable :: evals(:), eigen_a(:)
+    complex(8), allocatable :: p_k_full(:,:,:), p_active(:,:,:), H(:,:), W(:,:)
+    complex(8), allocatable :: rho_a(:,:), t1(:,:), rhoH(:,:), vH(:,:)
+
+    nba = sbe%n_active_bands
+    tmp1 = 0d0
+    if (nba == 0) then
+        call comm_summation(tmp1, tmp, 3, icomm)
+        jmat_intra = tmp / (sum(gs%kweight) * gs%volume)
+        return
+    end if
+
+    allocate(evals(nba), eigen_a(nba), p_k_full(sbe%nb, sbe%nb, 3))
+    allocate(p_active(nba, nba, 3), H(nba, nba), W(nba, nba))
+    allocate(rho_a(nba, nba), t1(nba, nba), rhoH(nba, nba), vH(nba, nba))
+
+    do ik = sbe%ik_min, sbe%ik_max
+        p_k_full(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
+        if (sbe%flag_vnl_correction) &
+            p_k_full(:, :, :) = p_k_full(:, :, :) + gs%rvnl_tm_matrix(:, :, :, ik)
+        do idir = 1, 3
+            do j = 1, nba
+                im = sbe%active_idx(j)
+                do i = 1, nba
+                    in = sbe%active_idx(i)
+                    p_active(i, j, idir) = p_k_full(in, im, idir)
+                end do
+            end do
+        end do
+        do i = 1, nba
+            eigen_a(i) = gs%eigen(sbe%active_idx(i), ik)
+        end do
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                rho_a(i, j) = sbe%rho(in, im, ik)
+            end do
+        end do
+
+        ! Houston basis: diagonalize H_VG = H_0(k) + A.p (+ Sigma_HF)
+        H(:, :) = Ac(1)*p_active(:,:,1) + Ac(2)*p_active(:,:,2) + Ac(3)*p_active(:,:,3)
+        do i = 1, nba
+            H(i, i) = H(i, i) + eigen_a(i)
+        end do
+        if (sbe%flag_coulomb) H(:, :) = H(:, :) + sbe%sigma_hf(:, :, ik)
+        call eigen_zheev(H, evals, W)
+
+        ! f^H = U^dagger rho U  (diagonal = Houston populations)
+        call ZGEMM('C','N', nba,nba,nba, dcmplx(1d0,0d0), W, nba, rho_a, nba, dcmplx(0d0,0d0), t1, nba)
+        call ZGEMM('N','N', nba,nba,nba, dcmplx(1d0,0d0), t1, nba, W, nba, dcmplx(0d0,0d0), rhoH, nba)
+
+        do idir = 1, 3
+            ! velocity operator v = p + A + v_nl (A on the diagonal), rotate to Houston
+            H(:, :) = p_active(:, :, idir)
+            do i = 1, nba
+                H(i, i) = H(i, i) + Ac(idir)
+            end do
+            call ZGEMM('C','N', nba,nba,nba, dcmplx(1d0,0d0), W, nba, H, nba, dcmplx(0d0,0d0), t1, nba)
+            call ZGEMM('N','N', nba,nba,nba, dcmplx(1d0,0d0), t1, nba, W, nba, dcmplx(0d0,0d0), vH, nba)
+            do a = 1, nba
+                tmp1(idir) = tmp1(idir) + gs%kweight(ik) * real(rhoH(a, a)) * real(vH(a, a))
+            end do
+        end do
+    end do
+
+    call comm_summation(tmp1, tmp, 3, icomm)
+    jmat_intra(:) = tmp(:) / (sum(gs%kweight) * gs%volume)
+    deallocate(evals, eigen_a, p_k_full, p_active, H, W, rho_a, t1, rhoH, vH)
+end subroutine calc_intraband_current_houston
 
 
 end module

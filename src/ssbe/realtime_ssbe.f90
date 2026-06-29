@@ -26,6 +26,9 @@ subroutine main_realtime_ssbe(icomm)
     integer :: nproc, irank, ierr
     integer :: fh_sbe_rt, fh_sbe_rt_energy, fh_sbe_nex, fh_sbe_nex_k
     integer :: fh_sbe_nex_k_unfold
+    integer :: fh_sbe_nex_k_real, fh_sbe_nex_k_unfold_real
+    integer :: fh_sbe_intra_current
+    real(8) :: jmat_intra(3)
     integer :: nk
     integer :: ib_lcb, nb_vb
     integer :: ib_top
@@ -34,6 +37,8 @@ subroutine main_realtime_ssbe(icomm)
     real(8), allocatable :: pop_k(:)
     real(8), allocatable :: pop_top_k(:)
     real(8), allocatable :: pop_lev_k(:, :, :)
+    real(8), allocatable :: pop_k_real(:)
+    real(8), allocatable :: pop_lev_k_real(:, :, :)
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
@@ -69,8 +74,8 @@ subroutine main_realtime_ssbe(icomm)
 
     ! Lowest conduction band index (Houston-basis population output)
     ib_lcb = nb_vb + 1
-    allocate(pop_k(1:nk))
-    if (gs%have_unfold) allocate(pop_lev_k(1:4, 1:4, 1:nk))
+    allocate(pop_k(1:nk), pop_k_real(1:nk))
+    if (gs%have_unfold) allocate(pop_lev_k(1:4, 1:4, 1:nk), pop_lev_k_real(1:4, 1:4, 1:nk))
 
     ! Highest band carried into the dynamics (top of the active subspace) -- the
     ! VG basis edge. We monitor its peak adiabatic occupation P_top as the cheap
@@ -94,10 +99,16 @@ subroutine main_realtime_ssbe(icomm)
         fh_sbe_nex = get_filehandle()
         open(unit=fh_sbe_nex, file=trim(base_directory)//trim(sysname)//"_sbe_nex.data", action="write")
         call write_sbe_nex_header(fh_sbe_nex)
-        ! SYSNAME_sbe_nex_k.data
+        ! SYSNAME_sbe_nex_k.data (instantaneous Houston-basis LCB population)
         fh_sbe_nex_k = get_filehandle()
         open(unit=fh_sbe_nex_k, file=trim(base_directory)//trim(sysname)//"_sbe_nex_k.data", action="write")
         call write_sbe_nex_k_header(fh_sbe_nex_k, nk)
+        ! SYSNAME_sbe_nex_k_real.data: REAL carriers only (fixed-basis diabatic
+        ! LCB occupation, k-resolved n_ex) -- no reversible A^2(t) virtual breathing
+        fh_sbe_nex_k_real = get_filehandle()
+        open(unit=fh_sbe_nex_k_real, &
+            & file=trim(base_directory)//trim(sysname)//"_sbe_nex_k_real.data", action="write")
+        call write_sbe_nex_k_real_header(fh_sbe_nex_k_real, nk)
         ! SYSNAME_sbe_nex_k_unfold.data: populations of PHYSICAL primitive
         ! bands at the unfolded primitive k-points (only with an unfold map)
         if (gs%have_unfold) then
@@ -105,6 +116,18 @@ subroutine main_realtime_ssbe(icomm)
             open(unit=fh_sbe_nex_k_unfold, &
                 & file=trim(base_directory)//trim(sysname)//"_sbe_nex_k_unfold.data", action="write")
             call write_sbe_nex_k_unfold_header(fh_sbe_nex_k_unfold, nk)
+            ! REAL-carrier unfolded twin
+            fh_sbe_nex_k_unfold_real = get_filehandle()
+            open(unit=fh_sbe_nex_k_unfold_real, &
+                & file=trim(base_directory)//trim(sysname)//"_sbe_nex_k_unfold_real.data", action="write")
+            call write_sbe_nex_k_unfold_header(fh_sbe_nex_k_unfold_real, nk)
+        end if
+        ! SYSNAME_sbe_intra_current.data: intra-band (Houston) current
+        if (yn_out_intraband_current == 'y') then
+            fh_sbe_intra_current = get_filehandle()
+            open(unit=fh_sbe_intra_current, &
+                & file=trim(base_directory)//trim(sysname)//"_sbe_intra_current.data", action="write")
+            call write_sbe_intra_current_header(fh_sbe_intra_current)
         end if
         ! Stdout logs:
         write(*, "(a)") " time-step time[fs] Current(xyz)[a.u.]                     electrons   Total energy[au]"
@@ -116,12 +139,17 @@ subroutine main_realtime_ssbe(icomm)
     if (irank == 0) then
         pop_k = 0.0d0
         call write_sbe_nex_k_block(fh_sbe_nex_k, 0.0d0, nk, gs%kpoint, pop_k)
+        call write_sbe_nex_k_block(fh_sbe_nex_k_real, 0.0d0, nk, gs%kpoint, pop_k)
         flush(fh_sbe_nex_k)
+        flush(fh_sbe_nex_k_real)
         if (gs%have_unfold) then
             pop_lev_k = 0.0d0
             call write_sbe_nex_k_unfold_block(fh_sbe_nex_k_unfold, 0.0d0, nk, &
                 & gs%kpoint, gs%unfold_offset, pop_lev_k, gs%n_coset)
+            call write_sbe_nex_k_unfold_block(fh_sbe_nex_k_unfold_real, 0.0d0, nk, &
+                & gs%kpoint, gs%unfold_offset, pop_lev_k, gs%n_coset)
             flush(fh_sbe_nex_k_unfold)
+            flush(fh_sbe_nex_k_unfold_real)
         end if
     end if
 
@@ -160,6 +188,15 @@ subroutine main_realtime_ssbe(icomm)
                 & t, Ac_ext_t(1:3, it), E(1:3), Ac_ext_t(1:3, it), E(1:3), Jmat(1:3))
         end if
 
+        ! Intra-band (Houston-basis) current -- physical intra/inter split in
+        ! the velocity gauge (the total J above is the gauge-invariant sum).
+        ! Written every step like the total current, for direct comparison.
+        if (yn_out_intraband_current == 'y') then
+            call calc_intraband_current_houston(sbe, gs, Ac_ext_t(:, it), jmat_intra, icomm)
+            if (irank == 0) &
+                call write_sbe_intra_current_line(fh_sbe_intra_current, t, jmat_intra(1:3))
+        end if
+
         if (mod(it, out_rt_energy_step) == 0) then
             tr_all = calc_trace(sbe, gs, nstate_sbe(1), icomm)
             if (irank == 0) then
@@ -181,15 +218,21 @@ subroutine main_realtime_ssbe(icomm)
         ! default 10x out_projection_step) since this output scales with nk.
         if (mod(it, out_projection_k_step) == 0) then
             call calc_bloch_population_k(sbe, gs, Ac_ext_t(:, it), ib_lcb, pop_k, icomm)
+            ! Real carriers only (diabatic / fixed-basis LCB occupation)
+            call calc_diabatic_population_k(sbe, ib_lcb, pop_k_real, icomm)
             if (irank == 0) then
                 call write_sbe_nex_k_block(fh_sbe_nex_k, t, nk, gs%kpoint, pop_k)
+                call write_sbe_nex_k_block(fh_sbe_nex_k_real, t, nk, gs%kpoint, pop_k_real)
             end if
             ! Physical (unfolded) CB1 populations per primitive BZ point
             if (gs%have_unfold) then
                 call calc_unfolded_population_k(sbe, gs, Ac_ext_t(:, it), pop_lev_k, icomm)
+                call calc_diabatic_unfolded_population_k(sbe, gs, pop_lev_k_real, icomm)
                 if (irank == 0) then
                     call write_sbe_nex_k_unfold_block(fh_sbe_nex_k_unfold, t, nk, &
                         & gs%kpoint, gs%unfold_offset, pop_lev_k, gs%n_coset)
+                    call write_sbe_nex_k_unfold_block(fh_sbe_nex_k_unfold_real, t, nk, &
+                        & gs%kpoint, gs%unfold_offset, pop_lev_k_real, gs%n_coset)
                 end if
             end if
 
@@ -218,11 +261,16 @@ subroutine main_realtime_ssbe(icomm)
                 flush(fh_sbe_rt_energy)
                 flush(fh_sbe_nex)
                 flush(fh_sbe_nex_k)
-                if (gs%have_unfold) flush(fh_sbe_nex_k_unfold)
+                flush(fh_sbe_nex_k_real)
+                if (gs%have_unfold) then
+                    flush(fh_sbe_nex_k_unfold)
+                    flush(fh_sbe_nex_k_unfold_real)
+                end if
+                if (yn_out_intraband_current == 'y') flush(fh_sbe_intra_current)
             end if
         end if
     end do
-    
+
     call comm_sync_all(icomm)
 
     if (irank == 0) then
@@ -230,12 +278,18 @@ subroutine main_realtime_ssbe(icomm)
         close(fh_sbe_rt_energy)
         close(fh_sbe_nex)
         close(fh_sbe_nex_k)
-        if (gs%have_unfold) close(fh_sbe_nex_k_unfold)
+        close(fh_sbe_nex_k_real)
+        if (gs%have_unfold) then
+            close(fh_sbe_nex_k_unfold)
+            close(fh_sbe_nex_k_unfold_real)
+        end if
+        if (yn_out_intraband_current == 'y') close(fh_sbe_intra_current)
     end if
 
-    deallocate(pop_k)
+    deallocate(pop_k, pop_k_real)
     deallocate(pop_top_k)
     if (allocated(pop_lev_k)) deallocate(pop_lev_k)
+    if (allocated(pop_lev_k_real)) deallocate(pop_lev_k_real)
 
     return
 end subroutine main_realtime_ssbe
