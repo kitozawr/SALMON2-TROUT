@@ -702,6 +702,21 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     ! 7. Diagnostic Print
     if (lprint) then
         write(*, '(a)') '=========================================='
+        write(*, '(a)') ' SBE real-time (velocity gauge) -- run configuration'
+        write(*, '(a, i6, a, i4, a, i4)') '   k-points = ', sbe%nk, &
+            ',   bands = ', sbe%nb, ',   active = ', sbe%n_active_bands
+        if (yn_sbe_spinor == 'y') then
+            write(*, '(a, f4.1)') '   basis    = spinor (spin-orbit split),  occ/band = ', sbe%occ_max
+        else
+            write(*, '(a, f4.1)') '   basis    = scalar (no spin-orbit),      occ/band = ', sbe%occ_max
+        end if
+        if (gs%have_unfold) then
+            write(*, '(a, i1, a)') '   cell     = FOLDED supercell (', gs%n_coset, &
+                '-coset unfold map present)'
+        else
+            write(*, '(a)') '   cell     = PRIMITIVE (no folding, no unfold map)'
+        end if
+        write(*, '(a)') '------------------------------------------'
         write(*, '(a)') 'DIAGNOSTIC: Frozen Core Check'
         write(*, '(a, f8.2, a)') '  frozen_core_threshold_ev = ', frozen_core_threshold_ev, ' eV'
         write(*, '(a, f8.2, a)') '  frozen_free_threshold_ev = ', frozen_free_threshold_ev, ' eV'

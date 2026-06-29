@@ -85,8 +85,10 @@ contains
     implicit none
     include 'versionf.h'
     print '(A)',         '##############################################################################'
-    print '(A)',         '# SALMON: Scalable Ab-initio Light-Matter simulator for Optics and Nanoscience'
+    print '(A)',         '#   SALMON2 - TROUT'
+    print '(A)',         '#   (Semiconductor-Bloch / EPM primitive-cell fork of SALMON)'
     print '(A)',         '#'
+    print '(A)',         '# SALMON: Scalable Ab-initio Light-Matter simulator for Optics and Nanoscience'
     print '(A,I1,".",I1,".",I1)', &
     &                    '#                             Version ', SALMON_VER_MAJOR, SALMON_VER_MINOR, SALMON_VER_MICRO
     print '(A)',         '##############################################################################'
