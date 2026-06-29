@@ -608,6 +608,7 @@ contains
       & sbe_coulomb_strength, &
       & sbe_coulomb_screen_au, &
       & yn_sbe_hf_sublattice_proj, &
+      & yn_sbe_coset_proj, &
       & yn_sbe_superres, &
       & yn_sbe_eph, &
       & sbe_eph_temperature_k, &
@@ -619,7 +620,10 @@ contains
       & sbe_bgr_coeff, &
       & sbe_search_sigma_e_ev, &
       & yn_sbe_eeh, &
-      & sbe_eeh_nu_sat
+      & sbe_eeh_nu_sat, &
+      & yn_sbe_auger, &
+      & sbe_auger_c_cm6s, &
+      & sbe_auger_n_gate_cm3
 
     namelist/epm/ &
       & epm_material, &
@@ -1068,6 +1072,7 @@ contains
     sbe_coulomb_strength    = 1.0d0      ! overall scaling of the exchange kernel (tuning)
     sbe_coulomb_screen_au   = 0.0d0      ! Yukawa screening kappa [1/Bohr]; 0 = bare (q=0 excluded)
     yn_sbe_hf_sublattice_proj = 'y'      ! project Sigma^HF block-diagonal over 4 FCC sublattices (folding fix)
+    yn_sbe_coset_proj       = 'y'        ! project the momentum coupling p block-diagonal over cosets (folding fix; needs unfold map)
     yn_sbe_superres         = 'n'        ! 'y': nonlocal super-compute mode (Part C; scaffolding only so far)
     yn_sbe_eph              = 'n'        ! 'y': population-relaxing electron-phonon Lindblad
     sbe_eph_temperature_k   = 300.0d0    ! phonon bath T_ph [K]
@@ -1080,6 +1085,9 @@ contains
     sbe_search_sigma_e_ev   = -1.0d0     ! energy-bin width sigma_E [eV]; <=0: grid-matched
     yn_sbe_eeh              = 'n'        ! 'y': carrier-carrier (e-e/e-h) thermalization channel
     sbe_eeh_nu_sat          = -1.0d0     ! carrier-carrier rate scale [s^-1]; <=0: 1e14 default
+    yn_sbe_auger            = 'n'        ! 'y': Auger recombination (density-gated CPTP, Sec 13)
+    sbe_auger_c_cm6s        = -1.0d0     ! Auger coeff C [cm^6/s]; <=0: material default
+    sbe_auger_n_gate_cm3    = -1.0d0     ! activation density [cm^-3]; <=0: material default
                                             ! (occupation 1 per spinor band, nelec valence bands instead of nelec/2)
 !! == default for &epm
     epm_material            = 'GaAs'
@@ -1731,6 +1739,7 @@ contains
     call comm_bcast(sbe_coulomb_strength,    nproc_group_global)
     call comm_bcast(sbe_coulomb_screen_au,   nproc_group_global)
     call comm_bcast(yn_sbe_hf_sublattice_proj, nproc_group_global)
+    call comm_bcast(yn_sbe_coset_proj, nproc_group_global)
     call comm_bcast(yn_sbe_superres,         nproc_group_global)
     call comm_bcast(yn_sbe_eph,              nproc_group_global)
     call comm_bcast(sbe_eph_temperature_k,   nproc_group_global)
@@ -1743,6 +1752,9 @@ contains
     call comm_bcast(sbe_search_sigma_e_ev,   nproc_group_global)
     call comm_bcast(yn_sbe_eeh,              nproc_group_global)
     call comm_bcast(sbe_eeh_nu_sat,          nproc_group_global)
+    call comm_bcast(yn_sbe_auger,            nproc_group_global)
+    call comm_bcast(sbe_auger_c_cm6s,        nproc_group_global)
+    call comm_bcast(sbe_auger_n_gate_cm3,    nproc_group_global)
 !! == bcast for epm
     call comm_bcast(epm_material,            nproc_group_global)
     call comm_bcast(epm_lattice_constant_au, nproc_group_global)
@@ -2754,6 +2766,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_coulomb_strength', sbe_coulomb_strength
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_coulomb_screen_au', sbe_coulomb_screen_au
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_hf_sublattice_proj', yn_sbe_hf_sublattice_proj
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_coset_proj', yn_sbe_coset_proj
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_superres', yn_sbe_superres
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_eph', yn_sbe_eph
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_eph_temperature_k', sbe_eph_temperature_k
@@ -2766,6 +2779,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_search_sigma_e_ev', sbe_search_sigma_e_ev
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_eeh', yn_sbe_eeh
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_eeh_nu_sat', sbe_eeh_nu_sat
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_auger', yn_sbe_auger
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_auger_c_cm6s', sbe_auger_c_cm6s
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_auger_n_gate_cm3', sbe_auger_n_gate_cm3
 
       if(inml_epm >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'epm', inml_epm
@@ -2886,10 +2902,12 @@ contains
     call yn_argument_check(yn_sbe_impact_ionization)
     call yn_argument_check(yn_sbe_coulomb)
     call yn_argument_check(yn_sbe_hf_sublattice_proj)
+    call yn_argument_check(yn_sbe_coset_proj)
     call yn_argument_check(yn_sbe_superres)
     call yn_argument_check(yn_sbe_eph)
     call yn_argument_check(yn_sbe_bgr_threshold)
     call yn_argument_check(yn_sbe_eeh)
+    call yn_argument_check(yn_sbe_auger)
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
       stop "Nk must be 1 when yn_periodic=='n'"

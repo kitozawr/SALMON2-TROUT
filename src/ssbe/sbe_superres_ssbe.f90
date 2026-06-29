@@ -158,6 +158,10 @@ module sbe_superres_ssbe
         logical       :: eph_ok       = .false.   ! e-ph rate (nu_sat) cited?
         logical       :: eeh_ok       = .false.   ! carrier-carrier rate cited?
         logical       :: coulomb_ok   = .false.   ! dielectric for Coulomb cited?
+        logical       :: auger_ok     = .false.   ! Auger coeff C cited?
+        ! Auger recombination (Sec 13): R = C n^3, density-gated above n_gate.
+        real(8)       :: auger_c_cm6s    = 0d0    ! Auger coefficient C [cm^6/s]
+        real(8)       :: auger_n_gate_cm3 = 0d0   ! activation density [cm^-3]
         ! dielectric (Coulomb HF exchange / carrier screening)
         real(8)       :: eps0         = 1d0       ! static dielectric
         real(8)       :: eps_inf      = 1d0       ! high-frequency dielectric
@@ -223,22 +227,43 @@ contains
             end do
         case ('CdS')
             ! Wurtzite (P6_3mc), polar, NON-centrosymmetric. Orthorhombic cell
-            ! (a, a*sqrt3, c) via &system al(1:3) -- NOT cubic. Only the STRUCTURE
-            ! is recorded here; the SBE DISSIPATION CHANNELS ARE ALL FORBIDDEN
-            ! Channels enabled with CITED constants from the CdS physics-methods
-            ! spec (md): e-ph (Frohlich, PRIMARY), Coulomb (eps), impact
-            ! ionization (E_th cited; prefactor is a fit parameter -> user must
-            ! set sbe_ii_prefactor, so ii_prefactor stays the sentinel here).
-            ! Carrier-carrier has no cited CdS rate -> eeh_ok stays .false.
+            ! (a, a*sqrt3, c) via &system al(1:3) -- NOT cubic.
             ! [structure: Bergstresser & Cohen, Phys. Rev. 164, 1069 (1967)]
+            !
+            ! CITED, ENABLED channels (the constants below are CdS-specific):
+            !   * e-ph   : Frohlich polar-optical LO (PRIMARY room-T channel);
+            !              hw_LO=38 meV [Raman], nu_sat=alpha*omega_LO=2.89e13
+            !              from alpha=0.5 [cyclotron].
+            !   * Coulomb: static dielectric eps0=8.9 [Berlincourt PR 129,1009 (1963)].
+            !   * impact : Keldysh soft threshold, E_th=1.5*E_g=3.6 eV; the
+            !              PREFACTOR is an uncited fit parameter -> sentinel (-1),
+            !              so the run aborts unless the user sets sbe_ii_prefactor.
+            !
+            ! FORBIDDEN channel (no cited CdS *rate* -> eeh_ok = .false.):
+            !   * carrier-carrier (yn_sbe_eeh). The implemented channel is an
+            !     FD-thermalization parametrised by a single rate scale nu_cc.
+            !     CdS has NO cited carrier-carrier rate, so enabling it with the
+            !     default would borrow the generic 1e14 s^-1 scale that is cited
+            !     ONLY for GaAs/Si (Goodnick-Lugli PRB 37, 2578; Fischetti-Laux
+            !     PRB 38, 9721) -- forbidden by the strict provenance rule. The
+            !     CdS citations (sub-100fs thermalization @ n>=1e18 [Shah 1986;
+            !     Elsaesser 1991] and Auger C=2.0e-30 cm^6/s [Haury 1998]) describe
+            !     a DENSITY-GATED Auger Lindblad channel (CDS_AUGER_C / CDS_EE_ACT_N
+            !     above; wiki/02 Sec 13) that is NOT YET IMPLEMENTED. Until that
+            !     channel is wired, CdS e-e stays forbidden -- a user who supplies
+            !     their own rate can still opt in via sbe_eeh_nu_sat (the same
+            !     explicit-input escape hatch as the II prefactor).
             mp%found = .true.
             mp%a_lattice_au = CDS_A_BOHR
             mp%cell_au = (/ CDS_A_BOHR, CDS_ASQ3_BOHR, CDS_C_BOHR /)  ! orthorhombic
             mp%is_diamond   = .false.                  ! V^A != 0 (broken inversion)
             mp%coulomb_ok = .true.; mp%eph_ok = .true.; mp%ii_ok = .true.
-            mp%eeh_ok = .true.    ! e-e/Auger cited: sub-100fs @ n>=1e18 [Shah 1986;
-            ! Elsaesser 1991]; Auger C=2.0e-30 cm^6/s [Haury 1998]. (Auger Lindblad
-            ! jump-operator channel still being wired -- carrier-carrier works now.)
+            mp%eeh_ok = .false.   ! no cited CdS carrier-carrier rate (see above)
+            ! Auger recombination IS cited for CdS: C = 2.0e-30 cm^6/s
+            ! [Haury et al., PRB 57, 11513 (1998)], density-gated at n >= 1e18
+            ! cm^-3 [Shah et al., IEEE JQE 22, 1728 (1986)].
+            mp%auger_ok = .true.
+            mp%auger_c_cm6s = CDS_AUGER_C;  mp%auger_n_gate_cm3 = CDS_EE_ACT_N
             mp%eps0 = CDS_EPS0;  mp%eps_inf = CDS_EPS_INF
             ! Frohlich polar-optical: a single dominant LO mode at 38 meV; the
             ! rate scale nu_sat = alpha*omega_LO is the cited Frohlich coupling.

@@ -21,8 +21,14 @@ What is plotted
                              True THz resolution needs a ps-scale run.
   *_sbe_rt_energy.data   : total energy vs time
   *_sbe_nex.data         : excited electron count vs time
-  *_sbe_nex_k.data       : per-k Houston-basis LCB population:
-                             snapshot PNGs (3 projected planes) + time-k maps
+  *_sbe_nex_k_real.data  : per-k REAL-carrier LCB population (fixed-basis
+                             diabatic n_ex, no A^2 breathing) -- the default
+                             carrier map: snapshots + time-k maps. With
+                             *_unfold_real.data, also the primitive-BZ map.
+  *_sbe_nex_k.data       : per-k instantaneous Houston-basis LCB population
+                             (carries the reversible virtual breathing; plotted
+                             only with --instantaneous or if no _real file)
+  *_sbe_intra_current.data: intra-band (Houston) current vs the total current
   *_k.data + *_eigen.data: band structure along the requested path
                              k in reduced coords, energy shifted to VBM = 0 eV
   band.dat               : band structure from a theory='dft_band' run,
@@ -543,40 +549,17 @@ def _wrap_to_fcc_bz(kpoints):
     return kpoints - cands[best]
 
 
-def _read_unfold_offsets(filepath):
-    """Parse the '# isub, offset G0 (sc reduced)' table from an unfold file.
-    Returns {isub: ndarray[3]}; falls back to the canonical FCC sublattice
-    offsets if the table is absent."""
-    offs = {}
-    with open(filepath, 'r') as f:
-        in_block = False
-        for line in f:
-            s = line.strip()
-            if s.startswith('# isub'):
-                in_block = True
-                continue
-            if in_block:
-                if s.startswith('#') or not s:
-                    break
-                p = s.split()
-                if len(p) == 4:
-                    offs[int(p[0])] = np.array([float(p[1]), float(p[2]), float(p[3])])
-                else:
-                    break
-    if len(offs) != 4:
-        offs = {1: np.zeros(3), 2: np.array([1., 0., 0.]),
-                3: np.array([0., 1., 0.]), 4: np.array([0., 0., 1.])}
-    return offs
-
-
-def _fold_to_cubic(kpoints_prim, sub, offsets):
-    """Recover the cubic supercell k (k_sc = k_prim - G0(isub)) and wrap it
-    into [-0.5, 0.5). Summing populations over the four sublattices at a fixed
-    k_sc collapses the FCC valleys (Gamma + the three X points) back onto the
-    regular cubic grid -- the clean single-zone view."""
-    g0 = np.array([offsets[int(s)] for s in sub])
-    ksc = kpoints_prim - g0
-    return ksc - np.round(ksc)
+def _fold_to_cubic(kpoints_prim):
+    """Recover the supercell k (k_sc = k_prim - G0(isub)) and wrap it into
+    [-0.5, 0.5). The coset offset G0 is a SUPERCELL reciprocal-lattice vector,
+    hence an integer triplet in sc-reduced units, so subtracting it then wrapping
+    is identical to wrapping k_prim directly: k_sc = k_prim - round(k_prim). This
+    needs neither the offset table (the *_sbe_nex_k_unfold.data output does not
+    carry one) nor the coset count, so it folds 2-coset (CdS/graphene), 4-coset
+    (cubic FCC) and any N-coset map alike. Summing the populations of the cosets
+    sharing a k_sc collapses the folded valleys back onto the single supercell
+    zone -- the clean per-k total of the lowest conduction band."""
+    return kpoints_prim - np.round(kpoints_prim)
 
 
 def _build_grid_info(kpoints):
@@ -636,7 +619,7 @@ def _heatmap_ax(ax, k_a, k_b, grid2d, label_a, label_b, title,
 
 
 def _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi,
-                   log_scale=False, tag='nex_k'):
+                   log_scale=False, tag='nex_k', basis_label='Houston-basis'):
     vmin = np.nanmin(pop3d)
     vmax = max(np.nanmax(pop3d), vmin + 1e-30)
 
@@ -651,7 +634,7 @@ def _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi,
                 'ky', 'kz', 'pop_lcb: ky-kz (avg kx)',
                 vmin=vmin, vmax=vmax, log_scale=log_scale)
 
-    fig.suptitle(f'Houston-basis LCB population,  t = {t_val:.6f} {t_unit}')
+    fig.suptitle(f'{basis_label} LCB population,  t = {t_val:.6f} {t_unit}')
     fig.tight_layout(rect=[0, 0, 1, 0.94])
     safe_t  = f'{t_val:.6f}'.replace('-', 'm').replace('+', 'p')
     out = output_dir / f'{tag}_snap_t{safe_t}{t_unit}.png'
@@ -690,24 +673,83 @@ def _save_kt_map(times, t_unit, k_vals, label_k, marginals, output_dir, dpi,
     print(f"  saved {out.name}")
 
 
+def _read_xy_data(filepath):
+    """Read a whitespace SALMON .data file -> ndarray (skip '#' comment lines)."""
+    rows = []
+    for line in open(filepath):
+        s = line.strip()
+        if not s or s.startswith('#'):
+            continue
+        try:
+            rows.append([float(x) for x in s.split()])
+        except ValueError:
+            continue
+    return np.array(rows) if rows else np.empty((0, 0))
+
+
+def plot_intra_current(filepath, rt_filepath, output_dir, dpi=150):
+    """Intra-band (Houston-basis) current J_intra(t), overlaid with the total
+    gauge-invariant current J_tot(t) from *_sbe_rt.data when available. In the
+    velocity gauge only J_tot is physical; J_intra is the physical drift part in
+    the Houston basis and J_inter = J_tot - J_intra the interband polarization."""
+    print(f"Processing {filepath.name} (intra-band Houston current) ...")
+    a = _read_xy_data(filepath)
+    if a.size == 0 or a.shape[1] < 4:
+        print("  (skip) no data")
+        return
+    t = a[:, 0]
+    Ji = a[:, 1:4]
+    Jt = None
+    if rt_filepath is not None:
+        rt = _read_xy_data(rt_filepath)
+        # *_sbe_rt.data total current Jm = columns 14:16 (1-indexed) -> 13:16
+        if rt.size and rt.shape[1] >= 16:
+            Jt = np.array([np.interp(t, rt[:, 0], rt[:, 13 + d]) for d in range(3)]).T
+
+    labels = ['x', 'y', 'z']
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4.6), sharex=True)
+    for d in range(3):
+        ax = axes[d]
+        if Jt is not None:
+            ax.plot(t, Jt[:, d], color='gray', lw=1.4, label='J_total (gauge-inv.)')
+            ax.plot(t, Jt[:, d] - Ji[:, d], color='steelblue', lw=1.0,
+                    alpha=0.8, label='J_inter (= tot - intra)')
+        ax.plot(t, Ji[:, d], color='crimson', lw=1.6, label='J_intra (Houston)')
+        ax.axhline(0, color='k', lw=0.5, ls=':')
+        ax.set_xlabel('time [a.u.]')
+        ax.set_ylabel(f'J_{labels[d]} [a.u.]')
+        ax.set_title(f'current {labels[d]}')
+        ax.legend(fontsize=8)
+    fig.suptitle('Intra-band (Houston-basis) vs total current  '
+                 '— intra = Boltzmann drift, vanishes when the field is off')
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    out = output_dir / 'sbe_intra_current.png'
+    fig.savefig(out, dpi=dpi, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  saved {out.name}")
+
+
 def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
-               unfold=False, subtract_baseline=False):
+               unfold=False, subtract_baseline=False, real=False):
     print(f"Processing {filepath.name}  "
           f"(cmap={'log' if log_scale else 'linear'}, "
           f"snapshots={'on' if snapshots else 'off'}"
+          f"{', REAL carriers' if real else ''}"
           f"{', unfolded primitive BZ' if unfold else ''}"
           f"{', baseline-subtracted' if subtract_baseline else ''}) ...")
-    tag = 'nex_k_unfold' if unfold else 'nex_k'
+    # real = fixed-basis diabatic (real carriers, no A^2 breathing);
+    # else = instantaneous Houston-basis population.
+    basis_label = 'real-carrier (diabatic)' if real else 'Houston-basis'
+    suff = '_real' if real else ''
+    tag = ('nex_k_unfold' if unfold else 'nex_k') + suff
     if subtract_baseline:
         tag += '_db'
     # The unfolded primitive-zone map legitimately shows the CB1 population of
-    # every FCC valley (Gamma for sublattice 1, the X points for 2/3/4), so it
-    # carries satellite peaks at the zone boundary. The FOLDED view sums the
-    # four sublattices back onto the regular cubic grid (k_sc = k_prim - G0),
-    # collapsing the valleys into a single clean zone -- the per-cubic-k total
-    # of the lowest conduction band.
-    offsets = _read_unfold_offsets(filepath) if unfold else None
-    ftag = 'nex_k_fold' + ('_db' if subtract_baseline else '')
+    # every folded valley (each coset's offset G0), so it carries satellite peaks
+    # at the zone boundary. The FOLDED view sums the cosets sharing a supercell k
+    # (k_sc = k_prim - G0, an integer wrap) back onto the single supercell zone --
+    # the per-k total of the lowest conduction band (any coset count).
+    ftag = 'nex_k_fold' + suff + ('_db' if subtract_baseline else '')
 
     kx_u = ky_u = kz_u = ix = iy = iz = None
     pop3d = None
@@ -742,15 +784,15 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
         pop3d[ix, iy, iz] = pop
         if snapshots:
             _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi,
-                           log_scale=log_scale, tag=tag)
+                           log_scale=log_scale, tag=tag, basis_label=basis_label)
         times.append(t_val)
         marg_kx.append(np.nanmean(pop3d, axis=(1, 2)))
         marg_ky.append(np.nanmean(pop3d, axis=(0, 2)))
         marg_kz.append(np.nanmean(pop3d, axis=(0, 1)))
 
-        # Folded cubic-zone view: sum the four sublattices at each k_sc.
+        # Folded supercell-zone view: sum the cosets sharing each k_sc.
         if unfold and sub is not None:
-            ksc = _fold_to_cubic(kpoints_prim, sub, offsets)
+            ksc = _fold_to_cubic(kpoints_prim)
             fpop = pop  # baseline (if any) already applied to `pop` above
             if fkx_u is None:
                 fkx_u, fky_u, fkz_u, fix, fiy, fiz = _build_grid_info(ksc)
@@ -759,7 +801,7 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
             np.add.at(fpop3d, (fix, fiy, fiz), fpop)
             if snapshots:
                 _save_snapshot(fpop3d, fkx_u, fky_u, fkz_u, t_val, t_unit, output_dir,
-                               dpi, log_scale=log_scale, tag=ftag)
+                               dpi, log_scale=log_scale, tag=ftag, basis_label=basis_label)
             fmarg_kx.append(np.nanmean(fpop3d, axis=(1, 2)))
             fmarg_ky.append(np.nanmean(fpop3d, axis=(0, 2)))
             fmarg_kz.append(np.nanmean(fpop3d, axis=(0, 1)))
@@ -1617,6 +1659,12 @@ def main():
                         help='Also write an A(kx,E)-style spectral map of the '
                              'unfolded CB1 population (needs the 7-column '
                              '*_sbe_nex_k_unfold.data with the e_cb1 column).')
+    parser.add_argument('--instantaneous', action='store_true',
+                        help='Also plot the instantaneous Houston-basis nex_k '
+                             'maps (*_sbe_nex_k.data / *_unfold.data). These carry '
+                             'the reversible A^2(t) virtual-polarization breathing. '
+                             'By default only the REAL-carrier maps '
+                             '(*_sbe_nex_k_real.data) are plotted when present.')
     parser.add_argument('--no-conductivity', action='store_true',
                         help='Skip the optical-conductivity sigma(w)=J/E plots '
                              '(global Re/Im spectrum + STFT Re-sigma map) from '
@@ -1665,27 +1713,57 @@ def main():
                 except Exception as exc:
                     print(f"  ERROR in conductivity for {f.name}: {exc}")
 
-        for f in sorted(input_dir.glob('*_sbe_nex_k.data')):
+        # Intra-band (Houston-basis) current vs the total current
+        for f in sorted(input_dir.glob('*_sbe_intra_current.data')):
+            found_any = True
+            rt = f.parent / (f.name[:-len('_sbe_intra_current.data')] + '_sbe_rt.data')
+            plot_intra_current(f, rt if rt.exists() else None, output_dir, dpi=args.dpi)
+
+        # REAL-carrier maps (default): fixed-basis diabatic population, the
+        # k-resolved n_ex -- no reversible A^2(t) virtual breathing.
+        real_k  = sorted(input_dir.glob('*_sbe_nex_k_real.data'))
+        real_uk = sorted(input_dir.glob('*_sbe_nex_k_unfold_real.data'))
+        for f in real_k:
             found_any = True
             plot_nex_k(f, output_dir, dpi=args.dpi,
-                       log_scale=args.log_cmap, snapshots=args.snapshots)
-            if args.subtract_baseline:
-                plot_nex_k(f, output_dir, dpi=args.dpi,
-                           log_scale=args.log_cmap, snapshots=args.snapshots,
-                           subtract_baseline=True)
-
-        # Physical (unfolded) CB1 populations on the primitive BZ
-        for f in sorted(input_dir.glob('*_sbe_nex_k_unfold.data')):
+                       log_scale=args.log_cmap, snapshots=args.snapshots, real=True)
+        for f in real_uk:
             found_any = True
             plot_nex_k(f, output_dir, dpi=args.dpi,
                        log_scale=args.log_cmap, snapshots=args.snapshots,
-                       unfold=True)
-            if args.subtract_baseline:
+                       unfold=True, real=True)
+
+        # Instantaneous Houston-basis maps (carry the virtual breathing): only
+        # when --instantaneous is set, or when no REAL file is present (old runs).
+        if args.instantaneous or not real_k:
+            for f in sorted(input_dir.glob('*_sbe_nex_k.data')):
+                found_any = True
+                plot_nex_k(f, output_dir, dpi=args.dpi,
+                           log_scale=args.log_cmap, snapshots=args.snapshots)
+                if args.subtract_baseline:
+                    plot_nex_k(f, output_dir, dpi=args.dpi,
+                               log_scale=args.log_cmap, snapshots=args.snapshots,
+                               subtract_baseline=True)
+
+        # Physical (unfolded) CB1 populations on the primitive BZ
+        unfold_for_spectral = real_uk or sorted(input_dir.glob('*_sbe_nex_k_unfold.data'))
+        if args.instantaneous or not real_uk:
+            for f in sorted(input_dir.glob('*_sbe_nex_k_unfold.data')):
+                found_any = True
                 plot_nex_k(f, output_dir, dpi=args.dpi,
                            log_scale=args.log_cmap, snapshots=args.snapshots,
-                           unfold=True, subtract_baseline=True)
-            if args.spectral:
-                stem = f.name[:-len('_sbe_nex_k_unfold.data')]
+                           unfold=True)
+                if args.subtract_baseline:
+                    plot_nex_k(f, output_dir, dpi=args.dpi,
+                               log_scale=args.log_cmap, snapshots=args.snapshots,
+                               unfold=True, subtract_baseline=True)
+
+        # Optional spectral A(kx,E) map (one, from whichever unfold file exists)
+        if args.spectral:
+            for f in unfold_for_spectral[:1]:
+                suffix = ('_sbe_nex_k_unfold_real.data' if f.name.endswith('_real.data')
+                          else '_sbe_nex_k_unfold.data')
+                stem = f.name[:-len(suffix)]
                 bpfile = f.parent / f'{stem}_bandpath.data'
                 if bpfile.exists():
                     plot_unfold_spectral(f, bpfile, output_dir, dpi=args.dpi)

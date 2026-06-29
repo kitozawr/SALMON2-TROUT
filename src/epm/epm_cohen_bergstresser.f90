@@ -12,7 +12,7 @@ module epm_cohen_bergstresser
     implicit none
 
     private
-    public :: cb_get_form_factors, cb_tau_zincblende, cb_lattice_vectors_fcc
+    public :: cb_get_form_factors, cb_tau_zincblende, cb_lattice_vectors_sc
 
 contains
 
@@ -96,18 +96,25 @@ contains
     end function cb_tau_zincblende
 
 
-    ! Conventional fcc primitive lattice vectors for the zincblende structure
-    ! (Cohen-Bergstresser convention):
-    !   a1 = (a/2)(0,1,1),  a2 = (a/2)(1,0,1),  a3 = (a/2)(1,1,0)
-    subroutine cb_lattice_vectors_fcc(a_lattice, a1, a2, a3)
+    ! Conventional SIMPLE-CUBIC (8-atom) cell vectors for the zincblende
+    ! structure:  a1 = (a,0,0), a2 = (0,a,0), a3 = (0,0,a).
+    !
+    ! This is the band-folding convention of the Python reference
+    ! (epm_gaas_reference.py): the simple-cubic supercell is a 4x supercell of
+    ! the primitive FCC cell, so its plane-wave basis spans the 4 FCC reciprocal
+    ! cosets and the EXACT parity selection rule on the Cohen-Bergstresser form
+    ! factors (nonzero only for shells |G|^2 in {3,4,8,11}, all of which are
+    ! all-same-parity) folds the 4 primitive BZs into the cubic BZ to machine
+    ! precision -- yielding 32 folded bands / 32 valence electrons exactly as the
+    ! SBE (and its folding/unfold pipeline) expect. The two-atom basis
+    ! displacement tau = (a/8)(1,1,1) is unchanged.
+    subroutine cb_lattice_vectors_sc(a_lattice, a1, a2, a3)
         implicit none
         real(8), intent(in)  :: a_lattice
         real(8), intent(out) :: a1(3), a2(3), a3(3)
-        real(8) :: h
-        h = 0.5d0 * a_lattice
-        a1 = (/ 0d0, h,   h   /)
-        a2 = (/ h,   0d0, h   /)
-        a3 = (/ h,   h,   0d0 /)
-    end subroutine cb_lattice_vectors_fcc
+        a1 = (/ a_lattice, 0d0,       0d0       /)
+        a2 = (/ 0d0,       a_lattice, 0d0       /)
+        a3 = (/ 0d0,       0d0,       a_lattice /)
+    end subroutine cb_lattice_vectors_sc
 
 end module epm_cohen_bergstresser

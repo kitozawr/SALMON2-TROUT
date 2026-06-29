@@ -104,8 +104,23 @@ def primitive_bands_momentum(epm, q_cart, Gcart, G_indices, npw, a, mu, spinor):
     full = np.zeros((H.shape[0], evb.shape[1]), dtype=complex)
     full[idx, :] = evb
     if spinor:
+        # Local part <m|(k+G)|n> (x) 1_2 ...
         p = epm.momentum_matrix_spinor(k_sc, Gcart, full)
+        # ... PLUS the mandatory NONLOCAL spin-orbit velocity correction
+        # v_SO = -i[r, H_SO] = grad_k H_SO. Since H_SO is nonlocal, the physical
+        # interband velocity is <m|(k+G) + grad_k H_SO|n>, NOT just the local
+        # part. This is exactly the rvnl_tm block the SALMON dataset carries
+        # (epm_gaas_reference.py main() writes it; the SBE uses it via
+        # yn_vnl_correction='y'). Dropping it silently underestimates the
+        # field-projected coupling and, in particular, mislabels the nearly-
+        # p-dark heavy-hole transition where the correction is a relative O(1)
+        # effect. build_so_matrices returns v_SO PER UNIT mu, so scale by mu
+        # (matching build_hamiltonian_spinor's `mu * H_so`).
+        _, v_so = epm.build_so_matrices(k_sc, Gcart, a, with_velocity=True)
+        for d in range(3):
+            p[:, :, d] += mu * (full.conj().T @ (v_so[d] @ full))
     else:
+        # Local pseudopotential: velocity is purely local, no correction.
         p = epm.momentum_matrix(k_sc, Gcart, full)
     return evals, p
 

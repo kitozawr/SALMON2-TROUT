@@ -150,14 +150,62 @@ subroutine write_sbe_nex_k_block(fh, t, nk, kpoint, pop_k)
 end subroutine write_sbe_nex_k_block
 
 
+subroutine write_sbe_nex_k_real_header(fh, nk)
+    implicit none
+    integer, intent(in) :: fh, nk
+    write(fh,'(a)') "# REAL carriers only: fixed-basis (diabatic) population of the lowest"
+    write(fh,'(a)') "# conduction band, per k-point. This is the k-resolved excited-electron"
+    write(fh,'(a)') "# count n_ex (no field-dependent projection, no reversible A^2(t) virtual"
+    write(fh,'(a)') "# polarization breathing): accumulates monotonically and freezes when the"
+    write(fh,'(a)') "# field passes. Same column layout as _sbe_nex_k.data."
+    write(fh,'(a,i0)') "# nk = ", nk
+    write(fh, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+        & 1, "ik", "none", &
+        & 2, "kx", "a.u.", &
+        & 3, "ky", "a.u.", &
+        & 4, "kz", "a.u.", &
+        & 5, "population_lcb_real", "none"
+    return
+end subroutine write_sbe_nex_k_real_header
+
+
+subroutine write_sbe_intra_current_header(fh)
+    use inputoutput, only: t_unit_current, t_unit_time
+    implicit none
+    integer, intent(in) :: fh
+    write(fh,'(a)') "# Intra-band current density in the instantaneous Houston (adiabatic) basis."
+    write(fh,'(a)') "# Velocity gauge: only the TOTAL current (_sbe_rt.data, Jm) is gauge"
+    write(fh,'(a)') "# invariant; the intra/inter split is physical in the Houston basis."
+    write(fh,'(a)') "# J_intra = sum_k w_k sum_a f^H_a v^H_aa  [T. Otobe, PRB 94, 235152 (2016)]"
+    write(fh, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+        & 1, "Time", trim(t_unit_time%name), &
+        & 2, "Jm_intra_x", trim(t_unit_current%name), &
+        & 3, "Jm_intra_y", trim(t_unit_current%name), &
+        & 4, "Jm_intra_z", trim(t_unit_current%name)
+    return
+end subroutine write_sbe_intra_current_header
+
+
+subroutine write_sbe_intra_current_line(fh, t, Jm_intra)
+    use inputoutput, only: t_unit_current, t_unit_time
+    implicit none
+    integer, intent(in) :: fh
+    real(8), intent(in) :: t, Jm_intra(3)
+    write(fh, '(F16.8,99(1X,E23.15E3))') &
+        & t * t_unit_time%conv, &
+        & Jm_intra(1:3) * t_unit_current%conv
+    return
+end subroutine write_sbe_intra_current_line
+
+
 
 subroutine write_sbe_nex_k_unfold_header(fh, nk)
     use inputoutput, only: t_unit_time
     implicit none
     integer, intent(in) :: fh, nk
-    write(fh,'(a)') "# Crystal-gauge population of the four PHYSICAL primitive bands"
-    write(fh,'(a)') "# (spins summed) closest to the gap -- VB-1, VB, CB1, CB2 -- of every"
-    write(fh,'(a)') "# folded primitive BZ point k_prim = k_sc + G0(isub)."
+    write(fh,'(a)') "# Houston-basis (instantaneous H_VG = H0 + A.p) population of the four"
+    write(fh,'(a)') "# PHYSICAL primitive bands (spins summed) closest to the gap -- VB-1, VB,"
+    write(fh,'(a)') "# CB1, CB2 -- of every folded primitive BZ point k_prim = k_sc + G0(isub)."
     write(fh,'(a)') "# (cubic-supercell EPM input; band assignment from SYSNAME_unfold.data)"
     write(fh,'(a)') "# Energies for the spectral plot come from SYSNAME_bandpath.data."
     write(fh,'(a,i0)') "# nk = ", nk
@@ -176,16 +224,17 @@ end subroutine write_sbe_nex_k_unfold_header
 
 
 
-subroutine write_sbe_nex_k_unfold_block(fh, t, nk, kpoint, offset, pop_lev)
+subroutine write_sbe_nex_k_unfold_block(fh, t, nk, kpoint, offset, pop_lev, n_coset)
     use inputoutput, only: t_unit_time
     implicit none
     integer, intent(in) :: fh, nk
     real(8), intent(in) :: t, kpoint(1:3, 1:nk), offset(1:3, 1:4)
     real(8), intent(in) :: pop_lev(1:4, 1:4, 1:nk)
+    integer, intent(in) :: n_coset     ! 4 (cubic FCC) or 2 (wurtzite/rect 2-fold)
     integer :: ik, isub
     write(fh, '(a,f16.8,a,a)') "# t = ", t * t_unit_time%conv, " ", trim(t_unit_time%name)
     do ik = 1, nk
-        do isub = 1, 4
+        do isub = 1, n_coset
             write(fh, '(I6, I4, 7E18.10)') ik, isub, &
                 & kpoint(1:3, ik) + offset(1:3, isub), pop_lev(1:4, isub, ik)
         end do

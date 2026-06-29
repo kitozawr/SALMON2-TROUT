@@ -468,6 +468,18 @@ character(256),allocatable :: atom_name(:)
   ! that the cubic-cell band folding creates). [Popescu-Zunger PRB 85, 085201]
   character(1)   :: yn_sbe_hf_sublattice_proj
 
+  ! Coset block-diagonal projection of the FIELD coupling (momentum matrix p,
+  ! hence H_VG and the velocity). A translationally invariant perturbation
+  ! conserves primitive crystal momentum, so its matrix elements between bands
+  ! of DIFFERENT cosets (different primitive k folded to the same supercell k)
+  ! are exactly zero; the band-folding/degeneracy mixing in the EPM eigenvectors
+  ! creates spurious inter-coset coupling that artificially hybridizes the
+  ! valleys (dense avoided crossings -> cascade tunneling Gamma~L~X). Projecting
+  ! p block-diagonal over the cosets keeps rho block-diagonal and restores the
+  ! correct per-valley (primitive) Zener physics. Same mechanism as the HF
+  ! sublattice projection, applied to the core propagator. [Popescu-Zunger 2012]
+  character(1)   :: yn_sbe_coset_proj
+
   ! Nonlocal "super-compute" mode (Part C): genuine momentum-exchange impact
   ! ionization + population-relaxing electron-phonon Lindblad. All OFF by
   ! default; the k-local channels remain the fast default. [scaffolding only at
@@ -487,6 +499,11 @@ character(256),allocatable :: atom_name(:)
   ! (intraband thermalization + EID), at a screened-Coulomb rate.
   character(1)   :: yn_sbe_eeh             ! enable carrier-carrier channel
   real(8)        :: sbe_eeh_nu_sat         ! carrier-carrier rate scale [s^-1]
+  ! Auger recombination (Sec 13): density-gated, number-conserving CPTP channel.
+  ! Per-carrier rate gamma = C n^2 (so R = C n^3); C cited per material.
+  character(1)   :: yn_sbe_auger           ! enable Auger recombination channel
+  real(8)        :: sbe_auger_c_cm6s       ! Auger coeff C [cm^6/s]; <=0: material default
+  real(8)        :: sbe_auger_n_gate_cm3   ! activation density [cm^-3]; <=0: material default
 
   !! &epm (local empirical pseudopotential method, Cohen-Bergstresser)
   character(32)  :: epm_material

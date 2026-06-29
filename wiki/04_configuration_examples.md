@@ -38,6 +38,9 @@
 | sbe_eph_n | — | 2 | saturation shape exponent n. |
 | yn_sbe_eeh | — | 'n' | carrier-carrier (e-e/e-h) CPTP thermalization to a Fermi-Dirac (F). |
 | sbe_eeh_nu_sat | s⁻¹ | 1e14 | carrier-carrier rate scale. |
+| yn_sbe_auger | — | 'n' | Auger recombination (density-gated, number-conserving CPTP; Sec 13). γ=C·n² (R=C·n³). Provenance-gated: cited C required (CdS only; GaAs/Si/graphene → `error stop`). |
+| sbe_auger_c_cm6s | cm⁶/s | −1.0 | Auger coefficient C; ≤0 ⇒ material default (CdS 2.0e-30 [Haury 1998]). |
+| sbe_auger_n_gate_cm3 | cm⁻³ | −1.0 | activation density; ≤0 ⇒ material default (CdS 1e18 [Shah 1986]). |
 | yn_sbe_bgr_threshold | — | 'n' | density-dependent II threshold E_th(t)=E_th0−|ΔE_BGR(n)| (C7). |
 | sbe_bgr_n_gate | cm⁻³ | 5.0e18 | apply BGR shift only above this density. |
 | sbe_bgr_coeff | eV·cm | 1.9e-8 | BGR coefficient K (tunable [1.9,3.8]e-8). |
@@ -47,16 +50,37 @@
 ## &epm parameters ✅
 | Parameter | Units | Default | Description |
 |---|---|---|---|
-| epm_material | — | 'GaAs' | 'GaAs' (zincblende) or 'Si' / 'Si_cb' (diamond, V^A=0). |
+| epm_material | — | 'GaAs' | **Fortran `theory='epm'` (cubic only):** 'GaAs' (zincblende) / 'Si' / 'Si_cb' (diamond, V^A=0). Also the **dissipation-channel material pointer** in the `&sbe` step — here 'CdS' is additionally valid (registry). |
 | epm_lattice_constant_au | Bohr | 10.68 | Lattice constant a (Si: 10.26). |
-| epm_pw_cutoff_ry | Ry | 11.1 | Plane-wave cutoff |k+G|². |
+| epm_pw_cutoff_ry | — | 11.1 | Plane-wave cutoff on \|G\|² in **(2π/a)² units** (integer shells h²+k²+l²); same convention as the Python reference. |
+
+> **Non-cubic materials (CdS, graphene) use the Python EPM references**, not the
+> Fortran `theory='epm'` (which is cubic-only). Generate their ground state +
+> band path + 2-coset unfold map with `python3 epm_wurtzite_cds.py` /
+> `python3 epm_graphene.py` (emits `SYSNAME_k/_eigen/_tm.data`, `_bandpath.data`,
+> `_unfold.data`), then run `theory='sbe'` on the result. The cubic Fortran EPM
+> is **verified byte-equivalent** to the Python reference for GaAs/Si (scalar).
 
 ## &analysis (output cadence) ✅
 | Parameter | Default | Description |
 |---|---|---|
 | out_rt_energy_step | 10 | Stride for SYSNAME_sbe_rt_energy.data + stdout. |
 | out_projection_step | 100 | Stride for SYSNAME_sbe_nex.data (excited e/h, summed over k). |
-| out_projection_k_step | 1000 | Stride for SYSNAME_sbe_nex_k.data (k-resolved Houston-basis lowest-CB). |
+| out_projection_k_step | 1000 | Stride for the k-resolved population maps (below). |
+| yn_out_intraband_current | n | If `y`, write SYSNAME_sbe_intra_current.data: the intra-band (drift) current in the Houston basis, every step. |
+
+**Per-k population maps** (written every `out_projection_k_step`):
+- **SYSNAME_sbe_nex_k_real.data** — *real carriers only*: the fixed-basis (diabatic) lowest-CB occupation, i.e. the k-resolved excited-electron count n_ex. No reversible A²(t) virtual-polarization breathing; accumulates monotonically and freezes when the field passes. **This is the carrier map to use.** (`_unfold_real` twin per primitive BZ point when a `_unfold.data` map is present; N cosets — 4 cubic / 2 wurtzite-rectangular.) A small residual (~20 %) can remain at the most strongly interband-coupled folds (e.g. the GaAs L-valley); it is 0 % at Γ and 0 % in the BZ total.
+- **SYSNAME_sbe_nex_k.data** — instantaneous Houston-basis lowest-CB population (`_unfold` twin). Physical *during* the pulse but carries the reversible virtual breathing (∝A(t)²); equals the real map after the pulse. Kept for diagnostics.
+
+**Intra-band current** (`yn_out_intraband_current='y'`): in the velocity gauge only the total current (SYSNAME_sbe_rt.data) is gauge invariant; its intra/inter split is physical in the Houston basis. J_intra is the Boltzmann drift (vanishes when the field is off); J_inter = J_total − J_intra is the interband polarization. [T. Otobe, PRB 94, 235152 (2016)]
+
+**Plotting:** `python3 plot_sbe_results.py -i <dir> -o <outdir>` renders the RT
+observables, conductivity, the intra-band current, the **real-carrier** k–t
+population maps (folded + unfolded), and band structure. The instantaneous
+(breathing) Houston maps are plotted only with `--instantaneous` (or when no
+`_real` file is present). Use `--lattice wurtzite` for CdS; the clean primitive
+band path (`SYSNAME_bandpath.data`, material-agnostic) plots via `--only-bands`.
 
 ## Example: GaAs EPM → SBE pipeline ✅
 ```fortran
@@ -126,6 +150,38 @@ Then `theory='sbe'` reading the generated files (sysname, lattice, num_kgrid, ns
 /
 ```
 All channels are CPTP and gated OFF by default. Validation staging (Chefonov Si THz bleaching, not yet run here): (1) ~8.5% bleaching plateau at ~5 MV/cm with e-ph alone; (2) enable II, ~2× transmission drop at >10–15 MV/cm. [Chefonov et al., PRB 98, 165206 (2018)]
+
+## Runnable examples per material (`samples/`) ✅
+
+Self-contained two-step EPM→SBE exercises, one folder per material, each with a
+`README.md` and the input file(s). The `x`-series are the TROUT (Bloch/EPM-SBE)
+additions. **Naming:** GaAs & Si use the cubic Fortran EPM (`theory='epm'`,
+self-contained `.inp`); CdS & graphene use the **Python EPM** for step 1 (the
+Fortran EPM is zincblende/diamond only). All run on a sparse 4×4×4 (graphene
+4×4×1) grid and demonstrate the real-carrier maps + the Houston intra-band
+current.
+
+| Exercise | Material | Step 1 (ground state) | Highlights |
+|---|---|---|---|
+| [`exercise_x3_bulkSi_epm_bloch_superres`](../samples/exercise_x3_bulkSi_epm_bloch_superres/) | Si (diamond) | `salmon < Si_epm_gs.inp` | super-compute mode, all CPTP dissipation channels |
+| [`exercise_x4_GaAs_epm_bloch_realcarrier`](../samples/exercise_x4_GaAs_epm_bloch_realcarrier/) | GaAs (zincblende) | `salmon < GaAs_epm_gs.inp` | real-carrier maps (Γ populated, no breathing) + intra-band current |
+| [`exercise_x5_CdS_wurtzite_epm_bloch`](../samples/exercise_x5_CdS_wurtzite_epm_bloch/) | CdS (wurtzite) | `python3 epm_wurtzite_cds.py gs` | 2-coset unfold, direct 2.5 eV gap |
+| [`exercise_x6_graphene_epm_bloch`](../samples/exercise_x6_graphene_epm_bloch/) | graphene (π-model) | `python3 epm_graphene.py gs` | 2-coset unfold, Dirac carriers, **in-plane** field |
+
+The Python EPM `gs` mode (`epm_wurtzite_cds.py gs`, `epm_graphene.py gs`) emits
+`SYSNAME_k/_eigen/_tm/_unfold/_bandpath.data` into the working directory without
+the slow convergence validation (the Hamiltonian build is vectorized: CdS GS
+≈ 30 s, graphene ≈ 1 s). Run it where you run `salmon`. Then:
+
+```sh
+./build/salmon < <material>_sbe_rt.inp          # step 2
+python3 plot_sbe_results.py -i . -o plots --snapshots
+```
+
+Each SBE input sets `yn_out_intraband_current='y'` and runs past the pulse so
+the real-carrier maps (`*_sbe_nex_k_real.data`, `*_unfold_real.data`) settle to
+their field-free residual. All four conserve the trace (GaAs/Si/CdS = 32,
+graphene = 4) to machine precision. Verified end-to-end with the current build.
 
 ## Recipes by material & mode ✅
 
@@ -200,6 +256,78 @@ Constants and their primary-source citations: [Constants](02_constants.md).
   sbe_ii_threshold_ev      = 1.1d0
   yn_sbe_bgr_threshold     = 'y'
   sbe_decoh_temperature_k  = -1.0d0
+/
+```
+
+### CdS (wurtzite) — Python EPM → SBE ✅
+CdS is **not** a Fortran-EPM material; generate its ground state with the Python
+reference, which emits the orthorhombic `al(1:3)=(a, a√3, c)` cell dataset:
+```sh
+python3 epm_wurtzite_cds.py        # -> CdS_k/_eigen/_tm.data, _bandpath.data, _unfold.data
+```
+The orthorhombic cell vector is `al(1:3) = (7.8159, 13.5375, 12.6852)` Bohr.
+Per-channel provenance (registry, all cited): e-ph (Fröhlich LO 38 meV), Coulomb
+(ε₀=8.9), impact ionization (E_th=3.6 eV; **you must set `sbe_ii_prefactor`** —
+no cited CdS value), and **Auger** (C=2.0e-30 cm⁶/s). **Carrier-carrier is
+FORBIDDEN** for CdS (no cited e-e rate; `yn_sbe_eeh='y'` aborts).
+```fortran
+&calculation
+  theory = 'sbe'
+/
+&control
+  sysname = 'CdS'
+/
+&system
+  yn_periodic = 'y'
+  al(1:3) = 7.8159d0, 13.5375d0, 12.6852d0   ! (a, a*sqrt3, c)
+  nelec  = 32
+  nstate = 32
+/
+&kgrid
+  num_kgrid(1:3) = 4, 4, 4
+/
+&epm
+  epm_material = 'CdS'             ! dissipation-channel pointer (wurtzite registry)
+/
+&sbe
+  yn_sbe_eph    = 'y'             ! Fröhlich polar-optical LO (primary room-T channel)
+  yn_sbe_coulomb = 'y'            ! auto eps0 = 8.9
+  yn_sbe_auger  = 'y'            ! Auger recombination (auto C=2e-30, n_gate=1e18; rare)
+  ! yn_sbe_impact_ionization = 'y'  ! needs sbe_ii_prefactor (uncited) -> set explicitly
+  ! yn_sbe_eeh = 'y'               ! FORBIDDEN for CdS (no cited e-e rate) -> aborts
+/
+```
+
+### graphene (monolayer, π-model) — Python EPM → SBE ✅ (bands / clean dynamics)
+graphene uses the Python reference (rectangular 4-atom cell, 2D sheet in a 3D
+vacuum box); it is a **minimal π-model** (1 π electron/atom → `nelec=4`,
+`nstate=8`, Dirac cone = lowest band pair).
+```sh
+python3 epm_graphene.py            # -> graphene_k/_eigen/_tm.data, _bandpath.data, _unfold.data
+```
+`al(1:3) = (a, √3a, vacuum) = (4.6487, 8.0518, 37.7945)` Bohr; `num_kgrid(3)=1`
+(no dispersion along the vacuum axis). **No dissipation channels are wired for
+graphene yet** (its registry entry — e-ph E2g/A1', gapless-CM Auger, no-Kuhn-Zurek
+policy — is a TODO; any material-dependent channel currently aborts). Use it for
+the **clean** (no-dissipation) SBE and the band structure:
+```fortran
+&calculation
+  theory = 'sbe'
+/
+&control
+  sysname = 'graphene'
+/
+&system
+  yn_periodic = 'y'
+  al(1:3) = 4.6487d0, 8.0518d0, 37.7945d0   ! (a, sqrt3*a, vacuum)
+  nelec  = 4
+  nstate = 8
+/
+&kgrid
+  num_kgrid(1:3) = 4, 4, 1
+/
+&sbe
+  ! clean run (Dirac-cone dynamics); dissipation channels not yet wired
 /
 ```
 

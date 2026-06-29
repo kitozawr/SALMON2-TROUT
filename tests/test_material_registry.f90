@@ -82,8 +82,11 @@ program test_material_registry
     if (.not. cds%eph_ok)     call bad('CdS e-ph (Frohlich) should be enabled (md cited)')
     if (.not. cds%coulomb_ok) call bad('CdS Coulomb should be enabled (md cited eps)')
     if (.not. cds%ii_ok)      call bad('CdS impact ionization should be enabled (md cited E_th)')
-    ! carrier-carrier (e-e) now cited for CdS (sub-100fs @ n>=1e18; Auger Haury)
-    if (.not. cds%eeh_ok)     call bad('CdS carrier-carrier should be enabled (Shah 1986; Haury 1998)')
+    ! carrier-carrier (e-e) is FORBIDDEN for CdS: there is no cited CdS rate (the
+    ! generic 1e14 scale is GaAs/Si only), and the density-gated Auger Lindblad
+    ! channel the CdS citations support (Shah 1986; Haury 1998; wiki/02 Sec 13)
+    ! is not yet wired -> eeh_ok must stay .false. (enabling yn_sbe_eeh aborts).
+    if (cds%eeh_ok)           call bad('CdS carrier-carrier must be forbidden (no cited CdS rate)')
     ! e-ph is the cited Frohlich polar-LO at 38 meV
     if (.not. cds%eph_polar)  call bad('CdS should be flagged polar (Frohlich)')
     call ichk('CdS eph_nph (single Frohlich LO)', cds%eph_nph, 1)
@@ -92,6 +95,13 @@ program test_material_registry
     call chk('CdS II threshold = 1.5 Eg', cds%ii_threshold_ev, 3.6d0)
     ! II prefactor is a fit parameter (md): registry holds a sentinel, not a value
     if (cds%ii_prefactor > 0d0) call bad('CdS II prefactor must be a sentinel (fit parameter)')
+    ! Auger recombination IS cited for CdS (Haury 1998 C; Shah 1986 n_gate)
+    if (.not. cds%auger_ok)  call bad('CdS Auger should be enabled (Haury 1998)')
+    call chk('CdS Auger C = 2.0e-30 cm^6/s', cds%auger_c_cm6s, 2.0d-30, 1d-40)
+    call chk('CdS Auger n_gate = 1e18 cm^-3', cds%auger_n_gate_cm3, 1.0d18, 1d8)
+    ! GaAs/Si Auger NOT cited/enabled (effect matrix: still 'pending')
+    if (ga%auger_ok) call bad('GaAs Auger must be forbidden (not cited)')
+    if (si%auger_ok) call bad('Si Auger must be forbidden (not cited)')
 
     ! every cited phonon table's weights must be positive (normalizable)
     if (sum(ga%eph_wraw(1:ga%eph_nph)) <= 0d0) call bad('GaAs eph weights non-positive')
