@@ -589,6 +589,64 @@ def _interp2d(grid2d, k_a, k_b, factor=8):
     return ka_f, kb_f, interp((KA, KB))
 
 
+def _read_bmatrix(kdata_path):
+    """Read the reciprocal vectors (# b1/# b2/# b3 [a.u.]) from a _k.data header,
+    written by the non-orthogonal EPM. Returns rows b1,b2,b3 (3x3) or None when
+    absent (orthogonal/legacy cubic dataset -> the reduced coords are already
+    axis-aligned and the standard heatmap is used)."""
+    try:
+        rows = {}
+        with open(kdata_path) as f:
+            for line in f:
+                s = line.strip()
+                if not s.startswith('#'):
+                    break
+                m = re.match(r'#\s*b([123])\s*=\s*([-\d.Ee+]+)\s+([-\d.Ee+]+)\s+([-\d.Ee+]+)', s)
+                if m:
+                    rows[int(m.group(1))] = [float(m.group(2)), float(m.group(3)), float(m.group(4))]
+        if len(rows) == 3:
+            return np.array([rows[1], rows[2], rows[3]])
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def _bmatrix_for(nex_file, suffix):
+    """Given a *_sbe_nex_k*.data file, return the reciprocal b_matrix from the
+    sibling ground-state {stem}_k.data, or None when it is absent / orthogonal.
+    Only the non-orthogonal (primitive) EPM writes the b1/b2/b3 header, so a
+    legacy cubic dataset transparently keeps the standard reduced-axis heatmap."""
+    stem = nex_file.name[:-len(suffix)] if nex_file.name.endswith(suffix) else nex_file.stem
+    kdata = nex_file.parent / f'{stem}_k.data'
+    return _read_bmatrix(kdata) if kdata.exists() else None
+
+
+def _cartesian_bz_grid(kfrac, pop, b_matrix, nbin):
+    """Un-shear a triclinic k-grid into a regular CARTESIAN heatmap volume.
+    kfrac (nk,3) reduced -> Cartesian k = kfrac @ b_matrix, wrapped into the
+    Wigner-Seitz BZ (nearest reciprocal-lattice vector), then averaged into an
+    nbin^3 regular Cartesian grid (NaN where no k falls -- the BZ corners). For
+    a dense input grid this gives a smooth heatmap of the true Brillouin zone.
+    Returns kx_u, ky_u, kz_u (bin centres, a.u.) and pop3d."""
+    kc = (kfrac - np.round(kfrac)) @ b_matrix          # into the reciprocal cell
+    # Wigner-Seitz wrap: subtract the nearest reciprocal lattice vector
+    ijk = np.array([[i, j, k] for i in (-1, 0, 1) for j in (-1, 0, 1) for k in (-1, 0, 1)])
+    G = ijk @ b_matrix                                  # (27,3) candidate G's
+    d2 = ((kc[:, None, :] - G[None, :, :]) ** 2).sum(axis=2)
+    kc = kc - G[np.argmin(d2, axis=1)]
+    kmax = np.abs(kc).max() * 1.0001
+    edges = np.linspace(-kmax, kmax, nbin + 1)
+    cen = 0.5 * (edges[1:] + edges[:-1])
+    ix = np.clip(np.digitize(kc[:, 0], edges) - 1, 0, nbin - 1)
+    iy = np.clip(np.digitize(kc[:, 1], edges) - 1, 0, nbin - 1)
+    iz = np.clip(np.digitize(kc[:, 2], edges) - 1, 0, nbin - 1)
+    ssum = np.zeros((nbin, nbin, nbin)); cnt = np.zeros((nbin, nbin, nbin))
+    np.add.at(ssum, (ix, iy, iz), pop)
+    np.add.at(cnt, (ix, iy, iz), 1.0)
+    pop3d = np.where(cnt > 0, ssum / np.maximum(cnt, 1.0), np.nan)
+    return cen, cen, cen, pop3d
+
+
 def _make_norm(vmin, vmax, log_scale):
     """Return a matplotlib Normalize or LogNorm for colormap scaling."""
     if log_scale and vmax > 0:
@@ -599,7 +657,7 @@ def _make_norm(vmin, vmax, log_scale):
 
 
 def _heatmap_ax(ax, k_a, k_b, grid2d, label_a, label_b, title,
-                vmin=None, vmax=None, factor=8, log_scale=False):
+                vmin=None, vmax=None, factor=8, log_scale=False, unit='reduced'):
     if grid2d.size == 0 or np.all(np.isnan(grid2d)):
         ax.set_title(title + " (no data)")
         return None
@@ -608,33 +666,35 @@ def _heatmap_ax(ax, k_a, k_b, grid2d, label_a, label_b, title,
                       vmax if vmax is not None else np.nanmax(gf),
                       log_scale)
     im = ax.imshow(
-        gf.T, origin='lower', aspect='auto',
+        gf.T, origin='lower', aspect='equal' if unit != 'reduced' else 'auto',
         extent=[ka_f[0], ka_f[-1], kb_f[0], kb_f[-1]],
         cmap=CMAP_POP, norm=norm, interpolation='nearest')
     plt.colorbar(im, ax=ax, shrink=0.8)
-    ax.set_xlabel(f'{label_a} [reduced]')
-    ax.set_ylabel(f'{label_b} [reduced]')
+    ax.set_xlabel(f'{label_a} [{unit}]')
+    ax.set_ylabel(f'{label_b} [{unit}]')
     ax.set_title(title)
     return im
 
 
 def _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi,
-                   log_scale=False, tag='nex_k', basis_label='Houston-basis'):
+                   log_scale=False, tag='nex_k', basis_label='Houston-basis',
+                   unit='reduced'):
     vmin = np.nanmin(pop3d)
     vmax = max(np.nanmax(pop3d), vmin + 1e-30)
 
     fig, axes = plt.subplots(1, 3, figsize=(19, 5.5))
     _heatmap_ax(axes[0], kx_u, ky_u, _project(pop3d, 2),
                 'kx', 'ky', 'pop_lcb: kx-ky (avg kz)',
-                vmin=vmin, vmax=vmax, log_scale=log_scale)
+                vmin=vmin, vmax=vmax, log_scale=log_scale, unit=unit)
     _heatmap_ax(axes[1], kx_u, kz_u, _project(pop3d, 1),
                 'kx', 'kz', 'pop_lcb: kx-kz (avg ky)',
-                vmin=vmin, vmax=vmax, log_scale=log_scale)
+                vmin=vmin, vmax=vmax, log_scale=log_scale, unit=unit)
     _heatmap_ax(axes[2], ky_u, kz_u, _project(pop3d, 0),
                 'ky', 'kz', 'pop_lcb: ky-kz (avg kx)',
-                vmin=vmin, vmax=vmax, log_scale=log_scale)
+                vmin=vmin, vmax=vmax, log_scale=log_scale, unit=unit)
 
-    fig.suptitle(f'{basis_label} LCB population,  t = {t_val:.6f} {t_unit}')
+    zone = 'Cartesian BZ (a.u.)' if unit != 'reduced' else 'reduced k'
+    fig.suptitle(f'{basis_label} LCB population [{zone}],  t = {t_val:.6f} {t_unit}')
     fig.tight_layout(rect=[0, 0, 1, 0.94])
     safe_t  = f'{t_val:.6f}'.replace('-', 'm').replace('+', 'p')
     out = output_dir / f'{tag}_snap_t{safe_t}{t_unit}.png'
@@ -730,7 +790,7 @@ def plot_intra_current(filepath, rt_filepath, output_dir, dpi=150):
 
 
 def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
-               unfold=False, subtract_baseline=False, real=False):
+               unfold=False, subtract_baseline=False, real=False, b_matrix=None):
     print(f"Processing {filepath.name}  "
           f"(cmap={'log' if log_scale else 'linear'}, "
           f"snapshots={'on' if snapshots else 'off'}"
@@ -780,11 +840,22 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
         if kx_u is None:
             kx_u, ky_u, kz_u, ix, iy, iz = _build_grid_info(kpoints)
             pop3d = np.empty((len(kx_u), len(ky_u), len(kz_u)))
+            # For a non-orthogonal (triclinic) grid the reduced axes are sheared,
+            # so the per-axis heatmap is geometrically misleading. With the
+            # reciprocal vectors (b_matrix) we un-shear into a regular CARTESIAN
+            # Wigner-Seitz volume -- a true picture of the Brillouin zone that
+            # gets smoother the denser the k-grid is.
+            cnbin = max(len(kx_u), len(ky_u), len(kz_u))
         pop3d.fill(np.nan)
         pop3d[ix, iy, iz] = pop
         if snapshots:
             _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi,
                            log_scale=log_scale, tag=tag, basis_label=basis_label)
+            if b_matrix is not None:
+                cx, cy, cz, cpop3d = _cartesian_bz_grid(kpoints, pop, b_matrix, cnbin)
+                _save_snapshot(cpop3d, cx, cy, cz, t_val, t_unit, output_dir, dpi,
+                               log_scale=log_scale, tag=tag + '_cart',
+                               basis_label=basis_label, unit='a.u.')
         times.append(t_val)
         marg_kx.append(np.nanmean(pop3d, axis=(1, 2)))
         marg_ky.append(np.nanmean(pop3d, axis=(0, 2)))
@@ -905,69 +976,128 @@ def _map_path_population(qred, grid_kpts, grid_pop, max_dist=None):
     return pop
 
 
-def plot_primitive_spectral(filepath, bpfile, output_dir, dpi=150):
-    """A(k,E) spectral map for a PRIMITIVE (unfolded) cell -- no cosets, no
-    unfold file. The skeleton is the primitive bandpath; the lowest conduction
-    band (CB1) is coloured by the per-k LCB population from the FOLDED-format
-    nex_k(_real).data, mapped onto the path by nearest k in the band-path's
-    native fractional convention (wrapped mod 1 -- works for any, incl. the
-    non-orthogonal FCC, lattice). Drawn at the peak-excitation frame."""
-    from matplotlib.collections import LineCollection
-    print(f"Processing {filepath.name}  (primitive spectral A(k,E), skeleton {bpfile.name}) ...")
-    dist, eig_ha, nv, spinor, nodes, qred = _load_bandpath(bpfile)
-    if not nv:
-        print("  (skip) band path has no nv header")
-        return
-    levels = _bandpath_level_energies(eig_ha, nv, spinor)
-    # peak-excitation frame (largest total LCB population)
-    best, best_sum, t_peak, tu = None, -1.0, 0.0, ''
-    for t_val, t_unit, kpts, pop, _lev, _sub in _iter_nex_k_blocks(filepath, unfold=False):
-        s = float(np.nansum(pop))
-        if s > best_sum:
-            best_sum, best, t_peak, tu = s, (kpts.copy(), pop.copy()), t_val, t_unit
-    if best is None:
-        print("  (skip) no data blocks"); return
-    gridk, gpop = best
-    # nearest-k mapping in the native fractional convention (periodic wrap)
-    spacing = _grid_spacing(gridk)
+def _map_primitive_population(qred, gridk, gpop, spacing, tol=1.3):
+    """Map the per-k LCB population (gpop on the MP grid gridk) onto each
+    band-path point qred by nearest k in the native fractional convention
+    (wrapped mod 1 -- works for any, incl. the non-orthogonal FCC, lattice).
+    Points farther than tol*spacing from any grid k get NaN."""
     P = np.full(len(qred), np.nan)
     for i, q in enumerate(qred):
         d = gridk - q[None, :]
         d -= np.round(d)                       # wrap mod 1 (umklapp)
         d2 = (d ** 2).sum(axis=1)
         j = int(np.argmin(d2))
-        if np.sqrt(d2[j]) <= 1.3 * spacing:
+        if np.sqrt(d2[j]) <= tol * spacing:
             P[i] = gpop[j]
-    ke_max = max(np.nanmax(levels['cb1'][1]), 1e-9)
-    vmax = max(np.nanmax(P[np.isfinite(P)]) if np.any(np.isfinite(P)) else 1e-12, 1e-12)
-    norm = mcolors.Normalize(vmin=0.0, vmax=vmax)
-    fig, ax = plt.subplots(figsize=(8, 6))
-    for name in UNFOLD_LEVELS:                  # vbm1, vb, cb1, cb2 skeleton
-        if name not in levels:
-            continue
-        e_ev = levels[name][0]
-        ax.plot(dist, e_ev, color='0.7', lw=0.8, zorder=1)
-    # colour CB1 by the mapped LCB population, broaden by kinetic energy
+    return P
+
+
+def plot_primitive_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=150):
+    """A(k,E) spectral movie for a PRIMITIVE (unfolded) cell -- no cosets, no
+    unfold file -- ONE FRAME PER TIME STEP.
+
+    Skeleton: the clean primitive-cell dispersion from *_bandpath.data, drawn as
+    thin grey lines (VB-1, VB, CB1, CB2). Decoration: at every output time the
+    lowest conduction band (CB1, the only band the folded-format nex_k file
+    resolves) is coloured by the per-k LCB population mapped onto the path
+    (nearest k, wrapped mod 1) and broadened by the carrier kinetic energy. Two
+    views per frame go into a `spectral_frames/` subfolder -- along the high-
+    symmetry path and projected onto kx -- so the electron's motion through the
+    primitive BZ can be watched frame by frame (assemble into a movie with e.g.
+    `ffmpeg -i nex_k_prim_spectral_path_f%04d*.png movie.mp4`). The colour scale
+    is fixed across all frames (global CB peak) so frames are comparable."""
+    from matplotlib.collections import LineCollection
+    print(f"Processing {filepath.name}  (primitive spectral A(k,E) per frame, "
+          f"skeleton {bpfile.name}) ...")
+    dist, eig_ha, nv, spinor, nodes, qred = _load_bandpath(bpfile)
+    if not nv:
+        print("  (skip) band path has no nv header — cannot identify levels")
+        return
+    levels = _bandpath_level_energies(eig_ha, nv, spinor)
     e_cb1, kin = levels['cb1']
-    lw = 1.0 + 7.0 * np.nan_to_num(kin) / ke_max
-    good = np.isfinite(P)
-    im = ax.scatter(dist[good], e_cb1[good], c=P[good], s=12 + 90 * lw[good],
-                    cmap=CMAP_POP, norm=norm, edgecolors='none', zorder=3)
-    plt.colorbar(im, ax=ax, label='CB1 real population (mapped to path)')
-    ax.axhline(0.0, color='r', lw=0.8)
-    node_lbl = [n[0] for n in nodes]; node_dst = [n[1] for n in nodes]
-    for nd in node_dst:
-        ax.axvline(nd, color='k', lw=0.5, ls=':')
-    ax.set_xticks(node_dst)
-    ax.set_xticklabels(['$\\Gamma$' if l == 'Gamma' else l for l in node_lbl])
-    ax.set_xlim(dist[0], dist[-1]); ax.set_ylim(-6, 8)
-    ax.set_ylabel('E - VBM [eV]')
-    ax.set_title(f'Primitive A(k,E): CB1 coloured by carrier population\n'
-                 f'peak frame t = {t_peak:.3g} {tu}')
-    fig.tight_layout()
-    out = output_dir / 'spectral_primitive.png'
-    fig.savefig(out, dpi=dpi, bbox_inches='tight'); plt.close(fig)
-    print(f"  saved {out.name}")
+    kx_path = qred[:, 0]                         # native FCC-reduced kx
+    ke_max = max(np.nanmax(kin), 1e-9)
+    lw_cb1 = 1.0 + 6.0 * np.nan_to_num(kin) / ke_max
+
+    # Pass 1: global colour scale (peak LCB population over all frames) + grid.
+    cb_peak, n_frames, gridk = 0.0, 0, None
+    for _t, _tu, kpts, pop, _lev, _sub in _iter_nex_k_blocks(filepath, unfold=False):
+        if gridk is None:
+            gridk = kpts
+        n_frames += 1
+        cb_peak = max(cb_peak, float(np.nanmax(pop)) if pop.size else 0.0)
+    if n_frames == 0:
+        print("  (skip) no data blocks found")
+        return
+    spacing = _grid_spacing(gridk)
+    norm = mcolors.Normalize(vmin=0.0, vmax=max(cb_peak, 1e-12))
+    stride = max(1, n_frames // max_frames)
+    node_lbl = [n[0] for n in nodes]
+    node_dst = [n[1] for n in nodes]
+
+    frame_dir = output_dir / 'spectral_frames'
+    frame_dir.mkdir(parents=True, exist_ok=True)
+
+    # Pass 2: render every (strided) frame.
+    n_written = 0
+    for iframe, (t_val, t_unit, kpts, pop, _lev, _sub) in enumerate(
+            _iter_nex_k_blocks(filepath, unfold=False)):
+        if iframe % stride != 0:
+            continue
+        P = _map_primitive_population(qred, kpts, pop, spacing)
+        good = np.isfinite(P)
+        safe_t = f'{t_val:.4f}'.replace('-', 'm').replace('+', 'p')
+        tag = f'f{iframe:04d}_t{safe_t}{t_unit}'
+
+        # view 1: along the high-symmetry path (thin skeleton + coloured CB1)
+        fig, ax = plt.subplots(figsize=(8, 6))
+        for name in UNFOLD_LEVELS:              # vbm1, vb, cb1, cb2 skeleton
+            if name in levels:
+                ax.plot(dist, levels[name][0], color='0.75', lw=0.6, zorder=1)
+        pts = np.column_stack([dist, e_cb1])
+        segs = np.stack([pts[:-1], pts[1:]], axis=1)
+        seg_pop = 0.5 * (np.nan_to_num(P[:-1]) + np.nan_to_num(P[1:]))
+        seg_lw  = 0.5 * (lw_cb1[:-1] + lw_cb1[1:])
+        lc = LineCollection(segs, cmap=CMAP_POP, norm=norm, zorder=3)
+        lc.set_array(seg_pop); lc.set_linewidths(seg_lw)
+        ax.add_collection(lc)
+        for d in node_dst:
+            ax.axvline(d, color='#888888', linestyle='--', lw=0.7)
+        ax.set_xticks(node_dst)
+        ax.set_xticklabels([r'$\Gamma$' if l == 'Gamma' else f'${l}$' for l in node_lbl])
+        ax.set_xlim(dist[0], dist[-1]); ax.set_ylim(-6, 8)
+        ax.axhline(0.0, color='tab:red', lw=0.8, alpha=0.7)
+        ax.set_ylabel('Energy [eV]  (VBM = 0)')
+        ax.set_title(f'Primitive A(k,E): CB1 coloured by population,  '
+                     f't = {t_val:.3f} {t_unit}\n'
+                     f'colour = population, width = carrier kinetic energy')
+        plt.colorbar(lc, ax=ax, label='CB1 real population')
+        fig.tight_layout()
+        fig.savefig(frame_dir / f'nex_k_prim_spectral_path_{tag}.png',
+                    dpi=dpi, bbox_inches='tight'); plt.close(fig)
+
+        # view 2: projected onto kx (scatter)
+        fig, ax = plt.subplots(figsize=(8, 6))
+        for name in UNFOLD_LEVELS:
+            if name in levels:
+                ax.plot(kx_path, levels[name][0], color='0.85', lw=0.4,
+                        zorder=1, marker='.', ms=1.5, ls='none')
+        im = ax.scatter(kx_path[good], e_cb1[good], c=P[good],
+                        s=8 + 60 * lw_cb1[good], cmap=CMAP_POP, norm=norm,
+                        edgecolors='none', alpha=0.85, zorder=3)
+        ax.axhline(0.0, color='tab:red', lw=0.8, alpha=0.7)
+        ax.set_xlabel('kx [reduced, primitive BZ]')
+        ax.set_ylabel('Energy [eV]  (VBM = 0)')
+        ax.set_title(f'Primitive population vs (kx, E),  t = {t_val:.3f} {t_unit}\n'
+                     f'(band-path points; colour = population, size = kinetic energy)')
+        plt.colorbar(im, ax=ax, label='CB1 real population')
+        fig.tight_layout()
+        fig.savefig(frame_dir / f'nex_k_prim_spectral_kx_{tag}.png',
+                    dpi=dpi, bbox_inches='tight'); plt.close(fig)
+        n_written += 1
+
+    print(f"  saved {n_written} frame(s) x 2 views into {frame_dir.name}/ "
+          f"(of {n_frames} time steps, stride {stride})")
 
 
 def plot_unfold_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=150):
@@ -1791,7 +1921,8 @@ def main():
         for f in real_k:
             found_any = True
             plot_nex_k(f, output_dir, dpi=args.dpi,
-                       log_scale=args.log_cmap, snapshots=args.snapshots, real=True)
+                       log_scale=args.log_cmap, snapshots=args.snapshots, real=True,
+                       b_matrix=_bmatrix_for(f, '_sbe_nex_k_real.data'))
         for f in real_uk:
             found_any = True
             plot_nex_k(f, output_dir, dpi=args.dpi,
@@ -1804,7 +1935,8 @@ def main():
             for f in sorted(input_dir.glob('*_sbe_nex_k.data')):
                 found_any = True
                 plot_nex_k(f, output_dir, dpi=args.dpi,
-                           log_scale=args.log_cmap, snapshots=args.snapshots)
+                           log_scale=args.log_cmap, snapshots=args.snapshots,
+                           b_matrix=_bmatrix_for(f, '_sbe_nex_k.data'))
                 if args.subtract_baseline:
                     plot_nex_k(f, output_dir, dpi=args.dpi,
                                log_scale=args.log_cmap, snapshots=args.snapshots,
