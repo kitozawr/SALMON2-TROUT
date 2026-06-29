@@ -111,6 +111,7 @@ module bloch_solver_ssbe
         ! von Neumann commutator. Frozen over a dt step (mean-field predictor).
         logical :: flag_coulomb = .false.
         logical :: flag_hf_subproj = .false. ! project Sigma^HF onto FCC sublattice blocks
+        logical :: flag_coset_proj = .false. ! project the momentum coupling p block-diagonal over cosets
 
         ! Population-relaxing electron-phonon Lindblad (Part C5, super-mode).
         ! k-local skeleton: each adiabatic level relaxes toward an energy-matched
@@ -231,7 +232,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
                              sbe_ii_form, sbe_ii_exponent, &
                              yn_sbe_coulomb, sbe_coulomb_epsilon, &
                              sbe_coulomb_strength, sbe_coulomb_screen_au, &
-                             yn_sbe_hf_sublattice_proj, &
+                             yn_sbe_hf_sublattice_proj, yn_sbe_coset_proj, &
                              yn_sbe_eph, sbe_eph_temperature_k, sbe_eph_nu_sat, &
                              sbe_eph_eps0_ev, sbe_eph_n, sbe_search_sigma_e_ev, &
                              yn_sbe_bgr_threshold, sbe_bgr_n_gate, sbe_bgr_coeff, &
@@ -556,6 +557,28 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     end if
 
     ! =========================================================================
+    ! Coset block-diagonal projection of the FIELD coupling (momentum matrix p).
+    ! A translationally invariant perturbation conserves primitive crystal
+    ! momentum, so <coset s|p|coset s'> = 0 for s/=s'; the EPM eigenvector
+    ! mixing at folded-valley degeneracies makes these spurious (here ~0.7x the
+    ! intra-coset coupling), artificially hybridizing the valleys. Projecting p
+    ! block-diagonal over the cosets (off-diagonal elements x sum_s w_s(i)w_s(j),
+    ! same soft projector as the HF fix) keeps rho block-diagonal and restores
+    ! the per-valley (primitive) Zener physics. Needs the unfold weights; inert
+    ! otherwise. Applied to p_active in the propagator (hence H_VG, the Houston
+    ! basis and the branch velocity) -- the core of the dynamics.
+    sbe%flag_coset_proj = (yn_sbe_coset_proj == 'y')
+    if (sbe%flag_coset_proj) then
+        if (.not. allocated(gs%unfold_w)) then
+            sbe%flag_coset_proj = .false.
+        else if (maxval(abs(gs%unfold_w)) <= 1d-12) then
+            sbe%flag_coset_proj = .false.
+        end if
+    end if
+    if (lprint .and. sbe%flag_coset_proj) &
+        write(*, '(a)') '# Coset projection ON: inter-coset momentum coupling p block-diagonalized (folding fix)'
+
+    ! =========================================================================
     ! Population-relaxing electron-phonon Lindblad (Part C5, super-mode).
     ! k-local skeleton with a single effective optical phonon. Off by default.
     ! [Jacoboni-Reggiani RMP 55, 645 (1983); nu saturation: Meng et al.,
@@ -836,6 +859,7 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     real(8) :: t_node(2, 3), s_node
     real(8) :: Ac_node(1:3, 2, 3)
     integer :: isub
+    real(8) :: pcoset
 
     integer :: ik, nb, nba, i, j, idir, in, im
 
@@ -904,7 +928,7 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     if (sbe%flag_nl_ii .and. nba > 0) call gather_global_occupation(sbe, gs)
 
     !$omp parallel default(shared) &
-    !$omp    private(ik, i, j, idir, in, im, isub, s) &
+    !$omp    private(ik, i, j, idir, in, im, isub, s, pcoset) &
     !$omp    private(p_active, rho_a, H1, H2, HVG, eigen_active, V_begin, V_end, X_a, w_act_sub) &
     !$omp    private(p_k_full, rho_n_full)
 
@@ -934,6 +958,24 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
                     end do
                 end do
             end do
+            ! Coset block-diagonal projection of the field coupling: suppress the
+            ! spurious inter-coset momentum matrix elements (folding artifact).
+            ! Off-diagonal only; intra-band (i=j) velocity untouched. Same soft
+            ! projector sum_s w_s(i)w_s(j) as apply_hf_sublattice_projection.
+            if (sbe%flag_coset_proj) then
+                do j = 1, nba
+                    im = sbe%active_idx(j)
+                    do i = 1, nba
+                        if (i == j) cycle
+                        in = sbe%active_idx(i)
+                        pcoset = 0d0
+                        do s = 1, 4
+                            pcoset = pcoset + gs%unfold_w(s, in, ik) * gs%unfold_w(s, im, ik)
+                        end do
+                        p_active(i, j, 1:3) = p_active(i, j, 1:3) * pcoset
+                    end do
+                end do
+            end if
             do i = 1, nba
                 eigen_active(i) = gs%eigen(sbe%active_idx(i), ik)
             end do

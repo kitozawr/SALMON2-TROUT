@@ -608,6 +608,7 @@ contains
       & sbe_coulomb_strength, &
       & sbe_coulomb_screen_au, &
       & yn_sbe_hf_sublattice_proj, &
+      & yn_sbe_coset_proj, &
       & yn_sbe_superres, &
       & yn_sbe_eph, &
       & sbe_eph_temperature_k, &
@@ -1071,6 +1072,7 @@ contains
     sbe_coulomb_strength    = 1.0d0      ! overall scaling of the exchange kernel (tuning)
     sbe_coulomb_screen_au   = 0.0d0      ! Yukawa screening kappa [1/Bohr]; 0 = bare (q=0 excluded)
     yn_sbe_hf_sublattice_proj = 'y'      ! project Sigma^HF block-diagonal over 4 FCC sublattices (folding fix)
+    yn_sbe_coset_proj       = 'y'        ! project the momentum coupling p block-diagonal over cosets (folding fix; needs unfold map)
     yn_sbe_superres         = 'n'        ! 'y': nonlocal super-compute mode (Part C; scaffolding only so far)
     yn_sbe_eph              = 'n'        ! 'y': population-relaxing electron-phonon Lindblad
     sbe_eph_temperature_k   = 300.0d0    ! phonon bath T_ph [K]
@@ -1737,6 +1739,7 @@ contains
     call comm_bcast(sbe_coulomb_strength,    nproc_group_global)
     call comm_bcast(sbe_coulomb_screen_au,   nproc_group_global)
     call comm_bcast(yn_sbe_hf_sublattice_proj, nproc_group_global)
+    call comm_bcast(yn_sbe_coset_proj, nproc_group_global)
     call comm_bcast(yn_sbe_superres,         nproc_group_global)
     call comm_bcast(yn_sbe_eph,              nproc_group_global)
     call comm_bcast(sbe_eph_temperature_k,   nproc_group_global)
@@ -2763,6 +2766,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_coulomb_strength', sbe_coulomb_strength
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_coulomb_screen_au', sbe_coulomb_screen_au
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_hf_sublattice_proj', yn_sbe_hf_sublattice_proj
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_coset_proj', yn_sbe_coset_proj
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_superres', yn_sbe_superres
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_eph', yn_sbe_eph
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_eph_temperature_k', sbe_eph_temperature_k
@@ -2898,6 +2902,7 @@ contains
     call yn_argument_check(yn_sbe_impact_ionization)
     call yn_argument_check(yn_sbe_coulomb)
     call yn_argument_check(yn_sbe_hf_sublattice_proj)
+    call yn_argument_check(yn_sbe_coset_proj)
     call yn_argument_check(yn_sbe_superres)
     call yn_argument_check(yn_sbe_eph)
     call yn_argument_check(yn_sbe_bgr_threshold)

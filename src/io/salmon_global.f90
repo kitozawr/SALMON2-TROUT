@@ -468,6 +468,18 @@ character(256),allocatable :: atom_name(:)
   ! that the cubic-cell band folding creates). [Popescu-Zunger PRB 85, 085201]
   character(1)   :: yn_sbe_hf_sublattice_proj
 
+  ! Coset block-diagonal projection of the FIELD coupling (momentum matrix p,
+  ! hence H_VG and the velocity). A translationally invariant perturbation
+  ! conserves primitive crystal momentum, so its matrix elements between bands
+  ! of DIFFERENT cosets (different primitive k folded to the same supercell k)
+  ! are exactly zero; the band-folding/degeneracy mixing in the EPM eigenvectors
+  ! creates spurious inter-coset coupling that artificially hybridizes the
+  ! valleys (dense avoided crossings -> cascade tunneling Gamma~L~X). Projecting
+  ! p block-diagonal over the cosets keeps rho block-diagonal and restores the
+  ! correct per-valley (primitive) Zener physics. Same mechanism as the HF
+  ! sublattice projection, applied to the core propagator. [Popescu-Zunger 2012]
+  character(1)   :: yn_sbe_coset_proj
+
   ! Nonlocal "super-compute" mode (Part C): genuine momentum-exchange impact
   ! ionization + population-relaxing electron-phonon Lindblad. All OFF by
   ! default; the k-local channels remain the fast default. [scaffolding only at
