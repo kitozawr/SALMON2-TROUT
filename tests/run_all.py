@@ -29,6 +29,7 @@ FORTRAN_DEPS = {
     "test_vg_basis_nb.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
     "test_material_registry.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
     "test_auger_cptp.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
+    "test_eph_interk_cptp.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
 }
 
 

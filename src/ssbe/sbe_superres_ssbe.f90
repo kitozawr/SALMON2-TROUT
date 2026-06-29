@@ -37,7 +37,7 @@ module sbe_superres_ssbe
               eps_thomas_fermi, tf_kappa2_degenerate, debye_kappa2, &
               lindhard_F, eps_lindhard_static, plasmon_freq2, lopc_branches, &
               energy_partner_weights, fermi_dirac, fit_fermi_dirac, &
-              carrier_carrier_relax, &
+              carrier_carrier_relax, eph_interk_dpop, &
               vg_eta_admixture, vg_trunc_shift2, vg_conv_error, vg_ptop_exceeds, &
               get_material_params
 
@@ -725,6 +725,87 @@ contains
             end do
         end do
     end subroutine carrier_carrier_relax
+
+    ! =====================================================================
+    ! INTER-K e-ph (the "super-mode ring" intervalley channel, Part C5/D).
+    ! ---------------------------------------------------------------------
+    ! The k-LOCAL apply_eph_relaxation relaxes a carrier to the energy-matched
+    ! partner BAND at the SAME k -- correct only when the final valley folds onto
+    ! a same-k band (folded cell) or for intra-valley polar-optical. On the
+    ! PRIMITIVE cell the intervalley final states live at DIFFERENT k, so the
+    ! search must run over all (k,band). This pure routine takes the GATHERED
+    ! Houston spectrum and returns the net diagonal population change; the caller
+    ! gathers eval/f (all-gather / ring) and applies dpop. Enabled when the ring
+    ! (yn_sbe_superres) is on -- "if the ring is on, inter-k goes through it".
+    !
+    ! EXACTLY trace-conserving (CPTP-safe): each source (ik,a) loses
+    !   out_tot = f*(1-exp(-Gamma_out*tau)) <= f   (no negativity),
+    ! distributed to destinations proportional to their partial rate, so
+    ! sum(dpop) = 0 by construction. Detailed balance (emission fe / absorption
+    ! fa from the Bose factor) + Pauli blocking (1 - f_dest/occ_max) at the
+    ! destination. Intra-k (jq==ik) is included automatically -- this SUBSUMES
+    ! the intra-k channel when the ring is on. O(nk^2 nba^2 nph) all-pairs (same
+    ! order as the Coulomb all-pairs sum it rides alongside).
+    subroutine eph_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, evbm, &
+                               nph, hw, wrel, nb_bose, nu_sat, nu_eps0, nu_n, &
+                               sigma, tau, dpop)
+        implicit none
+        integer, intent(in)  :: nk, nba, nph
+        real(8), intent(in)  :: eval(nba, nk), f(nba, nk), occ_max, a2half
+        real(8), intent(in)  :: ecbm, evbm, hw(nph), wrel(nph), nb_bose(nph)
+        real(8), intent(in)  :: nu_sat, nu_eps0, nu_n, sigma, tau   ! nu_n = saturation exponent
+        real(8), intent(out) :: dpop(nba, nk)
+        integer :: ik, jq, a, b, ip
+        real(8) :: eps_kin, nu_a, fe, fa, dE, shp, th, blk, gam, gamtot, out_tot
+        real(8) :: gpart(nba, nk)
+        real(8), parameter :: occ_eps = 1d-12
+
+        dpop = 0d0
+        do ik = 1, nk
+            do a = 1, nba
+                if (f(a, ik) < occ_eps) cycle
+                ! carrier kinetic energy from the nearest band edge (restore A^2/2,
+                ! the k-independent Houston offset; it cancels in energy MATCHING).
+                eps_kin = max(eval(a, ik) + a2half - ecbm, &
+                              evbm - (eval(a, ik) + a2half), 0d0)
+                nu_a = nu_saturation(eps_kin, nu_sat, nu_eps0, nu_n)
+                if (nu_a * tau < 1d-14) cycle
+
+                gpart = 0d0
+                gamtot = 0d0
+                do ip = 1, nph
+                    call eph_thermal_split(nb_bose(ip), fe, fa)
+                    do jq = 1, nk
+                        do b = 1, nba
+                            if (jq == ik .and. b == a) cycle
+                            if (eval(b, jq) < eval(a, ik)) then        ! emission (down)
+                                dE = abs((eval(a, ik) - eval(b, jq)) - hw(ip)); th = fe
+                            else                                       ! absorption (up)
+                                dE = abs((eval(b, jq) - eval(a, ik)) - hw(ip)); th = fa
+                            end if
+                            if (th <= 0d0) cycle
+                            shp = gaussian_shape(dE, sigma)
+                            if (shp <= 0d0) cycle
+                            blk = min(max(1d0 - f(b, jq) / occ_max, 0d0), 1d0)
+                            gam = nu_a * wrel(ip) * th * shp * blk
+                            gpart(b, jq) = gpart(b, jq) + gam
+                            gamtot = gamtot + gam
+                        end do
+                    end do
+                end do
+
+                if (gamtot * tau < 1d-14) cycle
+                out_tot = f(a, ik) * (1d0 - exp(-gamtot * tau))
+                dpop(a, ik) = dpop(a, ik) - out_tot
+                do jq = 1, nk
+                    do b = 1, nba
+                        if (gpart(b, jq) > 0d0) &
+                            dpop(b, jq) = dpop(b, jq) + out_tot * gpart(b, jq) / gamtot
+                    end do
+                end do
+            end do
+        end do
+    end subroutine eph_interk_dpop
 
     ! =====================================================================
     ! Velocity-gauge basis sufficiency / N_b convergence primitives.
