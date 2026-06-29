@@ -51,7 +51,7 @@ Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #
 **PRE-LIST material-pipeline tasks (predate the 8-item list, still open — order: map → physics → next material):**
 - **A. GaAs (reference, 100% done):** scalar + spinor GS/SBE/maps/dissipators+super-mode all ✅.
 - **B. Si (material 1) ✅:** GS (indirect 1.059 eV @ 0.85·X), SBE, maps, dissipators+super-mode (CPTP, 12.5% relax) all done. *Caveat: its e-ph is all-intervalley → awaits inter-k (TODO-4 decision).*
-- **C. CdS (material 2) 🚧:** GS (2.547 eV), SBE, maps ✅; **dissipators+super-mode running** (polar e-ph + Coulomb + Auger; eeh forbidden; II skipped — uncited prefactor). CdS e-ph is polar/intra-valley → valid on the primitive cell.
+- **C. CdS (material 2) ✅:** GS (2.547 eV), SBE, maps, **dissipators+super-mode all done** — ran on the hexagonal primitive cell with polar e-ph + Coulomb + Auger (eeh forbidden; II skipped — uncited prefactor): **electrons=16.00000000 exact (CPTP)**, real LCB carriers excited (peak 0.69) and acted on by the channels. CdS e-ph is polar/intra-valley → valid on the primitive cell as-is.
 - **D. graphene (material 3) ⬜:** primitive 2-atom hex EPM exists (`epm_graphene.py`, vectorized); needs the primitive-cell SBE run + maps + dissipators (graphene registry entry `epm_material='graphene'` NOT yet added — see folded-era item 3).
 - **E. Examples + wiki HUGE update ⬜:** `samples/` recipes + wiki for the whole primitive-cell pipeline (all materials, spinor, Cartesian map, spectral movie, `yn_sbe_spinor='y'`, odd grids). Ongoing; wiki/00 kept live.
 
