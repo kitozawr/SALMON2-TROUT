@@ -6,7 +6,20 @@ Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #
 
 ---
 
-## ⭐ CURRENT WORK — PRIMITIVE-CELL (non-orthogonal, NO folding) pivot — branch `claude/sbe-nonorthogonal`
+## 🧭 NEXT SESSION — START HERE
+The primitive-cell work was **merged to `develop-2.0.0`** (branch `claude/sbe-nonorthogonal` closed). **Commit small changes directly to `develop-2.0.0` now** (maintainer's instruction — no more feature branch). All four primitive materials run end-to-end: **GaAs (scalar+spinor), Si, CdS, graphene** (GS+SBE+maps); Si & CdS also have dissipators+super-mode (CPTP). Example set: `samples/exercise_x7_primitive_cell_epm/` (commented).
+
+**Open tasks, priority order** (details in the TODO list + decision blocks below):
+1. **inter-k e-ph THROUGH THE RING** (TODO-4 decision) — gated on `yn_sbe_superres`; CPTP net-Δf algorithm + insertion point (`compute_coulomb_selfenergy_ring` hop loop) are locked below. Needed for primitive Si/GaAs intervalley e-ph. *(big, delicate — the main physics gap.)*
+2. **graphene dissipators** — add the `epm_material='graphene'` registry entry (E2g 196 meV, A1′ 160 meV, gapless-CM Auger, no-Kuhn-Zurek) so graphene gets e-ph (folded-era item 3).
+3. **Fortran EPM for CdS/graphene** (TODO-2) — extend `src/epm` to the non-cubic primitive cells (no folding).
+4. **`--spectral` 4-level colouring** (TODO-3) — needs the SBE to emit VB-1/VB/CB1/CB2 primitive populations (currently only LCB); then colour all four in `plot_primitive_spectral`.
+5. **deeppseudodot DFT→EPM** (TODO-7) — branch `claude/dft-epm-coefficients-pdvguw`.
+6. **SBE console banner** refresh (TODO-8, cosmetic).
+
+---
+
+## ⭐ CURRENT WORK — PRIMITIVE-CELL (non-orthogonal, NO folding) pivot — branch `claude/sbe-nonorthogonal` (now merged to develop-2.0.0)
 
 **Read this block FIRST on resume — it is the live frontier.** Off merged `develop-2.0.0` (PR #46 merged the plotter/real-carrier/intra-current work). All runs are in the session scratchpad `…/scratchpad/{gaas_prim,gaas_prim_odd,gaas_prim_so,gaas_prim_so7,si_prim,cds_prim}`; the SALMON binary is `build/salmon`.
 
@@ -49,7 +62,7 @@ Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #
    **CPTP algorithm (the correctness key — implement exactly this):** gather `eval(nba,nk)` once per step (cheap; the ring already circulates the population blocks `transit`). In the hop loop, for each local carrier `(ik,a)` and each transiting `(iq,b)`, form the symmetric energy-matched pair rate `w = nu(eps)·w_mode·gaussian(|E(ik,a)−E(iq,b)|∓ħω)·Pauli`, and accumulate the **net** diagonal change `Δf(ik,a) += [in from (iq,b)] − [out to (iq,b)]`. Because rank-A's "(ik→iq) out" uses the **same** pairwise `w` as rank-B's "(iq→ik) in" (detailed balance, emission↔absorption with N_B/(N_B+1)), the transfers match across ranks ⇒ **global trace conserved without any bidirectional deposit** — each rank only ever writes its OWN local `Δf`. Apply `Δf` locally after the ring (clamp to [0,occ_max]) plus the source-coherence damping at rate `Γ_out(ik,a)` (local). Intra-k (same-k bands) is included automatically as the `iq==ik` term, so the ring path SUBSUMES and replaces the intra-k call when the ring is on. Needs a CPTP test (trace-conserving, PSD, γ=0 identity) mirroring `test_eph_cptp.f90` but for the inter-k pair transfer.
 5. Keep working examples + docs updated (long-term memory).
 6. ✅ **VERIFIED (already implemented).** `plot_conductivity` = σ(ω)=J(ω)·conj(E)/(|E|²+floor) (`_sigma_ratio`), Hann-windowed, **default 0–4 THz**, Re+Im. `plot_conductivity_stft` = Re σ(ω,t) 2-D map, **hop defaults to 1 sample → N−1 of N overlap** (the requested smoothness), 0–4 THz; effective hop only rises for the render cap (max_cols) while keeping overlap maximal. Note: needs a ps-scale run for true THz resolution (short test runs warn "trace too short for 0–4 THz").
-7. Find the un-merged branch with **deeppseudodot** copied in; set up DFT(primitive, in-salmon, Si example)→deep-EPM coefficient fitting; drop a ready Si example in `samples/` with a DFT-compatibility layer (user runs the long calc; EPM-compat not yet).
+7. **deeppseudodot / DFT→deep-EPM (branch found: `claude/dft-epm-coefficients-pdvguw`, un-merged).** Set up DFT(primitive cell, in-salmon, Si example)→deep-EPM coefficient fitting; drop a ready Si example in `samples/` with a DFT-compatibility layer (user runs the long calc; EPM-compat not yet). Start by `git checkout claude/dft-epm-coefficients-pdvguw` (or cherry-pick its deeppseudodot copy) and wire the Si primitive DFT GS → EPM-form-factor fit. Si only, possibly no NN training.
 8. Refresh the **SBE console output header/banner** (outdated).
 
 **PRE-LIST material-pipeline tasks (predate the 8-item list, still open — order: map → physics → next material):**
