@@ -40,11 +40,20 @@ Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #
    | **GaAs** | polar LO + 5 intervalley | ⚠️ polar mode valid; the 5 intervalley modes need inter-k |
    | **Si / Si_cb** | 6 intervalley g/f | ⚠️ **all intervalley** → intra-k search is the *folded* picture only; needs inter-k on the primitive cell |
 
-   So **CdS dissipators run correctly on the primitive cell** (its only e-ph mode is intra-valley); Si/GaAs intervalley e-ph on the primitive cell awaits the inter-k final-state search (or a primitive-cell gate). Maintainer instruction (2026-06-29): "e-ph should use the material from `&epm`" — confirmed it does; the open work is the primitive-cell intervalley gate/inter-k search, tracked here.
+   So **CdS dissipators run correctly on the primitive cell** (its only e-ph mode is intra-valley); Si/GaAs intervalley e-ph on the primitive cell awaits the inter-k final-state search. Maintainer instruction (2026-06-29): "e-ph should use the material from `&epm`" — confirmed it does.
+
+   **🟢 MAINTAINER DECISION (2026-06-29): NO gate — implement inter-k. "If e-ph is enabled, inter-k is enabled."** i.e. whenever `yn_sbe_eph='y'`, the e-ph final-state search must run **over all k AND bands** (energy-matched, broadened-delta), not just same-k bands, so intervalley scattering lands in the correct (different-k) valley on the primitive cell. No separate flag — it is implied by e-ph being on. The intra-k path is just the special case where the energy-matched partner is at the same k (folded cell). **Implementation = the pending "nonlocal e-ph" (C5/D): gather eval(nb,nk)+diag populations, search candidates across k, transfer inter-k via amp_damp on the ring/all-gather (mirrors nonlocal-II C4). Serial (1-rank) version is straightforward since all k are local; MPI version reuses the systolic ring.** 🚧 STARTED.
 5. Keep working examples + docs updated (long-term memory).
 6. ✅ **VERIFIED (already implemented).** `plot_conductivity` = σ(ω)=J(ω)·conj(E)/(|E|²+floor) (`_sigma_ratio`), Hann-windowed, **default 0–4 THz**, Re+Im. `plot_conductivity_stft` = Re σ(ω,t) 2-D map, **hop defaults to 1 sample → N−1 of N overlap** (the requested smoothness), 0–4 THz; effective hop only rises for the render cap (max_cols) while keeping overlap maximal. Note: needs a ps-scale run for true THz resolution (short test runs warn "trace too short for 0–4 THz").
 7. Find the un-merged branch with **deeppseudodot** copied in; set up DFT(primitive, in-salmon, Si example)→deep-EPM coefficient fitting; drop a ready Si example in `samples/` with a DFT-compatibility layer (user runs the long calc; EPM-compat not yet).
 8. Refresh the **SBE console output header/banner** (outdated).
+
+**PRE-LIST material-pipeline tasks (predate the 8-item list, still open — order: map → physics → next material):**
+- **A. GaAs (reference, 100% done):** scalar + spinor GS/SBE/maps/dissipators+super-mode all ✅.
+- **B. Si (material 1) ✅:** GS (indirect 1.059 eV @ 0.85·X), SBE, maps, dissipators+super-mode (CPTP, 12.5% relax) all done. *Caveat: its e-ph is all-intervalley → awaits inter-k (TODO-4 decision).*
+- **C. CdS (material 2) 🚧:** GS (2.547 eV), SBE, maps ✅; **dissipators+super-mode running** (polar e-ph + Coulomb + Auger; eeh forbidden; II skipped — uncited prefactor). CdS e-ph is polar/intra-valley → valid on the primitive cell.
+- **D. graphene (material 3) ⬜:** primitive 2-atom hex EPM exists (`epm_graphene.py`, vectorized); needs the primitive-cell SBE run + maps + dissipators (graphene registry entry `epm_material='graphene'` NOT yet added — see folded-era item 3).
+- **E. Examples + wiki HUGE update ⬜:** `samples/` recipes + wiki for the whole primitive-cell pipeline (all materials, spinor, Cartesian map, spectral movie, `yn_sbe_spinor='y'`, odd grids). Ongoing; wiki/00 kept live.
 
 ---
 
