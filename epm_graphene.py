@@ -425,6 +425,10 @@ if __name__ == '__main__':
         main_bandpath()                # clean primitive band path only
     elif mode == 'unfoldmap':
         main_unfoldmap()               # 2-coset unfold map only
+    elif mode == 'gs':
+        main_gs()                      # SBE ground-state files (k/eigen/tm)
+        main_bandpath()                # + the clean primitive band path
+        main_unfoldmap()               # + the 2-coset unfold map (no slow validation)
     else:
         _print_validation()
         print()

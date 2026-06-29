@@ -151,6 +151,38 @@ Then `theory='sbe'` reading the generated files (sysname, lattice, num_kgrid, ns
 ```
 All channels are CPTP and gated OFF by default. Validation staging (Chefonov Si THz bleaching, not yet run here): (1) ~8.5% bleaching plateau at ~5 MV/cm with e-ph alone; (2) enable II, ~2× transmission drop at >10–15 MV/cm. [Chefonov et al., PRB 98, 165206 (2018)]
 
+## Runnable examples per material (`samples/`) ✅
+
+Self-contained two-step EPM→SBE exercises, one folder per material, each with a
+`README.md` and the input file(s). The `x`-series are the TROUT (Bloch/EPM-SBE)
+additions. **Naming:** GaAs & Si use the cubic Fortran EPM (`theory='epm'`,
+self-contained `.inp`); CdS & graphene use the **Python EPM** for step 1 (the
+Fortran EPM is zincblende/diamond only). All run on a sparse 4×4×4 (graphene
+4×4×1) grid and demonstrate the real-carrier maps + the Houston intra-band
+current.
+
+| Exercise | Material | Step 1 (ground state) | Highlights |
+|---|---|---|---|
+| [`exercise_x3_bulkSi_epm_bloch_superres`](../samples/exercise_x3_bulkSi_epm_bloch_superres/) | Si (diamond) | `salmon < Si_epm_gs.inp` | super-compute mode, all CPTP dissipation channels |
+| [`exercise_x4_GaAs_epm_bloch_realcarrier`](../samples/exercise_x4_GaAs_epm_bloch_realcarrier/) | GaAs (zincblende) | `salmon < GaAs_epm_gs.inp` | real-carrier maps (Γ populated, no breathing) + intra-band current |
+| [`exercise_x5_CdS_wurtzite_epm_bloch`](../samples/exercise_x5_CdS_wurtzite_epm_bloch/) | CdS (wurtzite) | `python3 epm_wurtzite_cds.py gs` | 2-coset unfold, direct 2.5 eV gap |
+| [`exercise_x6_graphene_epm_bloch`](../samples/exercise_x6_graphene_epm_bloch/) | graphene (π-model) | `python3 epm_graphene.py gs` | 2-coset unfold, Dirac carriers, **in-plane** field |
+
+The Python EPM `gs` mode (`epm_wurtzite_cds.py gs`, `epm_graphene.py gs`) emits
+`SYSNAME_k/_eigen/_tm/_unfold/_bandpath.data` into the working directory without
+the slow convergence validation (the Hamiltonian build is vectorized: CdS GS
+≈ 30 s, graphene ≈ 1 s). Run it where you run `salmon`. Then:
+
+```sh
+./build/salmon < <material>_sbe_rt.inp          # step 2
+python3 plot_sbe_results.py -i . -o plots --snapshots
+```
+
+Each SBE input sets `yn_out_intraband_current='y'` and runs past the pulse so
+the real-carrier maps (`*_sbe_nex_k_real.data`, `*_unfold_real.data`) settle to
+their field-free residual. All four conserve the trace (GaAs/Si/CdS = 32,
+graphene = 4) to machine precision. Verified end-to-end with the current build.
+
 ## Recipes by material & mode ✅
 
 All recipes assume the matching EPM ground state was generated first (see the

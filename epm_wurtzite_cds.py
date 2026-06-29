@@ -158,25 +158,21 @@ def structure_factors(dG, atoms_pos, atoms_spec):
 
 def build_hamiltonian(kvec, Gcart, atoms_pos, atoms_spec):
     """H(k) [Hartree] = |k+G|^2 (Ry) + S^S V^S + iS^A V^A, normalized by TOTAL
-    atoms. Hermitian; complex because wurtzite breaks inversion."""
+    atoms. Hermitian; complex because wurtzite breaks inversion. Vectorized over
+    the plane-wave pairs (identical result to the scalar double loop; the cited
+    form factors are zero beyond shell 16, so no explicit g2 cut is needed)."""
     npw = len(Gcart)
-    H = np.zeros((npw, npw), dtype=complex)
-    g2cut = 17.0 * (2.0 * np.pi / _azb_bohr()) ** 2
-    for i in range(npw):
-        kg = kvec + Gcart[i]
-        H[i, i] += (kg @ kg) * RY_TO_HA
-        for j in range(npw):
-            if i == j:
-                continue
-            dG = Gcart[i] - Gcart[j]
-            g2 = dG @ dG
-            if g2 > g2cut:
-                continue
-            VS, VA = form_factor_phys(g2)
-            if VS == 0.0 and VA == 0.0:
-                continue
-            Ssym, Sasym = structure_factors(dG, atoms_pos, atoms_spec)
-            H[i, j] += (Ssym * VS + Sasym * VA) * RY_TO_HA
+    n = len(atoms_pos)
+    dG = Gcart[:, None, :] - Gcart[None, :, :]            # (npw, npw, 3)
+    g2 = np.einsum('ijd,ijd->ij', dG, dG)
+    VS, VA = form_factor_phys(g2)                          # array-safe (np.interp)
+    ph = np.exp(-1j * np.einsum('ijd,ad->ija', dG, atoms_pos))   # (npw, npw, n)
+    Ssym  = ph.sum(axis=2) / n
+    Sasym = (ph * atoms_spec[None, None, :]).sum(axis=2) / n
+    H = (Ssym * VS + Sasym * VA) * RY_TO_HA
+    np.fill_diagonal(H, 0.0)                               # diagonal is kinetic only
+    kg = kvec[None, :] + Gcart
+    H[np.diag_indices(npw)] = np.einsum('id,id->i', kg, kg) * RY_TO_HA
     return 0.5 * (H + H.conj().T)
 
 def bands_at_k(kvec, Gcart, atoms_pos, atoms_spec, nb):
@@ -377,6 +373,10 @@ if __name__ == '__main__':
         main_bandpath()                # clean primitive band path only
     elif mode == 'unfoldmap':
         main_unfoldmap()               # 2-coset unfold map only
+    elif mode == 'gs':
+        main_gs()                      # SBE ground-state files (k/eigen/tm)
+        main_bandpath()                # + the clean primitive band path
+        main_unfoldmap()               # + the 2-coset unfold map (no slow validation)
     else:
         _print_validation()
         print()
