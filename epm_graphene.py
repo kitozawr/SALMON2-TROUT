@@ -122,19 +122,22 @@ def build_hamiltonian(kvec, Gcart, tau, struct_norm=1.0):
     struct_norm = N_cell = n_atoms/2 (e.g. 2 for the 4-atom rectangular cell).
     Without it the supercell potential would be N_cell times too strong."""
     npw = len(Gcart)
-    H = np.zeros((npw, npw), dtype=complex)
-    for i in range(npw):
-        kg = kvec + Gcart[i]
-        H[i, i] += HBAR2_2M * (kg @ kg)
-        for j in range(npw):
-            if i == j:
-                continue
-            dG = Gcart[i] - Gcart[j]
-            VS = form_factor(dG @ dG)
-            if VS == 0.0:
-                continue
-            S = np.exp(-1j * (tau @ dG)).sum() / struct_norm
-            H[i, j] += VS * S
+    # Vectorized over plane-wave pairs (identical to the former scalar double
+    # loop). dG = G_i - G_j; the form factor is nonzero only on the n=4,12,16
+    # shells (rounded |dG|^2/unit within tol), so we fill VS per shell.
+    dG = Gcart[:, None, :] - Gcart[None, :, :]                # (npw,npw,2)
+    g2 = np.einsum('ijd,ijd->ij', dG, dG)
+    unit = (2.0 * np.pi / (np.sqrt(3.0) * A_LATT)) ** 2
+    n = g2 / unit
+    nr = np.round(n)
+    VS = np.zeros((npw, npw))
+    for shell, val in _FORM_FACTORS.items():
+        VS[(nr == shell) & (np.abs(n - nr) < 0.2)] = val
+    # structure factor S(dG) = (1/struct_norm) sum_atoms exp(-i tau.dG)
+    S = np.exp(-1j * np.einsum('ad,ijd->ija', tau, dG)).sum(axis=2) / struct_norm
+    H = VS * S
+    kg = kvec[None, :] + Gcart
+    H[np.diag_indices(npw)] = HBAR2_2M * np.einsum('id,id->i', kg, kg)
     return 0.5 * (H + H.conj().T)
 
 

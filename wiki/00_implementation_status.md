@@ -28,7 +28,7 @@ Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #
 
 **STANDING TODOs from the maintainer (2026-06-29, verbatim intent — sync target of this block):**
 0. **Keep THIS wiki block + tasks in sync** so a fresh session resumes after a context/limit cutover. (readme+wiki = long-term memory.)
-1. Verify **all** material EPMs are vectorized (not just GaAs) — Si/CdS/graphene `build_hamiltonian`.
+1. ✅ **DONE.** All four material EPM Hamiltonians are now vectorized. Finding: GaAs/Si and graphene were O(npw²) Python double-loops (only CdS used einsum). Vectorized `build_hamiltonian_sc` (GaAs/Si, pairwise dG-broadcast + per-shell form-factor fill) and graphene `build_hamiltonian` — both verified **byte-identical** to the loop (GaAs/Si 0.0e0; graphene 3.5e-15) with all EPM tests passing (Dirac cone + 4-coset/2-coset folding intact).
 2. Add **Fortran EPM for CdS and graphene** — *without folding* (primitive cell) it should work.
 3. `--spectral` must colour the **FOUR** levels (VB-1,VB,CB1,CB2) on the bandmap, not just one — needs the SBE to emit the 4-level primitive populations (currently only LCB).
 4. Verify the **e-ph intervalley transfer point** is found correctly in the **primitive** zone (valley coords differ from the folded/cubic hardcoded ones).
