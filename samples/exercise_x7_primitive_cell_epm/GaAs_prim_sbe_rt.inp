@@ -1,0 +1,58 @@
+!########################################################################################!
+! GaAs PRIMITIVE-CELL SBE — FCC 2-atom, NON-orthogonal, NO folding (scalar).             !
+!----------------------------------------------------------------------------------------!
+! Generate the GS first (writes GaAs_prim_k/_eigen/_tm/_bandpath.data into the cwd):      !
+!   python3 -c "import epm_gaas_primitive as p; p.main_gs(); p.main_bandpath()"           !
+! The al_vec* below are the FCC primitive vectors a/2*(0,1,1),(1,0,1),(1,1,0) with        !
+! a = 10.683 Bohr; nelec/nstate/num_kgrid MUST match the generator (NUM_KGRID=(8,8,8),    !
+! NELEC=8, NSTATE=8). The clean SBE reads only the band energies + momentum matrix, so    !
+! the non-orthogonal (triclinic) k-grid needs no special handling.                        !
+!########################################################################################!
+
+&calculation
+  theory = 'sbe'
+/
+
+&control
+  sysname = 'GaAs_prim'              ! reads GaAs_prim_k/_eigen/_tm.data
+/
+
+&units
+  unit_system = 'au'
+/
+
+&system
+  yn_periodic  = 'y'
+  ! FCC primitive (non-orthogonal) lattice vectors, a/2 = 5.3415 Bohr:
+  al_vec1(1:3) = 0.0d0,    5.3415d0, 5.3415d0
+  al_vec2(1:3) = 5.3415d0, 0.0d0,    5.3415d0
+  al_vec3(1:3) = 5.3415d0, 5.3415d0, 0.0d0
+  nelec  = 8                          ! 2 atoms (Ga 3 + As 5) -> 8 valence e- -> 4 filled
+  nstate = 8                          ! 4 valence + 4 conduction
+/
+
+&kgrid
+  num_kgrid(1:3) = 8, 8, 8            ! use an ODD grid (9,9,9) to sample Gamma explicitly
+/
+
+&tgrid
+  dt = 0.4d0
+  nt = 9000
+/
+
+&emfield
+  ! Below-gap multi-cycle drive (~30 THz): omega = 0.0046 Ha = 0.125 eV << 1.39 eV gap.
+  ae_shape1      = 'Acos2'
+  epdir_re1(1:3) = 0.0d0, 0.0d0, 1.0d0
+  I_wcm2_1       = 8.0d+10
+  tw1            = 1600.0d0
+  omega1         = 0.0046d0
+/
+
+&analysis
+  out_projection_k_step = 4500        ! k-resolved population snapshots (real + Houston)
+/
+
+&sbe
+  ! all yn_sbe_* default OFF -> clean velocity-gauge dynamics (no dissipation).
+/

@@ -1,0 +1,60 @@
+!########################################################################################!
+! GaAs PRIMITIVE-CELL SBE — FCC 2-atom with SPIN-ORBIT (spinor, 16 bands).                !
+!----------------------------------------------------------------------------------------!
+! Generate the spinor GS first:                                                           !
+!   python3 -c "import epm_gaas_primitive as p; p.INCLUDE_SPIN_ORBIT=True; \              !
+!               p.NUM_KGRID=(4,4,4); p.SYSNAME='GaAs_prim_so'; \                          !
+!               p.main_gs(); p.main_bandpath()"                                           !
+! The spinor GS has 2*NSTATE = 16 spin-orbit-split bands (Delta0 = 0.341 eV calibrated    !
+! on the primitive basis; direct gap 1.27 eV = scalar 1.39 - Delta0/3).                   !
+!                                                                                          !
+! *** CRITICAL: set yn_sbe_spinor='y' below. *** Without it the solver treats the 16-band !
+! spinor GS as scalar (nb_vb=nelec/2=4 -> ib_lcb=5 is a VALENCE band, occ cap 2) and the  !
+! population output is garbage. With it: nb_vb=nelec=8, ib_lcb=9, occ cap 1 (one e-/band).!
+!########################################################################################!
+
+&calculation
+  theory = 'sbe'
+/
+
+&control
+  sysname = 'GaAs_prim_so'
+/
+
+&units
+  unit_system = 'au'
+/
+
+&system
+  yn_periodic  = 'y'
+  al_vec1(1:3) = 0.0d0,    5.3415d0, 5.3415d0
+  al_vec2(1:3) = 5.3415d0, 0.0d0,    5.3415d0
+  al_vec3(1:3) = 5.3415d0, 5.3415d0, 0.0d0
+  nelec  = 8                          ! 8 valence e- (occ 1 per spinor band -> 8 filled)
+  nstate = 16                         ! 2 * 8 = 16 spin-orbit-split bands
+/
+
+&kgrid
+  num_kgrid(1:3) = 4, 4, 4            ! (spinor GS is 4x4x4 above; use 7,7,7 odd for a clean Gamma map)
+/
+
+&tgrid
+  dt = 0.4d0
+  nt = 9000
+/
+
+&emfield
+  ae_shape1      = 'Acos2'
+  epdir_re1(1:3) = 0.0d0, 0.0d0, 1.0d0
+  I_wcm2_1       = 8.0d+10
+  tw1            = 1600.0d0
+  omega1         = 0.0046d0
+/
+
+&analysis
+  out_projection_k_step = 4500
+/
+
+&sbe
+  yn_sbe_spinor = 'y'                 ! <<< MANDATORY for a spin-orbit (16-band) GS dataset
+/

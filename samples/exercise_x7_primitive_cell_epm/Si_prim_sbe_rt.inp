@@ -1,0 +1,73 @@
+!########################################################################################!
+! Si PRIMITIVE-CELL SBE — FCC 2-atom diamond (V^A=0), NON-orthogonal, NO folding.         !
+!----------------------------------------------------------------------------------------!
+! Generate the GS first (epm_si_primitive raises the cutoff to 27 Ry so the Delta-valley  !
+! camel-back is resolved -> indirect gap 1.06 eV @ 0.85*X):                               !
+!   python3 -c "import epm_si_primitive as s; s.configure_for_si('Si'); \                 !
+!               s.prim.main_gs(); s.prim.main_bandpath()"                                 !
+! al_vec* = a/2*(0,1,1),(1,0,1),(1,1,0) with a = 10.26 Bohr -> a/2 = 5.13 Bohr.           !
+!########################################################################################!
+
+&calculation
+  theory = 'sbe'
+/
+
+&control
+  sysname = 'Si_prim'
+/
+
+&units
+  unit_system = 'au'
+/
+
+&system
+  yn_periodic  = 'y'
+  al_vec1(1:3) = 0.0d0,  5.13d0, 5.13d0
+  al_vec2(1:3) = 5.13d0, 0.0d0,  5.13d0
+  al_vec3(1:3) = 5.13d0, 5.13d0, 0.0d0
+  nelec  = 8
+  nstate = 8
+/
+
+&kgrid
+  num_kgrid(1:3) = 8, 8, 8
+/
+
+&tgrid
+  dt = 0.4d0
+  nt = 9000
+/
+
+&emfield
+  ae_shape1      = 'Acos2'
+  epdir_re1(1:3) = 0.0d0, 0.0d0, 1.0d0
+  I_wcm2_1       = 8.0d+10
+  tw1            = 1600.0d0
+  omega1         = 0.0046d0
+/
+
+&analysis
+  out_projection_k_step = 4500
+/
+
+! ----------------------------------------------------------------------------------------
+! Dissipators + super-mode (optional). To enable, also add the &epm block and a finer dt:
+!   &epm
+!     epm_material            = 'Si'
+!     epm_lattice_constant_au = 10.26d0   ! selects the Si intervalley phonon table
+!   /
+! and in &tgrid use dt = 0.05d0 (the e-ph sub-cycling wants a fine step), then in &sbe:
+!     yn_sbe_superres          = 'y'      ! ring-MPI Coulomb HF (super-mode)
+!     yn_sbe_eph               = 'y'      ! 6 intervalley g/f phonons (Si)
+!     sbe_eph_temperature_k    = 300.0d0
+!     yn_sbe_eeh               = 'y'      ! carrier-carrier FD thermalization
+!     yn_sbe_impact_ionization = 'y'
+!     sbe_ii_threshold_ev      = 1.1d0
+! NOTE: Si's 6 e-ph modes are all INTERVALLEY, so on the primitive cell the k-local
+! search is the intra-k approximation; true intervalley needs the inter-k e-ph that rides
+! the super-mode ring (yn_sbe_superres) — pending, see wiki/00 TODO-4.
+! ----------------------------------------------------------------------------------------
+
+&sbe
+  ! all yn_sbe_* default OFF -> clean dynamics.
+/

@@ -1,0 +1,76 @@
+!########################################################################################!
+! CdS PRIMITIVE-CELL SBE — wurtzite 4-atom HEXAGONAL (a1,a2 at 120 deg), NO folding.      !
+!----------------------------------------------------------------------------------------!
+! Generate the GS first:                                                                  !
+!   python3 -c "import epm_cds_primitive as c; c.main_gs(); c.main_bandpath()"            !
+! Hexagonal primitive vectors: a1=a(1,0,0), a2=a(-1/2,sqrt3/2,0), a3=c(0,0,1) with        !
+! a=7.81591 Bohr (4.136 A), c=12.68522 Bohr (c/a=1.623). Direct gap 2.55 eV at Gamma.     !
+! 2 formula units -> 16 valence e- -> 8 filled bands; nstate=16.                          !
+!                                                                                          !
+! NOTE the c-axis selection rule: with E||c (epdir 0,0,1) the top-valence Gamma9 -> CB    !
+! transition is dipole-forbidden AT Gamma, so excitation is suppressed there and peaks    !
+! off-axis. Use epdir_re1 = 1,0,0 (E perp c) to populate Gamma.                           !
+!########################################################################################!
+
+&calculation
+  theory = 'sbe'
+/
+
+&control
+  sysname = 'CdS_prim'
+/
+
+&units
+  unit_system = 'au'
+/
+
+&system
+  yn_periodic  = 'y'
+  al_vec1(1:3) =  7.81591d0,  0.0d0,     0.0d0
+  al_vec2(1:3) = -3.90795d0,  6.76877d0, 0.0d0
+  al_vec3(1:3) =  0.0d0,      0.0d0,    12.68522d0
+  nelec  = 16
+  nstate = 16
+/
+
+&kgrid
+  num_kgrid(1:3) = 7, 7, 5            ! odd in-plane -> Gamma explicit
+/
+
+&tgrid
+  dt = 0.4d0
+  nt = 9000
+/
+
+&emfield
+  ae_shape1      = 'Acos2'
+  epdir_re1(1:3) = 0.0d0, 0.0d0, 1.0d0   ! E||c (see selection-rule note above)
+  I_wcm2_1       = 1.0d+12
+  tw1            = 1600.0d0
+  omega1         = 0.0046d0
+/
+
+&analysis
+  out_projection_k_step = 4500
+/
+
+! ----------------------------------------------------------------------------------------
+! Dissipators + super-mode (verified CPTP, electrons=16 exact). To enable, add:
+!   &epm
+!     epm_material            = 'CdS'
+!     epm_lattice_constant_au = 7.81591d0
+!   /
+! use dt = 0.05d0 in &tgrid, and in &sbe:
+!     yn_sbe_superres         = 'y'      ! ring-MPI Coulomb HF (eps0=8.9, cited)
+!     yn_sbe_eph              = 'y'      ! Frohlich polar-optical LO (38 meV) — INTRA-valley,
+!                                        ! so VALID on the primitive cell as-is.
+!     sbe_eph_temperature_k   = 300.0d0
+!     yn_sbe_auger            = 'y'      ! density-gated CPTP Auger (C=2e-30, cited)
+!     sbe_decoh_temperature_k = -1.0d0
+! FORBIDDEN: yn_sbe_eeh (no cited CdS carrier-carrier rate -> error stop).
+! Impact ionization needs an explicit sbe_ii_prefactor (uncited fit parameter).
+! ----------------------------------------------------------------------------------------
+
+&sbe
+  ! all yn_sbe_* default OFF -> clean dynamics.
+/
