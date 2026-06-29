@@ -98,7 +98,7 @@ def _write_gs_files_nonorth(outdir, kfrac, kpoint_cart, kweight, eigen, occup,
             for i in range(3):
                 f.write('# b{} = {:18.10E}{:18.10E}{:18.10E}  [a.u.]\n'.format(
                     i + 1, b_matrix[i, 0], b_matrix[i, 1], b_matrix[i, 2]))
-        f.write('# units: kx,ky,kz [reduced fractional of the FCC reciprocal lattice], weight\n')
+        f.write('# units: kx,ky,kz [reduced fractional of the reciprocal lattice], weight\n')
         f.write('# ik, kx, ky, kz, weight\n')
         for ik in range(nk):
             f.write('{:6d}{:18.10E}{:18.10E}{:18.10E}{:18.10E}\n'.format(
