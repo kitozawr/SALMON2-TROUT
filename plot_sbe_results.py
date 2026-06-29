@@ -905,6 +905,71 @@ def _map_path_population(qred, grid_kpts, grid_pop, max_dist=None):
     return pop
 
 
+def plot_primitive_spectral(filepath, bpfile, output_dir, dpi=150):
+    """A(k,E) spectral map for a PRIMITIVE (unfolded) cell -- no cosets, no
+    unfold file. The skeleton is the primitive bandpath; the lowest conduction
+    band (CB1) is coloured by the per-k LCB population from the FOLDED-format
+    nex_k(_real).data, mapped onto the path by nearest k in the band-path's
+    native fractional convention (wrapped mod 1 -- works for any, incl. the
+    non-orthogonal FCC, lattice). Drawn at the peak-excitation frame."""
+    from matplotlib.collections import LineCollection
+    print(f"Processing {filepath.name}  (primitive spectral A(k,E), skeleton {bpfile.name}) ...")
+    dist, eig_ha, nv, spinor, nodes, qred = _load_bandpath(bpfile)
+    if not nv:
+        print("  (skip) band path has no nv header")
+        return
+    levels = _bandpath_level_energies(eig_ha, nv, spinor)
+    # peak-excitation frame (largest total LCB population)
+    best, best_sum, t_peak, tu = None, -1.0, 0.0, ''
+    for t_val, t_unit, kpts, pop, _lev, _sub in _iter_nex_k_blocks(filepath, unfold=False):
+        s = float(np.nansum(pop))
+        if s > best_sum:
+            best_sum, best, t_peak, tu = s, (kpts.copy(), pop.copy()), t_val, t_unit
+    if best is None:
+        print("  (skip) no data blocks"); return
+    gridk, gpop = best
+    # nearest-k mapping in the native fractional convention (periodic wrap)
+    spacing = _grid_spacing(gridk)
+    P = np.full(len(qred), np.nan)
+    for i, q in enumerate(qred):
+        d = gridk - q[None, :]
+        d -= np.round(d)                       # wrap mod 1 (umklapp)
+        d2 = (d ** 2).sum(axis=1)
+        j = int(np.argmin(d2))
+        if np.sqrt(d2[j]) <= 1.3 * spacing:
+            P[i] = gpop[j]
+    ke_max = max(np.nanmax(levels['cb1'][1]), 1e-9)
+    vmax = max(np.nanmax(P[np.isfinite(P)]) if np.any(np.isfinite(P)) else 1e-12, 1e-12)
+    norm = mcolors.Normalize(vmin=0.0, vmax=vmax)
+    fig, ax = plt.subplots(figsize=(8, 6))
+    for name in UNFOLD_LEVELS:                  # vbm1, vb, cb1, cb2 skeleton
+        if name not in levels:
+            continue
+        e_ev = levels[name][0]
+        ax.plot(dist, e_ev, color='0.7', lw=0.8, zorder=1)
+    # colour CB1 by the mapped LCB population, broaden by kinetic energy
+    e_cb1, kin = levels['cb1']
+    lw = 1.0 + 7.0 * np.nan_to_num(kin) / ke_max
+    good = np.isfinite(P)
+    im = ax.scatter(dist[good], e_cb1[good], c=P[good], s=12 + 90 * lw[good],
+                    cmap=CMAP_POP, norm=norm, edgecolors='none', zorder=3)
+    plt.colorbar(im, ax=ax, label='CB1 real population (mapped to path)')
+    ax.axhline(0.0, color='r', lw=0.8)
+    node_lbl = [n[0] for n in nodes]; node_dst = [n[1] for n in nodes]
+    for nd in node_dst:
+        ax.axvline(nd, color='k', lw=0.5, ls=':')
+    ax.set_xticks(node_dst)
+    ax.set_xticklabels(['$\\Gamma$' if l == 'Gamma' else l for l in node_lbl])
+    ax.set_xlim(dist[0], dist[-1]); ax.set_ylim(-6, 8)
+    ax.set_ylabel('E - VBM [eV]')
+    ax.set_title(f'Primitive A(k,E): CB1 coloured by carrier population\n'
+                 f'peak frame t = {t_peak:.3g} {tu}')
+    fig.tight_layout()
+    out = output_dir / 'spectral_primitive.png'
+    fig.savefig(out, dpi=dpi, bbox_inches='tight'); plt.close(fig)
+    print(f"  saved {out.name}")
+
+
 def plot_unfold_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=150):
     """A(k,E)-style spectral plots of the unfolded population, ONE PER TIME FRAME.
 
@@ -1759,7 +1824,7 @@ def main():
                                unfold=True, subtract_baseline=True)
 
         # Optional spectral A(kx,E) map (one, from whichever unfold file exists)
-        if args.spectral:
+        if args.spectral and unfold_for_spectral:
             for f in unfold_for_spectral[:1]:
                 suffix = ('_sbe_nex_k_unfold_real.data' if f.name.endswith('_real.data')
                           else '_sbe_nex_k_unfold.data')
@@ -1770,6 +1835,19 @@ def main():
                 else:
                     print(f"  (skip spectral) {bpfile.name} not found "
                           f"(generate it with: epm_gaas_reference.py bandpath)")
+        elif args.spectral:
+            # PRIMITIVE (unfolded) cell: no unfold file. Use the folded-format
+            # LCB population (real preferred) + the primitive bandpath.
+            prim = (real_k or sorted(input_dir.glob('*_sbe_nex_k.data')))
+            for f in prim[:1]:
+                suffix = ('_sbe_nex_k_real.data' if f.name.endswith('_real.data')
+                          else '_sbe_nex_k.data')
+                stem = f.name[:-len(suffix)]
+                bpfile = f.parent / f'{stem}_bandpath.data'
+                if bpfile.exists():
+                    plot_primitive_spectral(f, bpfile, output_dir, dpi=args.dpi)
+                else:
+                    print(f"  (skip spectral) {bpfile.name} not found")
 
     # --- Band structure -------------------------------------------------
     if not args.no_bands:
