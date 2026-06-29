@@ -187,23 +187,29 @@ contains
     end subroutine calc_lattice_info
 
 
-    ! Read k-point coordinates from SALMON's output file
+    ! Read k-point coordinates from SALMON's output file. Robustly skips ANY
+    ! number of leading comment ('#') / blank lines, so the EPM may add header
+    ! metadata (e.g. the non-orthogonal reciprocal vectors '# b1/# b2/# b3')
+    ! without breaking the reader -- the data rows start with the integer ik.
     subroutine read_k_data()
         implicit none
-        character(256) :: dummy
-        integer :: fh, ik, iik
+        character(256) :: line
+        integer :: fh, ik, iik, ios
         real(8) :: tmp(4)
         fh = open_filehandle(trim(gs_directory) // trim(sysname) // '_k.data', 'old')
-        read(fh, "(a)") dummy
-        read(fh, "(a)") dummy
-        read(fh, "(a)") dummy
-        read(fh, "(a)") dummy
-        read(fh, "(a)") dummy
-        do ik = 1, nk
-            read(fh, *) iik, tmp(1:4)
+        ik = 0
+        do
+            read(fh, "(a)", iostat=ios) line
+            if (ios /= 0) exit
+            line = adjustl(line)
+            if (len_trim(line) == 0) cycle
+            if (line(1:1) == '#') cycle
+            ik = ik + 1
+            read(line, *) iik, tmp(1:4)
             if (ik .ne. iik) stop "ik mismatch"
             gs%kpoint(1:3, ik) = tmp(1:3)
             gs%kweight(ik) = tmp(4)
+            if (ik == nk) exit
         end do
         close(fh)
     end subroutine read_k_data

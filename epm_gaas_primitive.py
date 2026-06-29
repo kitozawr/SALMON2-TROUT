@@ -122,7 +122,7 @@ def main_gs(outdir='./'):
     kfrac = kpoint @ np.linalg.inv(b_matrix)        # Cartesian -> fractional (reduced)
     nk = len(kpoint)
     npw = len(Gcart)
-    print(f'# EPM GaAs PRIMITIVE FCC (2-atom, non-orthogonal, NO folding)')
+    print(f'# EPM {MATERIAL} PRIMITIVE FCC (2-atom, non-orthogonal, NO folding)')
     print(f'#   a = {a} Bohr,  V_cell = {V:.3f} Bohr^3 (= a^3/4 = {a**3/4:.3f})')
     print(f'#   plane waves = {npw} (all-same-parity), k-points = {nk}, bands = {NSTATE}')
     print(f'#   valence e- = {NELEC} (occ 2/band -> {NELEC//2} filled)')
@@ -148,7 +148,7 @@ def main_gs(outdir='./'):
     # Cartesian k saved separately for the valley analysis (k_cart = kfrac @ b_matrix).
     np.savez(f'{outdir}{SYSNAME}_kcart.npz', kcart=kpoint, b_matrix=b_matrix,
              a=A_LATTICE_AU)
-    print(f'# EPM (GaAs primitive): wrote {SYSNAME}_k/_eigen/_tm.data (nk={nk}, nb={NSTATE})')
+    print(f'# EPM ({MATERIAL} primitive): wrote {SYSNAME}_k/_eigen/_tm.data (nk={nk}, nb={NSTATE})')
 
 
 # FCC Brillouin-zone high-symmetry points, Cartesian in units of (2pi/a)
