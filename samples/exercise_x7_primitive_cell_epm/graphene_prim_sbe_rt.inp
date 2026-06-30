@@ -54,8 +54,17 @@
 /
 
 &sbe
-  ! all yn_sbe_* default OFF -> clean dynamics (trace = 2 conserved).
-  ! Dissipators for graphene are NOT yet available: the e-ph/Auger registry entry
-  ! epm_material='graphene' (E2g 196 meV, A1' 160 meV, gapless-CM) is pending --
-  ! see wiki/00 standing TODO (folded-era item 3).
+  ! all yn_sbe_* default OFF here -> clean dynamics (trace = 2 conserved).
+  !
+  ! graphene ELECTRON-PHONON is available (E2g 196 meV + A1' 160 meV, cited
+  ! Piscanec 2004) but is RING-ONLY -- both modes relax carriers to a different
+  ! k on the Dirac cone, so the k-local same-k search is inert. To enable it add
+  ! the &epm block (epm_material='graphene') above AND, in this &sbe block:
+  !     yn_sbe_eph            = 'y'
+  !     yn_sbe_superres       = 'y'     ! REQUIRED: inter-k e-ph through the ring
+  !     sbe_eph_temperature_k = 300.0d0
+  ! Validated: electrons=2.000 conserved (CPTP); carriers relax toward the K/K'
+  ! Dirac corners. FORBIDDEN for graphene (gapless): yn_sbe_impact_ionization,
+  ! yn_sbe_auger, yn_sbe_eeh, yn_sbe_coulomb, and Kuhn-Zurek sbe_decoh_* (all
+  ! error stop). Gapless carrier multiplication = the nonlocal-Auger task (wiki/07).
 /

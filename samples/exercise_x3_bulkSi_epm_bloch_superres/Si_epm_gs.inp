@@ -36,4 +36,7 @@
     epm_material            = 'Si'         ! diamond, V^A = 0, Kunikiyo form factors
     epm_lattice_constant_au = 10.26d0      ! must match al(1:3) above
     epm_pw_cutoff_ry        = 11.1d0       ! |k+G|^2 cutoff [Ry] (Cohen-Bergstresser shells)
+    epm_cell                = 'folded'     ! cubic 8-atom supercell + FCC-in-cubic folding (32 bands).
+                                           ! REQUIRED here: the default is now 'primitive' (2-atom FCC,
+                                           ! 8 bands); this superres exercise uses the folded cell.
 /

@@ -12,19 +12,22 @@ the ordering is the correct Kane one — **Γ ≫ L ≫ X** (L/Γ ≈ 0.01, matc
 Zener tunnelling estimate). Removing folding swings L/Γ by ~10⁵. See
 `wiki/05_folding_unfolding.md` §8.
 
-The ground state comes from the **Python EPM primitive references** (the in-SALMON
-Fortran EPM is cubic-supercell only — see TODO in `wiki/00`). The clean SBE is
-**k-grid-agnostic** (it propagates band energies + momentum matrix elements, and
-the Coulomb kernel is metric-aware), so a non-orthogonal / triclinic k-grid needs
-no special handling — the reduced k it stores are only labels.
+The ground state can come from **either** the in-SALMON **Fortran EPM**
+(`theory='epm'`, `epm_cell='primitive'` — now the DEFAULT) **or** the **Python EPM
+primitive references**. For **all four** materials the two are **verified
+interchangeable** (identical k-points; band energies to 5e-11 Ha for GaAs/Si/CdS,
+~6e-8 eV for graphene), so you no longer need Python to generate the GS.
+The clean SBE is **k-grid-agnostic** (it propagates band energies + momentum
+matrix elements, and the Coulomb kernel is metric-aware), so a non-orthogonal /
+triclinic k-grid needs no special handling — the reduced k it stores are labels.
 
-| Material | Cell | EPM generator | Gap (validated) |
-|---|---|---|---|
-| GaAs (scalar) | FCC 2-atom rhombohedral | `epm_gaas_primitive.py` | Γ 1.39 / L 2.68 / X 3.94 eV |
-| GaAs (spin-orbit) | same + SO | `epm_gaas_primitive.py` (`INCLUDE_SPIN_ORBIT`) | Δ₀=0.341 eV, gap 1.27 eV |
-| Si | FCC 2-atom (diamond, V^A=0) | `epm_si_primitive.py` | indirect 1.06 eV @ 0.85·X |
-| CdS | wurtzite 4-atom **hexagonal** | `epm_cds_primitive.py` | direct 2.55 eV (BC1967 2.58) |
-| graphene | 2-atom **hexagonal** (2D-in-vacuum) | `epm_graphene_primitive.py` | gapless Dirac at K |
+| Material | Cell | Fortran EPM GS step | Python generator | Gap (validated) |
+|---|---|---|---|---|
+| GaAs (scalar) | FCC 2-atom rhombohedral | `GaAs_prim_epm_gs.inp` ✅ | `epm_gaas_primitive.py` | Γ 1.39 / L 2.68 / X 3.94 eV |
+| GaAs (spin-orbit) | same + SO | — (spinor Fortran pending) | `epm_gaas_primitive.py` (`INCLUDE_SPIN_ORBIT`) | Δ₀=0.341 eV, gap 1.27 eV |
+| Si | FCC 2-atom (diamond, V^A=0) | `Si_prim_epm_gs.inp` ✅ | `epm_si_primitive.py` | indirect 1.06 eV @ 0.85·X |
+| CdS | wurtzite 4-atom **hexagonal** | `CdS_prim_epm_gs.inp` ✅ | `epm_cds_primitive.py` | direct 2.55 eV (BC1967 2.58) |
+| graphene | 2-atom **hexagonal** (2D-in-vacuum) | `graphene_prim_epm_gs.inp` ✅ | `epm_graphene_primitive.py` | gapless Dirac at K |
 
 ## Build
 
@@ -43,7 +46,10 @@ what the generator used.
 
 ```sh
 # --- GaAs scalar (8x8x8) ---------------------------------------------------
-python3 -c "import epm_gaas_primitive as p; p.main_gs(); p.main_bandpath()"
+# in-SALMON Fortran EPM (default primitive) -- no Python needed:
+./build/salmon < GaAs_prim_epm_gs.inp        # writes GaAs_prim_k/_eigen/_tm.data
+#   (equivalently: python3 -c "import epm_gaas_primitive as p; p.main_gs()")
+python3 -c "import epm_gaas_primitive as p; p.main_bandpath()"   # optional clean bandpath
 ./build/salmon < GaAs_prim_sbe_rt.inp
 python3 plot_sbe_results.py -i . -o plots --snapshots --spectral
 
@@ -55,18 +61,20 @@ python3 -c "import epm_gaas_primitive as p; p.INCLUDE_SPIN_ORBIT=True; \
 python3 plot_sbe_results.py -i . -o plots --snapshots
 
 # --- Si (8x8x8; cutoff 27 Ry to resolve the Delta valley) ------------------
-python3 -c "import epm_si_primitive as s; s.configure_for_si('Si'); \
-            s.prim.main_gs(); s.prim.main_bandpath()"
+./build/salmon < Si_prim_epm_gs.inp          # in-SALMON Fortran EPM (cutoff 27 Ry)
+python3 -c "import epm_si_primitive as s; s.configure_for_si('Si'); s.prim.main_bandpath()"
 ./build/salmon < Si_prim_sbe_rt.inp
 python3 plot_sbe_results.py -i . -o plots --snapshots --spectral
 
-# --- CdS (7x7x5 hexagonal) -------------------------------------------------
-python3 -c "import epm_cds_primitive as c; c.main_gs(); c.main_bandpath()"
+# --- CdS (7x7x5 hexagonal wurtzite) ----------------------------------------
+./build/salmon < CdS_prim_epm_gs.inp         # in-SALMON Fortran EPM (4-atom polar wurtzite)
+python3 -c "import epm_cds_primitive as c; c.main_bandpath()"
 ./build/salmon < CdS_prim_sbe_rt.inp
 python3 plot_sbe_results.py -i . -o plots --snapshots
 
 # --- graphene (12x12x1 hexagonal, 2D + vacuum; gapless Dirac) ---------------
-python3 -c "import epm_graphene_primitive as g; g.main_gs(); g.main_bandpath()"
+./build/salmon < graphene_prim_epm_gs.inp    # in-SALMON Fortran EPM (cutoff 2.94 Ry = 40 eV)
+python3 -c "import epm_graphene_primitive as g; g.main_bandpath()"
 ./build/salmon < graphene_prim_sbe_rt.inp    # in-plane field; trace=2 conserved
 python3 plot_sbe_results.py -i . -o plots --snapshots
 # -> the kx-ky Cartesian heatmap shows carriers at the six K/K' Dirac corners.

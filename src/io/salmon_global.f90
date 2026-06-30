@@ -509,6 +509,7 @@ character(256),allocatable :: atom_name(:)
   character(32)  :: epm_material
   real(8)        :: epm_lattice_constant_au
   real(8)        :: epm_pw_cutoff_ry
+  character(16)  :: epm_cell        ! 'primitive' (default) | 'folded' (cubic supercell, GaAs/Si only)
 
   !! &dc
   integer        :: num_fragment(3)

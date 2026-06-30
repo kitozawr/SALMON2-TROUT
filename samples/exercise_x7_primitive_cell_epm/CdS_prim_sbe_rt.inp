@@ -65,9 +65,11 @@
 !     yn_sbe_eph              = 'y'      ! Frohlich polar-optical LO (38 meV) — INTRA-valley,
 !                                        ! so VALID on the primitive cell as-is.
 !     sbe_eph_temperature_k   = 300.0d0
-!     yn_sbe_auger            = 'y'      ! density-gated CPTP Auger (C=2e-30, cited)
 !     sbe_decoh_temperature_k = -1.0d0
 ! FORBIDDEN: yn_sbe_eeh (no cited CdS carrier-carrier rate -> error stop).
+! FORBIDDEN: yn_sbe_auger (no VERIFIED CdS Auger coefficient -> error stop; the
+!            former "Haury 1998" C was a fabricated citation, removed). A user
+!            with a verified C may still opt in via sbe_auger_c_cm6s.
 ! Impact ionization needs an explicit sbe_ii_prefactor (uncited fit parameter).
 ! ----------------------------------------------------------------------------------------
 

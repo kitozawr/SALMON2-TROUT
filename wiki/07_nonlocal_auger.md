@@ -1,0 +1,234 @@
+# Nonlocal Auger recombination — implementation spec (TODO)
+
+**Status: NOT STARTED (spec only).** Recorded 2026-06-30 from the maintainer's
+prompt. This is the next major dissipation-physics task: rebuild Auger
+recombination from the current **k-local** approximation (initial states pinned
+at the band extrema — the first-generation impact-ionization approximation) into
+a fully **nonlocal** channel, reusing the machinery of the **already-nonlocal
+impact ionization**.
+
+> **Workflow (maintainer, 2026-06-30):** this is a **large SBE edit → do it on
+> its own feature branch**, not on `develop-2.0.0`. *"Важно не сломать
+> правильный код."* **Validation is by calculation only** — CPTP/number
+> conservation AND occupation maps (the carrier "spot" sitting at the
+> band-energy-minimum point), not by unit tests alone. The maintainer **approves
+> being sent plots** (population maps, lifetime curves). Build `build/salmon`,
+> run the small grids below, and send the maintainer the CPTP trace + population
+> maps before merging.
+
+## 0. The key idea that makes this tractable
+
+Auger recombination and impact ionization are **time-reverses of each other**
+(detailed balance). The squared matrix element |M|² is **identical**; only the
+occupation factors differ (§5). Since nonlocal impact ionization already works,
+nonlocal Auger is the **same kernel** with the Fermi factors swapped (and the
+energy δ-function direction/sign flipped). **Do not duplicate** the k-sampling or
+the umklapp G-sum — reuse them from the nonlocal impact-ionization path.
+
+Current code state to build on:
+- Impact ionization: **nonlocal** (`apply_ii_interk_ring` + `ii_interk_dpop` +
+  MP map `mp_grid_triple`/`mp_partner_triple`), ring-gated.
+- Electron–phonon: matrix element already in the e-ph coupling; inter-k e-ph
+  through the ring (`apply_eph_interk_ring`).
+- Coulomb / screened exchange: Σ^HF machinery (`compute_coulomb_selfenergy_ring`).
+- **Auger: still k-local** (`apply_auger_recombination`, initial states pinned at
+  Γ / valley minima) — this is what to replace.
+
+**Gate:** like the inter-k e-ph and nonlocal II, the nonlocal Auger is enabled
+**only when the ring is on** (`yn_sbe_superres='y'`); ring-off stays the k-local
+behaviour (byte-unchanged).
+
+## 1. Sources (verified — use only these)
+
+| tag | reference | what we take |
+|---|---|---|
+| **[K15]** | E. Kioupakis, D. Steiauf, P. Rinke, K. T. Delaney, C. G. Van de Walle, *Phys. Rev. B* **92**, 035207 (2015) | full direct + phonon-assisted (indirect) Auger formalism; model ε(q); free-carrier screening λ |
+| **[L90]** | D. B. Laks, G. F. Neumark, S. T. Pantelides, *Phys. Rev. B* **42**, 5176 (1990) | exact **nonlocal** pure-Auger in Si; criticality of the umklapp G-sum and q-dependent ε(q); thresholds |
+| **[S14]** | D. Steiauf, E. Kioupakis, C. G. Van de Walle, *ACS Photonics* **1**, 643 (2014) | GaAs coefficients (direct/phonon, eeh/hhe) |
+| **[R07]** | F. Rana, *arXiv:0705.1204v2* [cond-mat] (2007) | graphene: 2D Auger/impact-ionization on the Dirac spectrum |
+
+### ⚠️ Rejected source — DO NOT USE
+**"Haury et al., PRB 57, 11513 (1998), C = 2.0×10⁻³⁰ cm⁶/s" for CdS is a
+hallucination.** The real Haury et al. paper is **PRL 79, 511 (1997)** on the
+ferromagnetic transition in CdMnTe quantum wells — wrong journal, volume, page,
+year, and topic. The coefficient is unconfirmed anywhere. **It has already been
+removed from the code** (CdS Auger is gated off). Never re-introduce this number.
+
+## 2. What "nonlocal" means for Auger
+
+- **k-local (current):** initial states 1,2,3 fixed at the band extrema (Γ for
+  direct-gap GaAs/CdS; the valley minima for Si). [K15] Eqs. (19)–(20). Valid for
+  wide-gap materials where carriers cluster at the band edges.
+- **Nonlocal (target):** sum over **all occupied** initial states 1,2,3 across the
+  occupied part of the BZ. The final state is fixed by crystal-momentum
+  conservation
+  $$\mathbf{k}_4 = \mathbf{k}_1 + \mathbf{k}_2 - \mathbf{k}_3 + \mathbf{G}$$
+  with **G** an umklapp reciprocal-lattice vector that folds k₄ into the first BZ.
+  **Sum over all G**, and evaluate ε(q) at the **actually transferred** momentum
+  q = k₁ − k₃ + G.
+
+**Two nonlocal pieces that must NOT be dropped [L90]:**
+1. **The umklapp G-sum.** Dropping it underestimates the rate by ~**an order of
+   magnitude**.
+2. **q-dependent ε(q)** instead of static ε₀. Replacing ε(q)→ε₀ underestimates
+   by ~**an order of magnitude** (static ε₀ over-screens large q, but large-q
+   umklapp transitions dominate, where true ε(q)→1). Conversely ε=1 over-estimates
+   by an order. → both the **full G-sum** and the **full ε(q)** are mandatory.
+
+## 3. Direct (pure-Coulomb) Auger — 3D formalism
+
+[K15] Eqs. (1)–(8); [L90] Eqs. (1)–(8). Composite indices **1**≡(n₁,k₁).
+
+- **Rate (Fermi golden rule):**
+  $$R = 2\,\frac{2\pi}{\hbar}\sum_{1234} P\,|M_{1234}|^2\,\delta(\epsilon_1+\epsilon_2-\epsilon_3-\epsilon_4)$$
+  (the leading 2 = spin; momentum conservation is enforced inside M).
+- **Occupation factor:** $P = f_1 f_2 (1-f_3)(1-f_4)$. (eeh ⇒ ∝ n²p; hhe ⇒ ∝ np².
+  At n=p: R = Cₙn³ (eeh) and R = Cₚn³ (hhe).)
+- **Antisymmetrized |M|²:**
+  $$|M_{1234}|^2=|M^d-M^x|^2+|M^d|^2+|M^x|^2,$$
+  with $M^d=\langle\psi_1\psi_2|W|\psi_3\psi_4\rangle$, $M^x=\langle\psi_1\psi_2|W|\psi_4\psi_3\rangle$.
+- **Screened-Coulomb matrix element (with the umklapp sum):**
+  $$\langle\psi_1\psi_2|W|\psi_3\psi_4\rangle=\frac1V\sum_{\mathbf G}\delta_{\mathbf k_1+\mathbf k_2,\,\mathbf k_3+\mathbf k_4+\mathbf G'}\,\tilde W(\mathbf k_1-\mathbf k_3+\mathbf G)\,I_{1,3}(\mathbf G)\,I_{2,4}(\mathbf G'-\mathbf G)$$
+  $$\tilde W(\mathbf q)=\frac{1}{\varepsilon(\mathbf q)}\frac{4\pi e^2}{q^2+\lambda^2},\qquad I_{\alpha\beta}(\mathbf G)=\sum_{\mathbf G_1}c_\alpha^*(\mathbf G_1)c_\beta(\mathbf G_1-\mathbf G)$$
+  (the overlap integrals I use the periodic parts u of the Bloch functions — the
+  EPM plane-wave coefficients we already have).
+- **Model ε(q) [K15] (Cappellini–Del Sole–Reining–Bechstedt):**
+  $$\varepsilon(\mathbf q)=1+\Big[(\varepsilon_\infty-1)^{-1}+\alpha(q/q_{\rm TF})^2+\tfrac{\hbar^2q^4}{4m^2\omega_p^2}\Big]^{-1},\quad \alpha=1.563$$
+  (limits: ε(0)=ε_∞, ε(∞)→1).
+- **Free-carrier screening λ [K15]:** electron part — Debye–Hückel
+  $\lambda_e^2=4\pi n e^2/(\varepsilon_\infty k_BT)$ (non-degenerate,
+  $E_F-E_{\rm CBM}<\tfrac32k_BT$) or Thomas–Fermi
+  $\lambda_e^2=6\pi n e^2/[\varepsilon_\infty(E_F-E_{\rm CBM})]$ (degenerate);
+  hole part analogous; total $\lambda^2=\lambda_e^2+\lambda_h^2$.
+  **For Si [L90]: take λ=0** (Burt's dynamical argument: Auger transition
+  frequencies ~1 eV ≫ plasma ~0.1 eV → static free-carrier screening invalid);
+  keep screening only through ε(q).
+- **Coefficient:** $C(n)\equiv R(n)/(n^3V)$.
+
+## 4. Phonon-assisted (indirect) Auger — 3D formalism
+
+[K15] Eqs. (9)–(21). **Reuse the existing e-ph matrix elements g**; just remove
+the Γ-pinning of the initial states.
+
+- **Rate (2nd order):**
+  $$R=2\frac{2\pi}{\hbar}\sum_{1234,\nu\mathbf q}\tilde P\,|\tilde M_{1234;\nu\mathbf q}|^2\,\delta(\epsilon_1+\epsilon_2-\epsilon_3-\epsilon_4\mp\hbar\omega_{\nu\mathbf q})$$
+  (upper/lower sign = phonon emission/absorption).
+- **Factor:** $\tilde P=f_1f_2(1-f_3)(1-f_4)(n_{\nu\mathbf q}+\tfrac12\pm\tfrac12)$,
+  $n_{\nu\mathbf q}$ = Bose. (The emission channel survives at T=0 — needed for
+  low-T validation.)
+- **8-diagram element:**
+  $$|\tilde M|^2=|\tilde M_1{+}\tilde M_2{+}\tilde M_3{+}\tilde M_4-\tilde M_5{-}\tilde M_6{-}\tilde M_7{-}\tilde M_8|^2+|\tilde M_1{+}..{+}\tilde M_4|^2+|\tilde M_5{+}..{+}\tilde M_8|^2$$
+  Terms 1–4 = direct-Coulomb M^d with a g insertion on each of the 4 lines (energy
+  denominators $\epsilon_m-\epsilon_i\pm\hbar\omega+i\eta$); terms 5–8 = the same
+  with exchange M^x. **All eight on the same wavefunction set** (phases matter).
+- **e-ph element (already implemented):**
+  $g_{n\mathbf k,m\mathbf k+\mathbf q;\nu}=(\hbar/2M_0\omega_{\nu\mathbf q})^{1/2}\langle\psi_{n\mathbf k}|(\partial_{\nu\mathbf q}V)^*|\psi_{m\mathbf k+\mathbf q}\rangle$.
+- **local→nonlocal change:** in the Γ-approximation [K15] Eq. (19) the prefactor
+  is N³/8; the nonlocal version restores the full k₁,k₂,k₃ sum (with Fermi
+  factors) and fixes k₄ via the umklapp relation. Γ-approx error ~
+  (k_F/|q|_dominant)² — negligible for nitrides, but it **is** the nonlocality for
+  narrow-gap GaAs/Si.
+
+## 5. The Auger ⟷ impact-ionization bridge (reuse the working kernel)
+
+[R07] §2: generation processes are the time-reverses of recombination; same |M|²,
+only the occupation factors differ.
+
+| process | occupation factor |
+|---|---|
+| **Auger (recombination)** | $f_1 f_2 (1-f_3)(1-f_4)$ |
+| **Impact ionization (generation)** | $(1-f_1)(1-f_2)\,f_3 f_4$ |
+
+→ Compute the nonlocal Auger rate with the **same kernel** as the working
+nonlocal impact ionization, swapping in the recombination Fermi factors (and
+flipping the energy-δ sign/direction). Detailed balance holds at equilibrium
+(total generation = total recombination).
+
+## 6. Graphene — a SEPARATE 2D branch (not the 3D machinery)
+
+[R07]. Gapless Dirac spectrum; the 3D umklapp/overlap machinery does not apply —
+implement as its own branch.
+- Spectrum $E_s(\mathbf k)=s\hbar v|\mathbf k|$, $v=10^8$ cm/s, s=±1; densities
+  carry a factor **4** (spin × 2 valleys K,K′).
+- **Phase-space restriction (key):** CCCV energy conservation forces k₁,k₂,Q
+  **collinear**; overlaps → 1; the process is nearly forbidden (lifetimes > 1 ps).
+- Overlaps $|\langle u_{s'k'}|u_{sk}\rangle|^2=\tfrac12[1+ss'\cos\theta]\xrightarrow{\rm collinear}1$.
+- Recombination rate $R_{\rm CCCV}$, matrix elements $M_d,M_e$ with Thomas–Fermi
+  vector $Q_{\rm TF}=\frac{e^2k_BT}{\pi\varepsilon_\infty\hbar^2v^2}\log[(e^{E_{f+1}/k_BT}+1)(e^{-E_{f-1}/k_BT}+1)]$.
+- δ-collapsed to a 3D integral [R07 main result]:
+  $$R_{\rm CCCV}=\frac{1}{\hbar^2v}\!\int_0^\infty\!\frac{dk_1}{2\pi}\!\int_0^\infty\!\frac{dk_2}{2\pi}\!\int_{k_2}^\infty\!\frac{dQ}{2\pi}\frac{|M(k_1,k_2,Q)|^2}{\sqrt{(k_1{+}Q)(Q{-}k_2)k_1k_2}}[1{-}f_{-1}(Q{-}k_2)][1{-}f_{+1}(k_1{+}Q)]f_{+1}(k_1)f_{+1}(k_2)$$
+  $R=R_{\rm CCCV}(n,p)+R_{\rm CVVV}(n,p)$, $R_{\rm CVVV}(n,p)=R_{\rm CCCV}(p,n)$,
+  $1/\tau_r=R/\min(n,p)$. Units: **cm⁻²·s⁻¹** (2D!). **No single C [cm⁶/s]** —
+  validate by lifetime curves, not by C.
+
+## 7. Per-material parameters & validation targets (T=300 K unless noted)
+
+Keep the gap a tunable parameter (rigid scissor of the conduction band) for
+alloys / DFT-gap correction.
+
+- **GaAs — ADD [S14].** Direct-gap, Eg=1.43 eV, n=p=10¹⁸ cm⁻³. No spin-orbit;
+  exclude the split-off band (350 meV below VBM) as initial and (by central-zone
+  energy conservation) final hole state.
+
+  | process | direct C [cm⁶/s] | phonon C [cm⁶/s] |
+  |---|---|---|
+  | eeh | < 10⁻³³ (negligible) | 1.1×10⁻³¹ |
+  | hhe | 2.2×10⁻³¹ | 3.1×10⁻³¹ |
+
+  Checks: hhe ≈ 5× eeh at Eg=1.43; direct eeh negligible; direct hhe ~ phonon hhe.
+  Experiment cross-check: (7±4)×10⁻³⁰ (Strauss); ≤1.6×10⁻²⁹ (Lush) — order-of-mag
+  agreement. Grids: 80³ (direct), 56³ (phonon) — but here use the small grids in §8.
+- **Si — ADD [L90].** Indirect, CBM at k≈0.85·(2π/a) along Δ, 6 valleys. **λ=0**
+  (§3); ε(q) mandatory; umklapp G-sum mandatory. Fermi–Dirac for majority,
+  Boltzmann for minority. For hhe include split-off (full 27 hh/lh/so transitions).
+
+  | process | C (exp, Dziewior–Schmid) [cm⁶/s] | pure-Auger expectation |
+  |---|---|---|
+  | eeh (n-Si) | Cₙ=2.8×10⁻³¹ | pure-AR reproduces → agreement |
+  | hhe (p-Si) | Cₚ=0.99×10⁻³¹ | pure-AR ~10× low → remainder is the phonon channel |
+
+  Geometry: same-valley (×6) and orthogonal-valley (×12) contribute at the same
+  order; opposite-valley (×3) ~2 orders smaller — droppable. Thresholds: eeh≈8 meV,
+  hhe≈76 meV.
+- **graphene — UPDATE (2D branch §6) [R07].** No single C. ε_∞=10ε₀ (Al₂O₃) or 4ε₀
+  (SiO₂); v=10⁸ cm/s. Lifetime targets: τ_r>1 ps at n,p<10¹² cm⁻² (all T); τ_r>5 ps
+  at n,p<10¹¹ cm⁻²; τ_r≈1.1 ps at n=10¹² cm⁻², T=300 K, ε_∞=10ε₀. Qualitative:
+  generation/recombination curves cross at the equilibrium densities; at n=p,
+  R_CCCV=R_CVVV; smaller ε_∞ ⇒ larger rates.
+- **CdS — DISABLE.** The only coefficient ever cited (Haury PRB 57, 11513) is a
+  hallucination (§1) — no verified value. Physically CdS is wide-gap (Eg≈2.42 eV)
+  ⇒ direct Auger exponentially suppressed; the dominant channel would be the
+  indirect (phonon/alloy/defect) one. **Already disabled in the code.** If revived
+  later: use the nitride scheme [K15] (direct negligible, indirect dominant) and
+  **only a verified** coefficient — never the Haury number.
+
+## 8. Numerics (general)
+
+- **δ-functions** → finite-width Gaussians; converge the width and the η in the §4
+  denominators separately. [K15] guides: δ≈0.1 eV (direct), 0.3 eV (phonon); result
+  stable for η in 10–500 meV (coefficients vary ≤~20–40 %, intermediate states are
+  off-resonance).
+- **k-grids: SMALL only** — odd **7×7×7 for GaAs**, even **8×8×8 for Si** (heavy).
+- **k-point cutoff [K15]:** keep k within $E_{\rm cutoff}=E_F+M k_BT$ of the band
+  edge; pick integer M so the post-cutoff carrier density differs from the full one
+  by <1 %.
+- **Statistics:** Fermi–Dirac at high density (degeneracy). C becomes
+  density-dependent (phase-space filling) — the power-law exponent drops below 3.
+  Not a bug: report C(n)=R(n)/(n³V), not a constant.
+
+## 9. Acceptance checklist
+
+- [ ] **GaAs:** direct+phonon, eeh/hhe reproduce the §7 table (hhe/eeh≈5; direct
+      eeh<10⁻³³).
+- [ ] **Si:** pure-AR eeh≈Cₙ; pure-AR hhe≈×10 below Cₚ; thresholds 8/76 meV; G-sum
+      and ε(q) on; λ=0.
+- [ ] **graphene:** 2D branch; lifetimes meet §7; R_CCCV=R_CVVV at n=p.
+- [ ] **CdS:** disabled; the Haury number is nowhere in the code. *(done — this
+      session)*
+- [ ] Auger reuses the nonlocal impact-ionization kernel with swapped Fermi factors
+      (§5); k-sampling and G-sum are **not** duplicated.
+- [ ] **Ring-gated:** nonlocal Auger active only with `yn_sbe_superres='y'`;
+      ring-off behaviour byte-unchanged.
+- [ ] **Validation by calculation:** CPTP/number conservation + population maps
+      (carrier spot at the band-minimum) sent to the maintainer; large edit on its
+      own feature branch.

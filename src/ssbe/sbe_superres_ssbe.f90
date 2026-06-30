@@ -104,11 +104,18 @@ module sbe_superres_ssbe
     !   * Impact ionization: Keldysh soft threshold E_th ~ 1.5 E_g = 3.6 eV
     !     [md, (3/2)E_g rule]; the PREFACTOR is a fit parameter (CdS-specific
     !     value scarce -- md), so the user must set sbe_ii_prefactor explicitly.
-    ! Carrier-carrier (e-e/e-h) and Auger recombination are CITED and enabled,
-    ! density-gated: e-e sub-100fs thermalization at n >= 1e18 cm^-3 [Shah et al.,
-    ! IEEE JQE 22, 1728 (1986); Elsaesser PRL 66, 1757 (1991)]; Auger via C n^3,
-    ! C = 2.0e-30 cm^6/s [Haury et al., PRB 57, 11513 (1998)]. (The Auger Lindblad
-    ! jump-operator channel itself -- wiki Section 13 -- is still being wired.)
+    ! Carrier-carrier (e-e/e-h) and Auger recombination are FORBIDDEN for CdS:
+    ! the CdS literature only fixes an e-e *timescale* (sub-100fs thermalization
+    ! at n >= 1e18 cm^-3 [Shah et al., IEEE JQE 22, 1728 (1986); Elsaesser PRL 66,
+    ! 1757 (1991)]), NOT a carrier-carrier *rate*. There is NO verified CdS Auger
+    ! coefficient: the previously-cited "C = 2.0e-30 cm^6/s [Haury, PRB 57, 11513
+    ! (1998)]" was a FABRICATED reference -- the real Haury et al. paper is PRL 79,
+    ! 511 (1997) on ferromagnetism in CdMnTe quantum wells, unrelated to Auger in
+    ! CdS, and the coefficient is unconfirmed anywhere. It has been REMOVED; CdS
+    ! Auger is gated off (auger_ok=.false.). A user with a verified rate can still
+    ! opt in explicitly via sbe_auger_c_cm6s. (Physically CdS is wide-gap, Eg~2.4
+    ! eV, so direct Auger is exponentially suppressed and any future channel would
+    ! be the phonon/defect-assisted one -- see wiki/07, the nonlocal-Auger task.)
     ! Piezoelectric acoustic (e33/e31/e15 [Berlincourt PR 129,1009]) and
     ! deformation-potential acoustic are cited but NOT yet SBE Lindblad channels.
     ! =====================================================================
@@ -119,7 +126,8 @@ module sbe_superres_ssbe
     real(8), parameter, public :: CDS_EG_EV     = 2.58d0    ! direct gap at Gamma (low-T) [BC1967 Table I]
     real(8), parameter, public :: CDS_EPS0      = 8.9d0     ! static dielectric (isotropic avg) [Berlincourt 1963]
     real(8), parameter, public :: CDS_EPS_INF   = 5.3d0     ! high-frequency dielectric [Berlincourt 1963]
-    real(8), parameter, public :: CDS_AUGER_C   = 2.0d-30   ! Auger coeff [cm^6/s] [Haury PRB 57, 11513 (1998)]
+    ! (NO verified CdS Auger coefficient exists -- the former CDS_AUGER_C with its
+    !  "Haury PRB 57, 11513 (1998)" citation was fabricated and has been removed.)
     real(8), parameter, public :: CDS_EE_ACT_N  = 1.0d18    ! e-e activation density [cm^-3] [Shah JQE 22, 1728]
     real(8), parameter, public :: CDS_HW_LO_MEV = 38.0d0    ! Frohlich LO ~305 cm^-1 [Raman; md]
     real(8), parameter, public :: CDS_ALPHA_FR  = 0.5d0     ! Frohlich coupling alpha [md]
@@ -133,6 +141,32 @@ module sbe_superres_ssbe
     real(8), parameter, public :: CDS_E15       = -0.183d0  ! piezo [C/m^2] [Berlincourt 1963]
 
     ! =====================================================================
+    ! Monolayer graphene -- GAPLESS Dirac semimetal, honeycomb (D6h), V^A=0
+    ! (centrosymmetric). a = 2.46 Ang = 4.6511 Bohr.
+    ! ELECTRON-PHONON (the cited, enabled channel): the two strongly-coupled
+    ! optical modes responsible for the Kohn anomalies and dominant hot-carrier
+    ! energy relaxation:
+    !   * E2g at Gamma (intra-valley LO/TO, q~0): hw = 196 meV (~1580 cm^-1),
+    !     EPC <g^2_Gamma> = 0.0405 eV^2.
+    !   * A1' at K   (INTER-valley K<->K', the Kohn-anomaly mode): hw = 160 meV,
+    !     EPC <g^2_K> = 0.0994 eV^2 (DFT); enhanced ~x2 by GW.
+    ! [Piscanec, Lazzeri, Mauri, Ferrari, Robertson, PRL 93, 185503 (2004);
+    !  GW enhancement: Lazzeri, Attaccalite, Wirtz, Mauri, PRB 78, 081406 (2008)].
+    ! Both modes RELAX carriers DOWN THE CONE / across valleys, i.e. to a DIFFERENT
+    ! k -- so graphene e-ph is physical only through the INTER-K ring path
+    ! (yn_sbe_superres='y'); the k-local same-k search is inert on the 2-band cone.
+    ! nu_sat = optical-phonon emission rate cap; OP emission is the dominant hot-
+    ! carrier cooling channel, time scale ~10-100 fs [hot-carrier cooling lit.].
+    ! Conservative cap ~5e13 s^-1 (~20 fs); tunable via sbe_eph_nu_sat.
+    real(8), parameter, public :: GRAPH_A_BOHR    = 4.6511d0  ! a = 2.46 Ang
+    real(8), parameter, public :: GRAPH_HW_E2G_MEV = 196.0d0  ! Gamma E2g optical [Piscanec 2004]
+    real(8), parameter, public :: GRAPH_HW_A1P_MEV = 160.0d0  ! K A1' optical (Kohn anomaly) [Piscanec 2004]
+    real(8), parameter, public :: GRAPH_G2_E2G    = 0.0405d0  ! <g^2_Gamma> [eV^2] [Piscanec 2004]
+    real(8), parameter, public :: GRAPH_G2_A1P    = 0.0994d0  ! <g^2_K> [eV^2] DFT [Piscanec 2004]
+    real(8), parameter, public :: GRAPH_GW_K      = 2.0d0     ! GW enhancement of the K coupling [Lazzeri 2008]
+    real(8), parameter, public :: GRAPH_NU_SAT_SI = 5.0d13    ! OP-emission rate cap [~20 fs; hot-carrier cooling]
+
+    ! =====================================================================
     ! Material registry -- the SINGLE place that maps a material name to all
     ! the per-material constants the SBE dissipation channels need (dielectric,
     ! impact-ionization fit, electron-phonon table). Adding a material is one
@@ -141,7 +175,7 @@ module sbe_superres_ssbe
     ! the cited constants declared above -- the registry only assembles them.
     ! =====================================================================
     integer, parameter, public :: MAT_MAXPH = 8         ! capacity of a phonon table
-    character(*), parameter, public :: MAT_SUPPORTED = 'GaAs, Si, Si_cb, CdS'
+    character(*), parameter, public :: MAT_SUPPORTED = 'GaAs, Si, Si_cb, CdS, graphene'
 
     type, public :: s_material_params
         logical       :: found        = .false.
@@ -248,23 +282,30 @@ contains
             !     ONLY for GaAs/Si (Goodnick-Lugli PRB 37, 2578; Fischetti-Laux
             !     PRB 38, 9721) -- forbidden by the strict provenance rule. The
             !     CdS citations (sub-100fs thermalization @ n>=1e18 [Shah 1986;
-            !     Elsaesser 1991] and Auger C=2.0e-30 cm^6/s [Haury 1998]) describe
-            !     a DENSITY-GATED Auger Lindblad channel (CDS_AUGER_C / CDS_EE_ACT_N
-            !     above; wiki/02 Sec 13) that is NOT YET IMPLEMENTED. Until that
-            !     channel is wired, CdS e-e stays forbidden -- a user who supplies
-            !     their own rate can still opt in via sbe_eeh_nu_sat (the same
-            !     explicit-input escape hatch as the II prefactor).
+            !     Elsaesser 1991]) describe a *timescale*, not a rate. A user who
+            !     supplies their own rate can still opt in via sbe_eeh_nu_sat (the
+            !     same explicit-input escape hatch as the II prefactor).
+            !
+            ! FORBIDDEN channel (NO verified CdS Auger coefficient -> auger_ok=.false.):
+            !   * Auger recombination (yn_sbe_auger). The former default
+            !     "C = 2.0e-30 cm^6/s [Haury, PRB 57, 11513 (1998)]" was a
+            !     FABRICATED reference (the real Haury 1997 PRL is on CdMnTe
+            !     ferromagnetism, not CdS Auger) and was removed. CdS Auger is
+            !     gated off; a user with a verified C may still opt in via
+            !     sbe_auger_c_cm6s.
             mp%found = .true.
             mp%a_lattice_au = CDS_A_BOHR
             mp%cell_au = (/ CDS_A_BOHR, CDS_ASQ3_BOHR, CDS_C_BOHR /)  ! orthorhombic
             mp%is_diamond   = .false.                  ! V^A != 0 (broken inversion)
             mp%coulomb_ok = .true.; mp%eph_ok = .true.; mp%ii_ok = .true.
             mp%eeh_ok = .false.   ! no cited CdS carrier-carrier rate (see above)
-            ! Auger recombination IS cited for CdS: C = 2.0e-30 cm^6/s
-            ! [Haury et al., PRB 57, 11513 (1998)], density-gated at n >= 1e18
-            ! cm^-3 [Shah et al., IEEE JQE 22, 1728 (1986)].
-            mp%auger_ok = .true.
-            mp%auger_c_cm6s = CDS_AUGER_C;  mp%auger_n_gate_cm3 = CDS_EE_ACT_N
+            ! Auger recombination FORBIDDEN for CdS: no verified coefficient (the
+            ! former "Haury PRB 57, 11513" C was fabricated, removed). A density
+            ! gate is kept (Shah 1986) only for a user who supplies their own C
+            ! via sbe_auger_c_cm6s; with auger_ok=.false. the default C is 0, so a
+            ! plain yn_sbe_auger='y' run aborts (provenance) unless C is given.
+            mp%auger_ok = .false.
+            mp%auger_c_cm6s = 0d0;  mp%auger_n_gate_cm3 = CDS_EE_ACT_N
             mp%eps0 = CDS_EPS0;  mp%eps_inf = CDS_EPS_INF
             ! Frohlich polar-optical: a single dominant LO mode at 38 meV; the
             ! rate scale nu_sat = alpha*omega_LO is the cited Frohlich coupling.
@@ -279,6 +320,56 @@ contains
             mp%ii_threshold_ev = CDS_II_ETH_EV
             mp%ii_prefactor = -1d0     ! sentinel: NO cited CdS prefactor; the
             ! init requires the user to set sbe_ii_prefactor explicitly (fit param).
+        case ('graphene')
+            ! GAPLESS Dirac semimetal (honeycomb D6h, V^A=0, centrosymmetric).
+            ! a minimal pi-model (Ramanujam 3-form-factor EPM); the Python ref
+            ! emits the GS, so this registry entry only supplies the DISSIPATION
+            ! constants. Hexagonal 2-atom primitive (or the rectangular 2-fold
+            ! folded cell): cell_au below is informational only.
+            !
+            ! CITED, ENABLED channel:
+            !   * e-ph: the two Kohn-anomaly optical modes E2g(Gamma,196 meV) and
+            !     A1'(K,160 meV), EPC <g^2_Gamma>=0.0405, <g^2_K>=0.0994 eV^2 (x2 GW)
+            !     [Piscanec PRL 93,185503 (2004); Lazzeri PRB 78,081406 (2008)].
+            !     ** Both modes are NON-LOCAL on the cone (carriers relax to a
+            !        DIFFERENT k), so graphene e-ph is valid ONLY through the
+            !        inter-k RING (yn_sbe_superres='y'); the k-local same-k search
+            !        is inert on the 2-band Dirac cone. **
+            !
+            ! FORBIDDEN channels (GAPLESS physics -- the gap-based maps don't apply):
+            !   * impact ionization (ii_ok=.false.): the Stobbe/Keldysh fit is a
+            !     (eps_kin - E_th)^a law with E_th a GAP threshold -- meaningless for
+            !     a gapless cone. Graphene carrier multiplication is the (nearly
+            !     thresholdless) 2D collinear process -- the Rana branch of the
+            !     nonlocal-Auger task (wiki/07), NOT this gap-threshold channel.
+            !   * Auger recombination (auger_ok=.false.): recombination across a gap
+            !     with C*n^3 -- no gap, no single cm^6/s C. Again the 2D Rana branch.
+            !   * carrier-carrier (eeh_ok=.false.): no cited graphene FD-thermalization
+            !     RATE (the graphene e-e coupling alpha=2.2/eps_eff is a coupling, not
+            !     a rate); the gapless e-e/CM physics is the Rana branch.
+            !   * Coulomb HF (coulomb_ok=.false.): needs the 2D kernel V(q)=2*pi*e^2/
+            !     (eps*q), not the 3D 4*pi/(eps*q^2) used by the current Sigma^HF.
+            !
+            ! Also: a Kuhn-Zurek (single-particle wave-packet) dephasing is
+            ! UNPHYSICAL for gapless Dirac carriers (coherence loss is many-body) --
+            ! the SBE init aborts on graphene + sbe_decoh_* (see bloch_solver init).
+            mp%found = .true.
+            mp%a_lattice_au = GRAPH_A_BOHR
+            mp%cell_au = (/ GRAPH_A_BOHR, GRAPH_A_BOHR*sqrt(3d0), 0d0 /)  ! informational
+            mp%is_diamond = .true.    ! V^A = 0 (centrosymmetric)
+            mp%eph_ok = .true.
+            mp%ii_ok = .false.; mp%auger_ok = .false.
+            mp%eeh_ok = .false.; mp%coulomb_ok = .false.
+            ! non-polar optical deformation-potential modes (no Frohlich LO branch)
+            mp%eph_polar = .false.
+            mp%eph_nph = 2
+            mp%eph_hw_mev(1) = GRAPH_HW_E2G_MEV
+            mp%eph_hw_mev(2) = GRAPH_HW_A1P_MEV
+            ! raw per-mode weight = <g^2>/hw (analogue of D^2/hw); the A1' K-mode
+            ! carries the x2 GW enhancement and dominates (Kohn anomaly).
+            mp%eph_wraw(1) = GRAPH_G2_E2G            / GRAPH_HW_E2G_MEV
+            mp%eph_wraw(2) = GRAPH_G2_A1P * GRAPH_GW_K / GRAPH_HW_A1P_MEV
+            mp%eph_nu_sat_si = GRAPH_NU_SAT_SI
         case default
             mp%found = .false.
         end select

@@ -628,7 +628,8 @@ contains
     namelist/epm/ &
       & epm_material, &
       & epm_lattice_constant_au, &
-      & epm_pw_cutoff_ry
+      & epm_pw_cutoff_ry, &
+      & epm_cell
 
     namelist/dc/ &
       & num_fragment, &
@@ -1093,6 +1094,7 @@ contains
     epm_material            = 'GaAs'
     epm_lattice_constant_au = 10.68d0    ! GaAs zincblende lattice constant (a = 5.65 Angstrom = 10.68 Bohr)
     epm_pw_cutoff_ry        = 11.1d0     ! Plane-wave cutoff |k+G|^2 [Ry] (includes Cohen-Bergstresser G^2=11 shell)
+    epm_cell                = 'primitive' ! 'primitive' (non-orthogonal, no folding; default) | 'folded' (cubic supercell, GaAs/Si only)
 !! == default for &dc
     num_fragment = 0
     num_rgrid_buffer = 0
@@ -1759,6 +1761,7 @@ contains
     call comm_bcast(epm_material,            nproc_group_global)
     call comm_bcast(epm_lattice_constant_au, nproc_group_global)
     call comm_bcast(epm_pw_cutoff_ry,        nproc_group_global)
+    call comm_bcast(epm_cell,                nproc_group_global)
 !! == bcast for dc
     call comm_bcast(num_fragment ,nproc_group_global)
     call comm_bcast(num_rgrid_buffer, nproc_group_global)
@@ -2788,6 +2791,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'epm_material', trim(epm_material)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epm_lattice_constant_au', epm_lattice_constant_au
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epm_pw_cutoff_ry', epm_pw_cutoff_ry
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'epm_cell', trim(epm_cell)
 
       if(inml_dc >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', inml_dc

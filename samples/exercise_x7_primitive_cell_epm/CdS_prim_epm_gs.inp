@@ -1,0 +1,45 @@
+!########################################################################################!
+! CdS wurtzite PRIMITIVE-CELL EPM ground state -- in-SALMON Fortran EPM (theory='epm').    !
+!----------------------------------------------------------------------------------------!
+! Step 1 of 2. Writes CdS_prim_k/_eigen/_tm.data read by CdS_prim_sbe_rt.inp (step 2).     !
+! 4-atom HEXAGONAL wurtzite primitive (2 Cd + 2 S), polar (inversion broken -> V^A != 0),  !
+! Bergstresser & Cohen Phys. Rev. 164, 1069 (1967) Table II form factors. Verified         !
+! INTERCHANGEABLE with epm_cds_primitive.py (band energies to ~1e-9 eV; direct gap at      !
+! Gamma = 2.547 eV vs BC1967 2.58). The hexagonal a/c and u=3/8 are fixed cited constants  !
+! (the EPM ignores epm_lattice_constant_au for CdS).                                       !
+!                                                                                          !
+! CdS has 8 valence e-/formula unit; the primitive cell holds 2 f.u. -> 16 valence e-      !
+! -> 8 filled bands. nelec=16, nstate=16. cutoff 12 Ry (|G|^2 [a.u.]) converges the gap.   !
+! Use an ODD in-plane grid (7,7,5) so Gamma is an explicit grid point.                     !
+!----------------------------------------------------------------------------------------!
+! Units a.u.:  Length 1 [a.u.] = 0.52917721067 [Angstrom];  Energy 1 [a.u.] = 27.2114 eV   !
+!########################################################################################!
+
+&calculation
+    theory = 'epm'
+/
+
+&control
+    sysname = 'CdS_prim'
+/
+
+&units
+    unit_system = 'au'
+/
+
+&system
+    yn_periodic = 'y'
+    al(1:3) = 7.8159d0, 13.5376d0, 12.6877d0   ! informational; the EPM fixes the hexagonal a/c
+    nelec  = 16                                 ! 2 formula units x 8 valence e- -> 8 filled bands
+    nstate = 16                                 ! 8 valence + 8 conduction
+/
+
+&kgrid
+    num_kgrid(1:3) = 7, 7, 5                     ! ODD in-plane -> Gamma on the mesh
+/
+
+&epm
+    epm_material     = 'CdS'                     ! wurtzite, polar (V^A != 0), BC1967 form factors
+    epm_pw_cutoff_ry = 12.0d0                    ! KINETIC cutoff |G|^2 [a.u.] (gap converged ~2.55 eV)
+    epm_cell         = 'primitive'               ! hexagonal 4-atom primitive, NO folding
+/

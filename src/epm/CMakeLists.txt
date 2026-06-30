@@ -1,5 +1,6 @@
 set(SOURCES
     epm_cohen_bergstresser.f90
+    epm_noncubic.f90
     epm_solver.f90
     main_epm.f90
    )
