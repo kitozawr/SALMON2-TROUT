@@ -6,6 +6,14 @@ Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #
 
 ---
 
+## 🔵 BRANCH `claude/inter-k-ring-eph-ii` — inter-k e-ph + momentum-conserving nonlocal II (through the ring)
+Maintainer decision: **"if the ring (`yn_sbe_superres`) is on, inter-k goes through it."** Both channels DONE + tested (17/17) + verified live on primitive Si; the k-local versions are gated OFF when the ring is on (ring-off byte-unchanged).
+- **inter-k e-ph** (`apply_eph_interk_ring` + pure `eph_interk_dpop`, `test_eph_interk_cptp`): gathers the Houston spectrum, CPTP net-`dpop` to the energy-matched valley at a DIFFERENT k. Verified: Si 8³ `eph+superres` → electrons=8.000.
+- **momentum-conserving nonlocal II** (`apply_ii_interk_ring` + pure `ii_interk_dpop` + MP map `mp_grid_triple`/`mp_partner_triple`, `test_ii_interk_cptp`/`test_mp_kmap`): the true 2-particle event with crystal momentum `k1+k2=k1'+k2'` (mod G) via the MP index map (O(1) `klut`), broadened Fermi golden rule, cited Stobbe magnitude. **Resolves Si's INDIRECT gap explicitly** — the created e–h pair lands in the correct Δ valleys, replacing the old BZ-averaged k-local imitation. Verified: Si 4³ `impact+superres` → MP map built, electrons=8.000 exact, carriers created.
+- **Known limits (refinements):** O(nk³) all-pairs II (heavy at large nk — distribute on the systolic ring / cap candidates); `|V(q)|²` is the reduced-space model `1/(q²+κ²)` (metric-exact `coulomb_kernel` next); band-edge finals (`ic`) only; e-ph wiring uses the end-of-step Ac (no sub-cycling yet). Ready to merge to `develop-2.0.0` when desired.
+
+---
+
 ## 🧭 NEXT SESSION — START HERE
 The primitive-cell work was **merged to `develop-2.0.0`** (branch `claude/sbe-nonorthogonal` closed). **Commit small changes directly to `develop-2.0.0` now** (maintainer's instruction — no more feature branch). All four primitive materials run end-to-end: **GaAs (scalar+spinor), Si, CdS, graphene** (GS+SBE+maps); Si & CdS also have dissipators+super-mode (CPTP). Example set: `samples/exercise_x7_primitive_cell_epm/` (commented).
 
