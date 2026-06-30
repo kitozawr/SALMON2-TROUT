@@ -144,8 +144,17 @@ subroutine main_realtime_ssbe(icomm)
         write(*, "(a)") "---------------------------------------------------------------------------------------"
     end if
 
-    ! Write initial (t=0) nex_k block before the time loop so the population
-    ! at t=0 (equilibrium, all pop_k=0) appears in the output file.
+    ! Write initial (t=0) nex_k block before the time loop. The LCB/CB1 outputs
+    ! are zero at equilibrium, but the 4-level file must carry the REAL diabatic
+    ! occupations (valence FULL, conduction empty) so the carrier (hole/electron)
+    ! colour scale is not poisoned by a spurious t=0 "hole" -- compute them
+    ! (collective) before the irank-0 write.
+    if (.not. gs%have_unfold) then
+        call calc_diabatic_population_k(sbe, ib_lcb-2, pop_k_real, icomm); pop4(1,:) = pop_k_real
+        call calc_diabatic_population_k(sbe, ib_lcb-1, pop_k_real, icomm); pop4(2,:) = pop_k_real
+        call calc_diabatic_population_k(sbe, ib_lcb,   pop_k_real, icomm); pop4(3,:) = pop_k_real
+        call calc_diabatic_population_k(sbe, ib_lcb+1, pop_k_real, icomm); pop4(4,:) = pop_k_real
+    end if
     if (irank == 0) then
         pop_k = 0.0d0
         call write_sbe_nex_k_block(fh_sbe_nex_k, 0.0d0, nk, gs%kpoint, pop_k)
@@ -153,7 +162,6 @@ subroutine main_realtime_ssbe(icomm)
         flush(fh_sbe_nex_k)
         flush(fh_sbe_nex_k_real)
         if (.not. gs%have_unfold) then
-            pop4 = 0.0d0
             call write_sbe_nex_k_lev_block(fh_sbe_nex_k_lev_real, 0.0d0, nk, gs%kpoint, pop4)
             flush(fh_sbe_nex_k_lev_real)
         end if
