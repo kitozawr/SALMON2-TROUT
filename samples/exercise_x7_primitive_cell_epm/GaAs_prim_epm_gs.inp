@@ -1,0 +1,45 @@
+!########################################################################################!
+! GaAs PRIMITIVE-CELL EPM ground state -- in-SALMON Fortran EPM (theory='epm').            !
+!----------------------------------------------------------------------------------------!
+! Step 1 of 2. Writes GaAs_prim_k/_eigen/_tm.data read by GaAs_prim_sbe_rt.inp (step 2).   !
+! NEW: the Fortran EPM now builds the FCC 2-atom NON-orthogonal PRIMITIVE cell directly    !
+! (epm_cell='primitive', the DEFAULT) -- no folding, no cubic supercell. It is verified    !
+! INTERCHANGEABLE with epm_gaas_primitive.py: identical k-points, band energies to 5e-11   !
+! Ha, identical occupations. So you no longer need Python to generate the primitive GS.    !
+!                                                                                          !
+! The FCC reciprocal (BCC) is the cubic (2pi/a)(h,k,l) with h,k,l all same parity, so the  !
+! primitive basis is the cubic plane-wave basis restricted to one parity class (coset 0).  !
+! nelec/nstate/num_kgrid MUST match the SBE step: 8/8/(8,8,8) (2 atoms -> 8 valence e-).   !
+!----------------------------------------------------------------------------------------!
+! Units a.u.:  Length 1 [a.u.] = 0.52917721067 [Angstrom];  Energy 1 [a.u.] = 27.2114 eV   !
+!########################################################################################!
+
+&calculation
+    theory = 'epm'
+/
+
+&control
+    sysname = 'GaAs_prim'
+/
+
+&units
+    unit_system = 'au'
+/
+
+&system
+    yn_periodic = 'y'
+    al(1:3) = 10.683d0, 10.683d0, 10.683d0   ! GaAs a = 5.653 Angstrom (cubic value; the EPM builds the FCC primitive internally)
+    nelec  = 8                                ! 2 atoms (Ga 3 + As 5) -> 8 valence e- -> 4 filled bands
+    nstate = 8                                ! 4 valence + 4 conduction
+/
+
+&kgrid
+    num_kgrid(1:3) = 8, 8, 8                  ! MP mesh on the FCC reciprocal (use 9,9,9 to sample Gamma)
+/
+
+&epm
+    epm_material            = 'GaAs'          ! zincblende, V^A != 0, Cohen-Bergstresser FFs
+    epm_lattice_constant_au = 10.683d0        ! FCC primitive lattice constant a [Bohr]
+    epm_pw_cutoff_ry        = 11.1d0          ! |G|^2 cutoff in (2pi/a)^2 units
+    epm_cell                = 'primitive'     ! NON-orthogonal FCC primitive, NO folding (default)
+/
