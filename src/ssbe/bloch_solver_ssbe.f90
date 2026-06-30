@@ -141,6 +141,15 @@ module bloch_solver_ssbe
         logical :: flag_ring = .false.
         integer :: irank = 0, nproc = 1
         integer, allocatable :: itbl_min(:), itbl_max(:)  ! k-partition per rank (0:nproc-1)
+
+        ! Monkhorst-Pack momentum-conservation map (built lazily on first use by
+        ! the momentum-resolved nonlocal impact ionization). kmap_ok=.false. on a
+        ! non-MP / symmetry-reduced grid -> the momentum-resolved II is gated off.
+        logical :: kmap_built = .false.
+        logical :: kmap_ok    = .false.
+        integer :: kmap_n(3)  = 0
+        integer, allocatable :: kmap_idx(:, :)   ! (3, nk) 0-based MP triple
+        integer, allocatable :: kmap_lut(:)      ! (0:nk-1) flattened triple -> ik
     end type
 
     !=========================================================================
@@ -1105,6 +1114,17 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     deallocate(p_k_full, rho_n_full)
     !$omp end parallel
 
+    ! Inter-k e-ph through the super-mode ring: once per step on the post-step
+    ! density matrix (the k-local e-ph is gated off in houston_dissipate when the
+    ! ring is on). MPI-collective (gathers the Houston spectrum), so it MUST be
+    ! outside the OpenMP region and called by every rank.
+    if (sbe%flag_eph .and. sbe%flag_ring) call apply_eph_interk_ring(sbe, gs, Ac_end, dt)
+
+    ! Momentum-conserving nonlocal impact ionization through the ring (once per
+    ! step, after the unitary evolution; k-local II gated off in houston_dissipate
+    ! when the ring is on). MPI-collective -> outside the OpenMP region.
+    if (sbe%flag_impact .and. sbe%flag_ring) call apply_ii_interk_ring(sbe, gs, Ac_end, dt)
+
 end subroutine dt_evolve_bloch_cf4
 
 
@@ -1545,7 +1565,9 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
         end if
 
         m_sub = 1
-        if (sbe%flag_eph) &
+        ! e-ph sub-cycling only for the k-LOCAL channel; when the ring is on the
+        ! inter-k e-ph runs once per step in apply_eph_interk_ring (outside).
+        if (sbe%flag_eph .and. .not. sbe%flag_ring) &
             m_sub = max(m_sub, min(20, max(1, ceiling(10d0 * sbe%eph_numax_au * tau))))
         if (sbe%flag_eeh) &
             m_sub = max(m_sub, min(20, max(1, ceiling(10d0 * sbe%eeh_nu_au * tau))))
@@ -1554,10 +1576,12 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
                     sbe%auger_c_au * sbe%n_exc_cm3**2 * tau))))
         tau_sub_d = tau / dble(m_sub)
         do isub_d = 1, m_sub
-            if (sbe%flag_impact) &
+            ! k-LOCAL impact ionization only when the ring is OFF; with the ring
+            ! the momentum-conserving inter-k II runs once per step (outside).
+            if (sbe%flag_impact .and. .not. sbe%flag_ring) &
                 call apply_impact_ionization(sbe, nba, t2, evals, Ac, tau_sub_d, &
                                              wsub_branch, sbe%flag_unfold_ii)
-            if (sbe%flag_eph) &
+            if (sbe%flag_eph .and. .not. sbe%flag_ring) &
                 call apply_eph_relaxation(sbe, nba, t2, evals, Ac, tau_sub_d)
             if (sbe%flag_eeh) &
                 call apply_carrier_carrier(sbe, nba, t2, evals, tau_sub_d)
@@ -1862,6 +1886,298 @@ subroutine apply_eph_relaxation(sbe, nba, rho_ad, evals, Ac, tau)
         end do
     end do
 end subroutine apply_eph_relaxation
+
+
+! INTER-K e-ph through the super-mode ring (Part C5/D). Enabled when
+! flag_eph.and.flag_ring; replaces the k-local apply_eph_relaxation (which is
+! gated off in houston_dissipate when flag_ring). Self-contained: gathers the
+! instantaneous Houston spectrum (eval) and adiabatic populations (f) over ALL
+! k via comm_summation, calls the pure CPTP map eph_interk_dpop, and applies the
+! net diagonal change dpop + coherence damping (rate gout) to each local rho(k).
+! Carriers thus relax to the energy-matched valley at a DIFFERENT k (true
+! intervalley scattering on the primitive cell). Exactly trace-conserving.
+subroutine apply_eph_interk_ring(sbe, gs, Ac, tau)
+    use sbe_superres_ssbe, only: eph_interk_dpop
+    use eigen_lapack, only: eigen_zheev
+    use communication, only: comm_summation
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info),      intent(in)    :: gs
+    real(8),                  intent(in)    :: Ac(3), tau
+
+    integer :: nba, nk, ik, i, j, in, im, idir, a, b, s
+    real(8) :: a2half, pcoset
+    real(8),    allocatable :: eval_loc(:,:), f_loc(:,:), eval_all(:,:), f_all(:,:)
+    real(8),    allocatable :: dpop(:,:), gout(:,:)
+    complex(8), allocatable :: U_loc(:,:,:), rad_loc(:,:,:)
+    real(8)    :: eigen_active(sbe%n_active_bands), evals(sbe%n_active_bands)
+    complex(8) :: p_active(sbe%n_active_bands, sbe%n_active_bands, 3)
+    complex(8) :: HVG(sbe%n_active_bands, sbe%n_active_bands)
+    complex(8) :: W(sbe%n_active_bands, sbe%n_active_bands)
+    complex(8) :: t1(sbe%n_active_bands, sbe%n_active_bands)
+    complex(8) :: rad(sbe%n_active_bands, sbe%n_active_bands)
+
+    nba = sbe%n_active_bands
+    if (nba <= 0 .or. sbe%eph_nph <= 0) return
+    nk = sbe%nk
+    a2half = 0.5d0 * dot_product(Ac, Ac)
+    allocate(eval_loc(nba, nk), f_loc(nba, nk), eval_all(nba, nk), f_all(nba, nk))
+    allocate(dpop(nba, nk), gout(nba, nk))
+    allocate(U_loc(nba, nba, sbe%ik_min:sbe%ik_max), &
+             rad_loc(nba, nba, sbe%ik_min:sbe%ik_max))
+    eval_loc = 0d0; f_loc = 0d0
+
+    ! Pass 1: local instantaneous Houston spectrum + adiabatic populations.
+    do ik = sbe%ik_min, sbe%ik_max
+        do idir = 1, 3
+            do j = 1, nba
+                im = sbe%active_idx(j)
+                do i = 1, nba
+                    in = sbe%active_idx(i)
+                    p_active(i, j, idir) = gs%p_tm_matrix(in, im, idir, ik)
+                    if (sbe%flag_vnl_correction) &
+                        p_active(i, j, idir) = p_active(i, j, idir) + gs%rvnl_tm_matrix(in, im, idir, ik)
+                end do
+            end do
+        end do
+        if (sbe%flag_coset_proj) then
+            do j = 1, nba
+                im = sbe%active_idx(j)
+                do i = 1, nba
+                    if (i == j) cycle
+                    in = sbe%active_idx(i)
+                    pcoset = 0d0
+                    do s = 1, 4
+                        pcoset = pcoset + gs%unfold_w(s, in, ik) * gs%unfold_w(s, im, ik)
+                    end do
+                    p_active(i, j, 1:3) = p_active(i, j, 1:3) * pcoset
+                end do
+            end do
+        end if
+        do i = 1, nba
+            eigen_active(i) = gs%eigen(sbe%active_idx(i), ik)
+        end do
+        call build_HVG(nba, eigen_active, p_active, Ac, HVG)
+        if (sbe%flag_coulomb) HVG = HVG + sbe%sigma_hf(:, :, ik)
+        call eigen_zheev(HVG, evals, W)
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                rad(i, j) = sbe%rho(in, im, ik)
+            end do
+        end do
+        ! adiabatic rho~ = W^dagger rho W
+        call ZGEMM('C', 'N', nba, nba, nba, dcmplx(1d0,0d0), W, nba, rad, nba, dcmplx(0d0,0d0), t1, nba)
+        call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0,0d0), t1, nba, W, nba, dcmplx(0d0,0d0), rad, nba)
+        U_loc(:, :, ik) = W
+        rad_loc(:, :, ik) = rad
+        do a = 1, nba
+            eval_loc(a, ik) = evals(a)
+            f_loc(a, ik)    = real(rad(a, a))
+        end do
+    end do
+
+    ! Gather the global Houston spectrum (each rank fills its k-slice; sum -> all).
+    call comm_summation(eval_loc, eval_all, nba * nk, sbe%icomm)
+    call comm_summation(f_loc,    f_all,    nba * nk, sbe%icomm)
+
+    ! Net CPTP inter-k population change + per-source out-rate.
+    call eph_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
+                         sbe%eph_ecbm_au, sbe%eph_evbm_au, sbe%eph_nph, &
+                         sbe%eph_hw(1:sbe%eph_nph), sbe%eph_wrel(1:sbe%eph_nph), &
+                         sbe%eph_nb(1:sbe%eph_nph), sbe%eph_nusat_au, sbe%eph_eps0_au, &
+                         sbe%eph_n, sbe%eph_sigma_au, tau, dpop, gout)
+
+    ! Pass 2: apply to each LOCAL rho(k) -- diagonal += dpop, coherences damped.
+    do ik = sbe%ik_min, sbe%ik_max
+        rad = rad_loc(:, :, ik)
+        W   = U_loc(:, :, ik)
+        do a = 1, nba
+            rad(a, a) = rad(a, a) + dcmplx(dpop(a, ik), 0d0)
+        end do
+        do b = 1, nba
+            do a = 1, nba
+                if (a /= b) rad(a, b) = rad(a, b) * exp(-0.5d0 * (gout(a, ik) + gout(b, ik)) * tau)
+            end do
+        end do
+        ! back to the fixed band basis: rho = W rho~ W^dagger
+        call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0,0d0), W, nba, rad, nba, dcmplx(0d0,0d0), t1, nba)
+        call ZGEMM('N', 'C', nba, nba, nba, dcmplx(1d0,0d0), t1, nba, W, nba, dcmplx(0d0,0d0), rad, nba)
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                sbe%rho(in, im, ik) = rad(i, j)
+            end do
+        end do
+    end do
+
+    deallocate(eval_loc, f_loc, eval_all, f_all, dpop, gout, U_loc, rad_loc)
+end subroutine apply_eph_interk_ring
+
+
+! MOMENTUM-CONSERVING nonlocal impact ionization through the ring (Part C4/D).
+! Enabled when flag_impact.and.flag_ring; replaces the k-local apply_impact_
+! ionization (gated off in houston_dissipate when flag_ring). The true 2-particle
+! event hot-e(k1)+valence-e(k2) -> e(k1')+e(k2') conserves crystal momentum
+! k1+k2=k1'+k2' (mod G) via the MP index map -- so for an INDIRECT-gap material
+! (Si) the created pair lands in the correct conduction valleys, instead of the
+! old BZ-averaged k-local imitation. Self-contained: builds the MP map once
+! (gated off if the grid is not a regular MP mesh), gathers the Houston spectrum,
+! calls the pure CPTP ii_interk_dpop, and applies dpop (+ amplitude-damping
+! coherence factor) to each local rho(k). Exactly trace-conserving / carrier-
+! multiplying.
+subroutine apply_ii_interk_ring(sbe, gs, Ac, tau)
+    use sbe_superres_ssbe, only: ii_interk_dpop, mp_grid_triple
+    use eigen_lapack, only: eigen_zheev
+    use communication, only: comm_summation
+    use salmon_global, only: num_kgrid
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info),      intent(in)    :: gs
+    real(8),                  intent(in)    :: Ac(3), tau
+
+    integer :: nba, nk, ik, i, j, in, im, idir, a, b, s, m(3), iv, ic, lidx
+    real(8) :: a2half, pcoset, resid, maxresid, kappa2, sig, fold, fnew, damp_a
+    real(8),    allocatable :: eval_loc(:,:), f_loc(:,:), eval_all(:,:), f_all(:,:), dpop(:,:)
+    real(8),    allocatable :: damp(:)
+    complex(8), allocatable :: U_loc(:,:,:), rad_loc(:,:,:)
+    real(8)    :: eigen_active(sbe%n_active_bands), evals(sbe%n_active_bands)
+    complex(8) :: p_active(sbe%n_active_bands, sbe%n_active_bands, 3)
+    complex(8) :: HVG(sbe%n_active_bands, sbe%n_active_bands)
+    complex(8) :: W(sbe%n_active_bands, sbe%n_active_bands)
+    complex(8) :: t1(sbe%n_active_bands, sbe%n_active_bands)
+    complex(8) :: rad(sbe%n_active_bands, sbe%n_active_bands)
+
+    nba = sbe%n_active_bands
+    if (nba <= 0) return
+    nk = sbe%nk
+    iv = sbe%nv_act
+    ic = sbe%nv_act + 1
+    if (iv < 1 .or. ic > nba) return
+
+    ! Build the MP momentum-conservation map once (gate off on a non-MP grid).
+    if (.not. sbe%kmap_built) then
+        allocate(sbe%kmap_idx(3, nk), sbe%kmap_lut(0:nk-1))
+        sbe%kmap_n = num_kgrid
+        sbe%kmap_lut = 0
+        maxresid = 0d0
+        do ik = 1, nk
+            call mp_grid_triple(gs%kpoint(:, ik), num_kgrid, m, resid)
+            sbe%kmap_idx(:, ik) = m
+            maxresid = max(maxresid, resid)
+            lidx = m(1) + num_kgrid(1) * (m(2) + num_kgrid(2) * m(3))
+            if (lidx >= 0 .and. lidx <= nk - 1) sbe%kmap_lut(lidx) = ik
+        end do
+        sbe%kmap_ok = (maxresid < 1d-6) .and. &
+                      (num_kgrid(1) * num_kgrid(2) * num_kgrid(3) == nk) .and. &
+                      (minval(sbe%kmap_lut) >= 1)
+        sbe%kmap_built = .true.
+        if (sbe%irank == 0 .and. .not. sbe%kmap_ok) &
+            write(*,'(a)') '# NOTE: momentum-resolved nonlocal II disabled '// &
+                           '(k-grid is not a regular MP mesh)'
+    end if
+    if (.not. sbe%kmap_ok) return
+
+    a2half = 0.5d0 * dot_product(Ac, Ac)
+    kappa2 = 0.05d0                          ! reduced-space Coulomb regulariser (shape)
+    sig    = max(sbe%eph_sigma_au, 2d-3)     ! energy-conservation broadening
+    allocate(eval_loc(nba,nk), f_loc(nba,nk), eval_all(nba,nk), f_all(nba,nk), dpop(nba,nk))
+    allocate(U_loc(nba,nba, sbe%ik_min:sbe%ik_max), rad_loc(nba,nba, sbe%ik_min:sbe%ik_max))
+    allocate(damp(nba))
+    eval_loc = 0d0; f_loc = 0d0
+
+    ! Pass 1: local instantaneous Houston spectrum + adiabatic populations.
+    do ik = sbe%ik_min, sbe%ik_max
+        do idir = 1, 3
+            do j = 1, nba
+                im = sbe%active_idx(j)
+                do i = 1, nba
+                    in = sbe%active_idx(i)
+                    p_active(i, j, idir) = gs%p_tm_matrix(in, im, idir, ik)
+                    if (sbe%flag_vnl_correction) &
+                        p_active(i, j, idir) = p_active(i, j, idir) + gs%rvnl_tm_matrix(in, im, idir, ik)
+                end do
+            end do
+        end do
+        if (sbe%flag_coset_proj) then
+            do j = 1, nba
+                im = sbe%active_idx(j)
+                do i = 1, nba
+                    if (i == j) cycle
+                    in = sbe%active_idx(i)
+                    pcoset = 0d0
+                    do s = 1, 4
+                        pcoset = pcoset + gs%unfold_w(s, in, ik) * gs%unfold_w(s, im, ik)
+                    end do
+                    p_active(i, j, 1:3) = p_active(i, j, 1:3) * pcoset
+                end do
+            end do
+        end if
+        do i = 1, nba
+            eigen_active(i) = gs%eigen(sbe%active_idx(i), ik)
+        end do
+        call build_HVG(nba, eigen_active, p_active, Ac, HVG)
+        if (sbe%flag_coulomb) HVG = HVG + sbe%sigma_hf(:, :, ik)
+        call eigen_zheev(HVG, evals, W)
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                rad(i, j) = sbe%rho(in, im, ik)
+            end do
+        end do
+        call ZGEMM('C','N', nba,nba,nba, dcmplx(1d0,0d0), W,nba, rad,nba, dcmplx(0d0,0d0), t1,nba)
+        call ZGEMM('N','N', nba,nba,nba, dcmplx(1d0,0d0), t1,nba, W,nba, dcmplx(0d0,0d0), rad,nba)
+        U_loc(:,:,ik) = W
+        rad_loc(:,:,ik) = rad
+        do a = 1, nba
+            eval_loc(a,ik) = evals(a)
+            f_loc(a,ik)    = real(rad(a,a))
+        end do
+    end do
+
+    call comm_summation(eval_loc, eval_all, nba*nk, sbe%icomm)
+    call comm_summation(f_loc,    f_all,    nba*nk, sbe%icomm)
+
+    call ii_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
+                        sbe%ii_ecbm_au, sbe%ii_eth_au, sbe%ii_pref_au, sbe%ii_exponent, &
+                        iv, ic, sbe%kmap_idx, sbe%kmap_n, sbe%kmap_lut, kappa2, sig, tau, dpop)
+
+    ! Pass 2: apply to each LOCAL rho(k). Amplitude-damping coherence factor:
+    ! a level that loses population damps its coherences by sqrt(f_new/f_old).
+    do ik = sbe%ik_min, sbe%ik_max
+        rad = rad_loc(:,:,ik)
+        W   = U_loc(:,:,ik)
+        do a = 1, nba
+            fold = real(rad(a,a))
+            fnew = max(fold + dpop(a,ik), 0d0)
+            if (dpop(a,ik) < 0d0 .and. fold > 1d-12) then
+                damp(a) = sqrt(fnew / fold)
+            else
+                damp(a) = 1d0
+            end if
+            rad(a,a) = dcmplx(fnew, 0d0)
+        end do
+        do b = 1, nba
+            do a = 1, nba
+                if (a /= b) rad(a,b) = rad(a,b) * damp(a) * damp(b)
+            end do
+        end do
+        call ZGEMM('N','N', nba,nba,nba, dcmplx(1d0,0d0), W,nba, rad,nba, dcmplx(0d0,0d0), t1,nba)
+        call ZGEMM('N','C', nba,nba,nba, dcmplx(1d0,0d0), t1,nba, W,nba, dcmplx(0d0,0d0), rad,nba)
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                sbe%rho(in, im, ik) = rad(i, j)
+            end do
+        end do
+    end do
+
+    deallocate(eval_loc, f_loc, eval_all, f_all, dpop, U_loc, rad_loc, damp)
+end subroutine apply_ii_interk_ring
 
 
 !=============================================================================

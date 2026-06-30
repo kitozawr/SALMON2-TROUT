@@ -37,7 +37,8 @@ module sbe_superres_ssbe
               eps_thomas_fermi, tf_kappa2_degenerate, debye_kappa2, &
               lindhard_F, eps_lindhard_static, plasmon_freq2, lopc_branches, &
               energy_partner_weights, fermi_dirac, fit_fermi_dirac, &
-              carrier_carrier_relax, eph_interk_dpop, &
+              carrier_carrier_relax, eph_interk_dpop, ii_interk_dpop, &
+              mp_grid_triple, mp_partner_triple, &
               vg_eta_admixture, vg_trunc_shift2, vg_conv_error, vg_ptop_exceeds, &
               get_material_params
 
@@ -748,19 +749,21 @@ contains
     ! order as the Coulomb all-pairs sum it rides alongside).
     subroutine eph_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, evbm, &
                                nph, hw, wrel, nb_bose, nu_sat, nu_eps0, nu_n, &
-                               sigma, tau, dpop)
+                               sigma, tau, dpop, gout)
         implicit none
         integer, intent(in)  :: nk, nba, nph
         real(8), intent(in)  :: eval(nba, nk), f(nba, nk), occ_max, a2half
         real(8), intent(in)  :: ecbm, evbm, hw(nph), wrel(nph), nb_bose(nph)
         real(8), intent(in)  :: nu_sat, nu_eps0, nu_n, sigma, tau   ! nu_n = saturation exponent
         real(8), intent(out) :: dpop(nba, nk)
+        real(8), intent(out), optional :: gout(nba, nk)  ! total out-rate Gamma_out per source (coherence damping)
         integer :: ik, jq, a, b, ip
         real(8) :: eps_kin, nu_a, fe, fa, dE, shp, th, blk, gam, gamtot, out_tot
         real(8) :: gpart(nba, nk)
         real(8), parameter :: occ_eps = 1d-12
 
         dpop = 0d0
+        if (present(gout)) gout = 0d0
         do ik = 1, nk
             do a = 1, nba
                 if (f(a, ik) < occ_eps) cycle
@@ -794,6 +797,7 @@ contains
                     end do
                 end do
 
+                if (present(gout)) gout(a, ik) = gamtot
                 if (gamtot * tau < 1d-14) cycle
                 out_tot = f(a, ik) * (1d0 - exp(-gamtot * tau))
                 dpop(a, ik) = dpop(a, ik) - out_tot
@@ -806,6 +810,124 @@ contains
             end do
         end do
     end subroutine eph_interk_dpop
+
+    ! =====================================================================
+    ! INTER-K (momentum-conserving) impact ionization through the ring.
+    ! ---------------------------------------------------------------------
+    ! The TRUE 2-particle event: a hot conduction e- (k1, band ih) and a valence
+    ! e- (k2, iv) -> two conduction e- at (k1', ic) and (k2', ic) leaving a hole,
+    ! with crystal momentum k1 + k2 = k1' + k2' (mod G) [k2' from mp_partner_triple]
+    ! and energy E(k1,ih)+E(k2,iv) = E(k1',ic)+E(k2',ic) [broadened Fermi golden
+    ! rule]. The threshold magnitude g0 = pref*(eps_kin - E_th)^expo is the cited
+    ! Stobbe-fit rate; the screened Coulomb |V(q)|^2 (q = k1-k1') and the energy
+    ! delta SHAPE which momentum-conserving final config it goes to. EXACTLY
+    ! trace-conserving: each event writes -amt,-amt,+amt,+amt (primary out +
+    ! valence out = the two conduction gains), so sum(dpop)=0 by construction.
+    ! Primary out capped at f(ih,k1)*(1-exp(-Gamma*tau)) <= f (no negativity).
+    ! klut(0:nk-1): flattened MP lookup, triple (m1,m2,m3) -> ik via
+    ! lidx = m1 + n1*(m2 + n2*m3). The caller precomputes it once.
+    subroutine ii_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
+                              pref, expo, iv, ic, kidx, kn, klut, kappa2, sigma, tau, dpop)
+        implicit none
+        integer, intent(in)  :: nk, nba, iv, ic, kidx(3, nk), kn(3), klut(0:nk-1)
+        real(8), intent(in)  :: eval(nba, nk), f(nba, nk), occ_max, a2half
+        real(8), intent(in)  :: ecbm, eth, pref, expo, kappa2, sigma, tau
+        real(8), intent(out) :: dpop(nba, nk)
+        integer :: i1, i1p, i2, ih, ipass, jj, m2p(3), d
+        real(8) :: ekin, dd, g0, etgt, vq, q2, dq, shp, pauli, gpart, gamtot, out_tot, amt
+        real(8), parameter :: occ_eps = 1d-12
+
+        dpop = 0d0
+        if (iv < 1 .or. ic > nba .or. ic <= iv) return
+
+        do i1 = 1, nk
+            do ih = ic, nba
+                if (f(ih, i1) < occ_eps) cycle
+                ekin = eval(ih, i1) + a2half - ecbm
+                dd = ekin - eth
+                if (dd <= 0d0) cycle
+                g0 = pref * dd ** expo            ! cited Stobbe-fit total magnitude
+
+                ! Pass 1 (ipass=1): accumulate gamtot; Pass 2: distribute out_tot.
+                gamtot = 0d0
+                out_tot = 0d0
+                do ipass = 1, 2
+                    if (ipass == 2) then
+                        if (gamtot * tau < 1d-14) exit
+                        out_tot = f(ih, i1) * (1d0 - exp(-gamtot * tau))
+                    end if
+                    do i1p = 1, nk
+                        q2 = 0d0
+                        do d = 1, 3
+                            dq = dble(kidx(d, i1) - kidx(d, i1p)) / dble(max(kn(d), 1))
+                            dq = dq - anint(dq)
+                            q2 = q2 + dq * dq
+                        end do
+                        vq = 1d0 / (q2 + kappa2)       ! screened Coulomb |V(q)| shape
+                        do i2 = 1, nk
+                            call mp_partner_triple(kidx(:,i1), kidx(:,i2), kidx(:,i1p), kn, m2p)
+                            jj = klut(m2p(1) + kn(1) * (m2p(2) + kn(2) * m2p(3))) ! O(1) k2'
+                            if (jj < 1) cycle
+                            etgt = eval(ih,i1) + eval(iv,i2) - eval(ic,i1p) - eval(ic,jj)
+                            shp = gaussian_shape(etgt, sigma)
+                            if (shp <= 0d0) cycle
+                            pauli = (f(iv,i2) / occ_max) &
+                                  * min(max(1d0 - f(ic,i1p)/occ_max, 0d0), 1d0) &
+                                  * min(max(1d0 - f(ic,jj )/occ_max, 0d0), 1d0)
+                            gpart = g0 * vq * shp * pauli
+                            if (ipass == 1) then
+                                gamtot = gamtot + gpart
+                            else
+                                amt = out_tot * gpart / gamtot
+                                dpop(ih, i1)  = dpop(ih, i1)  - amt   ! hot primary leaves
+                                dpop(ic, i1p) = dpop(ic, i1p) + amt   ! primary relaxed
+                                dpop(iv, i2)  = dpop(iv, i2)  - amt   ! valence e- -> hole
+                                dpop(ic, jj)  = dpop(ic, jj)  + amt   ! promoted to conduction
+                            end if
+                        end do
+                    end do
+                end do
+            end do
+        end do
+    end subroutine ii_interk_dpop
+
+    ! =====================================================================
+    ! Monkhorst-Pack momentum-conservation index map (for the inter-k / nonlocal
+    ! collision channels: impact ionization, e-e). A regular MP mesh has points
+    ! k_m = (2m - n + 1)/(2n) per dimension (m = 0..n-1), so crystal-momentum
+    ! conservation k1 + k2 - k1' (mod G) is EXACT integer arithmetic on the index
+    ! triples: m2' = mod(m1 + m2 - m1', n). mp_grid_triple recovers the triple
+    ! from the reduced coordinate and reports the residual (0 for a true MP point,
+    ! so the caller can gate the channel off on a non-MP / symmetry-reduced grid).
+    ! =====================================================================
+    pure subroutine mp_grid_triple(kred, n, m, resid)
+        real(8), intent(in)  :: kred(3)
+        integer, intent(in)  :: n(3)
+        integer, intent(out) :: m(3)
+        real(8), intent(out) :: resid     ! max wrapped |kred - reconstructed MP point|
+        integer :: d
+        real(8) :: km
+        resid = 0d0
+        do d = 1, 3
+            if (n(d) <= 0) then
+                m(d) = 0
+                cycle
+            end if
+            m(d) = modulo(nint(kred(d) * n(d) + (n(d) - 1) * 0.5d0), n(d))
+            km = (2d0 * m(d) - n(d) + 1d0) / (2d0 * n(d))
+            resid = max(resid, abs(modulo(kred(d) - km + 0.5d0, 1d0) - 0.5d0))
+        end do
+    end subroutine mp_grid_triple
+
+    ! Momentum-conserving partner index triple: m2' = mod(m1 + m2 - m1', n).
+    pure subroutine mp_partner_triple(m1, m2, m1p, n, m2p)
+        integer, intent(in)  :: m1(3), m2(3), m1p(3), n(3)
+        integer, intent(out) :: m2p(3)
+        integer :: d
+        do d = 1, 3
+            m2p(d) = modulo(m1(d) + m2(d) - m1p(d), max(n(d), 1))
+        end do
+    end subroutine mp_partner_triple
 
     ! =====================================================================
     ! Velocity-gauge basis sufficiency / N_b convergence primitives.
