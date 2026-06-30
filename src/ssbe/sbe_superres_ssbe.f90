@@ -748,19 +748,21 @@ contains
     ! order as the Coulomb all-pairs sum it rides alongside).
     subroutine eph_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, evbm, &
                                nph, hw, wrel, nb_bose, nu_sat, nu_eps0, nu_n, &
-                               sigma, tau, dpop)
+                               sigma, tau, dpop, gout)
         implicit none
         integer, intent(in)  :: nk, nba, nph
         real(8), intent(in)  :: eval(nba, nk), f(nba, nk), occ_max, a2half
         real(8), intent(in)  :: ecbm, evbm, hw(nph), wrel(nph), nb_bose(nph)
         real(8), intent(in)  :: nu_sat, nu_eps0, nu_n, sigma, tau   ! nu_n = saturation exponent
         real(8), intent(out) :: dpop(nba, nk)
+        real(8), intent(out), optional :: gout(nba, nk)  ! total out-rate Gamma_out per source (coherence damping)
         integer :: ik, jq, a, b, ip
         real(8) :: eps_kin, nu_a, fe, fa, dE, shp, th, blk, gam, gamtot, out_tot
         real(8) :: gpart(nba, nk)
         real(8), parameter :: occ_eps = 1d-12
 
         dpop = 0d0
+        if (present(gout)) gout = 0d0
         do ik = 1, nk
             do a = 1, nba
                 if (f(a, ik) < occ_eps) cycle
@@ -794,6 +796,7 @@ contains
                     end do
                 end do
 
+                if (present(gout)) gout(a, ik) = gamtot
                 if (gamtot * tau < 1d-14) cycle
                 out_tot = f(a, ik) * (1d0 - exp(-gamtot * tau))
                 dpop(a, ik) = dpop(a, ik) - out_tot
