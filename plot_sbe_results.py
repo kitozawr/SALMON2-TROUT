@@ -992,75 +992,125 @@ def _map_primitive_population(qred, gridk, gpop, spacing, tol=1.3):
     return P
 
 
-def plot_primitive_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=150):
-    """A(k,E) spectral movie for a PRIMITIVE (unfolded) cell -- no cosets, no
-    unfold file -- ONE FRAME PER TIME STEP.
+def _iter_nex_k_lev_blocks(filepath):
+    """Stream SYSNAME_sbe_nex_k_lev_real.data: per time block yield
+    (t_val, t_unit, kpoints[nk,3], pop4[nk,4]) where pop4 columns are the diabatic
+    populations of VB-1, VB, CB1, CB2."""
+    t_val, t_unit, kk, pp = None, '', [], []
+    for line in open(filepath):
+        s = line.strip()
+        if s.startswith('# t ='):
+            if t_val is not None and kk:
+                yield t_val, t_unit, np.array(kk), np.array(pp)
+            parts = s.split('=')[1].split()
+            t_val = float(parts[0]); t_unit = parts[1] if len(parts) > 1 else 'a.u.'
+            kk, pp = [], []
+            continue
+        if s.startswith('#') or not s:
+            continue
+        v = s.split()
+        if len(v) >= 8:
+            kk.append([float(v[1]), float(v[2]), float(v[3])])
+            pp.append([float(v[4]), float(v[5]), float(v[6]), float(v[7])])
+    if t_val is not None and kk:
+        yield t_val, t_unit, np.array(kk), np.array(pp)
 
-    Skeleton: the clean primitive-cell dispersion from *_bandpath.data, drawn as
-    thin grey lines (VB-1, VB, CB1, CB2). Decoration: at every output time the
-    lowest conduction band (CB1, the only band the folded-format nex_k file
-    resolves) is coloured by the per-k LCB population mapped onto the path
-    (nearest k, wrapped mod 1) and broadened by the carrier kinetic energy. Two
-    views per frame go into a `spectral_frames/` subfolder -- along the high-
-    symmetry path and projected onto kx -- so the electron's motion through the
-    primitive BZ can be watched frame by frame (assemble into a movie with e.g.
-    `ffmpeg -i nex_k_prim_spectral_path_f%04d*.png movie.mp4`). The colour scale
-    is fixed across all frames (global CB peak) so frames are comparable."""
+
+def plot_primitive_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=150):
+    """A(k,E) spectral movie for a PRIMITIVE (unfolded) cell -- ONE FRAME PER STEP.
+
+    Skeleton: the clean primitive bands from *_bandpath.data (thin grey lines).
+    Decoration: if the FOUR-level file SYSNAME_sbe_nex_k_lev_real.data is present
+    every gap-edge band (VB-1, VB, CB1, CB2) is coloured by its CARRIER population
+    -- holes (occ - pop) in the valence bands, electrons (pop) in the conduction
+    bands -- so excitation shows up in all four bands on a shared scale. Otherwise
+    only CB1 is coloured from the LCB file (legacy). Two views/frame go into
+    `spectral_frames/` (path + kx projection); assemble with
+    `ffmpeg -i nex_k_prim_spectral_path_f%04d*.png movie.mp4`."""
     from matplotlib.collections import LineCollection
-    print(f"Processing {filepath.name}  (primitive spectral A(k,E) per frame, "
-          f"skeleton {bpfile.name}) ...")
     dist, eig_ha, nv, spinor, nodes, qred = _load_bandpath(bpfile)
     if not nv:
         print("  (skip) band path has no nv header — cannot identify levels")
         return
     levels = _bandpath_level_energies(eig_ha, nv, spinor)
-    e_cb1, kin = levels['cb1']
-    kx_path = qred[:, 0]                         # native FCC-reduced kx
-    ke_max = max(np.nanmax(kin), 1e-9)
-    lw_cb1 = 1.0 + 6.0 * np.nan_to_num(kin) / ke_max
+    kx_path = qred[:, 0]
+    occ_full = 1.0 if spinor else 2.0
+    node_lbl = [n[0] for n in nodes]; node_dst = [n[1] for n in nodes]
 
-    # Pass 1: global colour scale (peak LCB population over all frames) + grid.
-    cb_peak, n_frames, gridk = 0.0, 0, None
-    for _t, _tu, kpts, pop, _lev, _sub in _iter_nex_k_blocks(filepath, unfold=False):
+    # Prefer the 4-level file (colour all bands); else fall back to the LCB file.
+    lev_file = filepath.parent / filepath.name.replace('_nex_k_real.data',
+                                                       '_nex_k_lev_real.data')
+    use_lev = lev_file.exists()
+    src = lev_file if use_lev else filepath
+    print(f"Processing {src.name}  (primitive spectral A(k,E) per frame, "
+          f"{'4-level' if use_lev else 'CB1-only'}, skeleton {bpfile.name}) ...")
+
+    # which bandpath levels to colour, and the carrier sign per level
+    if use_lev:
+        col_levels = [('vbm1', 0, 'hole'), ('vb', 1, 'hole'),
+                      ('cb1', 2, 'elec'), ('cb2', 3, 'elec')]
+    else:
+        col_levels = [('cb1', None, 'elec')]
+
+    def frames():
+        if use_lev:
+            for t, tu, kpts, pop4 in _iter_nex_k_lev_blocks(lev_file):
+                yield t, tu, kpts, pop4
+        else:
+            for t, tu, kpts, pop, _l, _s in _iter_nex_k_blocks(filepath, unfold=False):
+                yield t, tu, kpts, pop[:, None]
+
+    # Pass 1: global colour scale over the carrier populations + grid spacing.
+    peak, n_frames, gridk = 0.0, 0, None
+    for _t, _tu, kpts, pcols in frames():
         if gridk is None:
             gridk = kpts
         n_frames += 1
-        cb_peak = max(cb_peak, float(np.nanmax(pop)) if pop.size else 0.0)
+        for name, col, sign in col_levels:
+            p = pcols[:, col] if col is not None else pcols[:, 0]
+            carrier = (occ_full - p) if sign == 'hole' else p
+            peak = max(peak, float(np.nanmax(carrier)) if carrier.size else 0.0)
     if n_frames == 0:
-        print("  (skip) no data blocks found")
-        return
+        print("  (skip) no data blocks found"); return
     spacing = _grid_spacing(gridk)
-    norm = mcolors.Normalize(vmin=0.0, vmax=max(cb_peak, 1e-12))
+    norm = mcolors.Normalize(vmin=0.0, vmax=max(peak, 1e-12))
     stride = max(1, n_frames // max_frames)
-    node_lbl = [n[0] for n in nodes]
-    node_dst = [n[1] for n in nodes]
-
     frame_dir = output_dir / 'spectral_frames'
     frame_dir.mkdir(parents=True, exist_ok=True)
+    clabel = 'carrier population (e in CB, h in VB)' if use_lev else 'CB1 real population'
 
-    # Pass 2: render every (strided) frame.
     n_written = 0
-    for iframe, (t_val, t_unit, kpts, pop, _lev, _sub) in enumerate(
-            _iter_nex_k_blocks(filepath, unfold=False)):
+    for iframe, (t_val, t_unit, kpts, pcols) in enumerate(frames()):
         if iframe % stride != 0:
             continue
-        P = _map_primitive_population(qred, kpts, pop, spacing)
-        good = np.isfinite(P)
         safe_t = f'{t_val:.4f}'.replace('-', 'm').replace('+', 'p')
         tag = f'f{iframe:04d}_t{safe_t}{t_unit}'
+        # carrier population mapped onto the path, per coloured level
+        mapped = {}
+        for name, col, sign in col_levels:
+            p = pcols[:, col] if col is not None else pcols[:, 0]
+            carrier = (occ_full - p) if sign == 'hole' else p
+            mapped[name] = _map_primitive_population(qred, kpts, carrier, spacing)
 
-        # view 1: along the high-symmetry path (thin skeleton + coloured CB1)
+        # view 1: along the high-symmetry path (thin skeleton + coloured bands)
         fig, ax = plt.subplots(figsize=(8, 6))
-        for name in UNFOLD_LEVELS:              # vbm1, vb, cb1, cb2 skeleton
-            if name in levels:
-                ax.plot(dist, levels[name][0], color='0.75', lw=0.6, zorder=1)
-        pts = np.column_stack([dist, e_cb1])
-        segs = np.stack([pts[:-1], pts[1:]], axis=1)
-        seg_pop = 0.5 * (np.nan_to_num(P[:-1]) + np.nan_to_num(P[1:]))
-        seg_lw  = 0.5 * (lw_cb1[:-1] + lw_cb1[1:])
-        lc = LineCollection(segs, cmap=CMAP_POP, norm=norm, zorder=3)
-        lc.set_array(seg_pop); lc.set_linewidths(seg_lw)
-        ax.add_collection(lc)
+        for nm in UNFOLD_LEVELS:
+            if nm in levels:
+                ax.plot(dist, levels[nm][0], color='0.8', lw=0.5, zorder=1)
+        lc_last = None
+        for name, col, sign in col_levels:
+            if name not in levels:
+                continue
+            e_b, kin = levels[name]
+            kemax = max(np.nanmax(kin), 1e-9)
+            lw = 1.0 + 6.0 * np.nan_to_num(kin) / kemax
+            P = mapped[name]
+            pts = np.column_stack([dist, e_b])
+            segs = np.stack([pts[:-1], pts[1:]], axis=1)
+            lc = LineCollection(segs, cmap=CMAP_POP, norm=norm, zorder=3)
+            lc.set_array(0.5 * (np.nan_to_num(P[:-1]) + np.nan_to_num(P[1:])))
+            lc.set_linewidths(0.5 * (lw[:-1] + lw[1:]))
+            ax.add_collection(lc); lc_last = lc
         for d in node_dst:
             ax.axvline(d, color='#888888', linestyle='--', lw=0.7)
         ax.set_xticks(node_dst)
@@ -1068,29 +1118,38 @@ def plot_primitive_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=15
         ax.set_xlim(dist[0], dist[-1]); ax.set_ylim(-6, 8)
         ax.axhline(0.0, color='tab:red', lw=0.8, alpha=0.7)
         ax.set_ylabel('Energy [eV]  (VBM = 0)')
-        ax.set_title(f'Primitive A(k,E): CB1 coloured by population,  '
-                     f't = {t_val:.3f} {t_unit}\n'
-                     f'colour = population, width = carrier kinetic energy')
-        plt.colorbar(lc, ax=ax, label='CB1 real population')
+        ax.set_title(f'Primitive A(k,E): {"4 gap-edge bands" if use_lev else "CB1"} '
+                     f'coloured by carrier population,  t = {t_val:.3f} {t_unit}\n'
+                     f'colour = carrier population, width = carrier kinetic energy')
+        if lc_last is not None:
+            plt.colorbar(lc_last, ax=ax, label=clabel)
         fig.tight_layout()
         fig.savefig(frame_dir / f'nex_k_prim_spectral_path_{tag}.png',
                     dpi=dpi, bbox_inches='tight'); plt.close(fig)
 
-        # view 2: projected onto kx (scatter)
+        # view 2: projected onto kx (scatter, all coloured levels)
         fig, ax = plt.subplots(figsize=(8, 6))
-        for name in UNFOLD_LEVELS:
-            if name in levels:
-                ax.plot(kx_path, levels[name][0], color='0.85', lw=0.4,
+        for nm in UNFOLD_LEVELS:
+            if nm in levels:
+                ax.plot(kx_path, levels[nm][0], color='0.85', lw=0.4,
                         zorder=1, marker='.', ms=1.5, ls='none')
-        im = ax.scatter(kx_path[good], e_cb1[good], c=P[good],
-                        s=8 + 60 * lw_cb1[good], cmap=CMAP_POP, norm=norm,
-                        edgecolors='none', alpha=0.85, zorder=3)
+        im = None
+        for name, col, sign in col_levels:
+            if name not in levels:
+                continue
+            e_b, kin = levels[name]
+            kemax = max(np.nanmax(kin), 1e-9)
+            lw = 1.0 + 6.0 * np.nan_to_num(kin) / kemax
+            P = mapped[name]; good = np.isfinite(P)
+            im = ax.scatter(kx_path[good], e_b[good], c=P[good],
+                            s=8 + 60 * lw[good], cmap=CMAP_POP, norm=norm,
+                            edgecolors='none', alpha=0.85, zorder=3)
         ax.axhline(0.0, color='tab:red', lw=0.8, alpha=0.7)
         ax.set_xlabel('kx [reduced, primitive BZ]')
         ax.set_ylabel('Energy [eV]  (VBM = 0)')
-        ax.set_title(f'Primitive population vs (kx, E),  t = {t_val:.3f} {t_unit}\n'
-                     f'(band-path points; colour = population, size = kinetic energy)')
-        plt.colorbar(im, ax=ax, label='CB1 real population')
+        ax.set_title(f'Primitive carrier population vs (kx, E),  t = {t_val:.3f} {t_unit}')
+        if im is not None:
+            plt.colorbar(im, ax=ax, label=clabel)
         fig.tight_layout()
         fig.savefig(frame_dir / f'nex_k_prim_spectral_kx_{tag}.png',
                     dpi=dpi, bbox_inches='tight'); plt.close(fig)

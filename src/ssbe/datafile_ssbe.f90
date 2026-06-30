@@ -169,6 +169,37 @@ subroutine write_sbe_nex_k_real_header(fh, nk)
 end subroutine write_sbe_nex_k_real_header
 
 
+! Four gap-edge diabatic populations per k (VB-1, VB, CB1, CB2) -- the primitive-
+! cell analogue of the unfolded 4-level output, used by --spectral to colour all
+! four bands (not just CB1).
+subroutine write_sbe_nex_k_lev_header(fh, nk)
+    implicit none
+    integer, intent(in) :: fh, nk
+    write(fh,'(a)') "# REAL carriers: fixed-basis (diabatic) populations of the FOUR gap-edge"
+    write(fh,'(a)') "# bands per k-point -- VB-1, VB, CB1, CB2 (spins NOT summed; primitive cell)."
+    write(fh,'(a,i0)') "# nk = ", nk
+    write(fh, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+        & 1, "ik", "none", 2, "kx", "a.u.", 3, "ky", "a.u.", 4, "kz", "a.u.", &
+        & 5, "pop_vbm1", "none", 6, "pop_vb", "none", 7, "pop_cb1", "none", 8, "pop_cb2", "none"
+    return
+end subroutine write_sbe_nex_k_lev_header
+
+
+subroutine write_sbe_nex_k_lev_block(fh, t, nk, kpoint, pop4)
+    use inputoutput, only: t_unit_time
+    implicit none
+    integer, intent(in) :: fh, nk
+    real(8), intent(in) :: t, kpoint(1:3, 1:nk), pop4(1:4, 1:nk)
+    integer :: ik
+    write(fh, '(a,f16.8,a,a)') "# t = ", t * t_unit_time%conv, " ", trim(t_unit_time%name)
+    do ik = 1, nk
+        write(fh, '(I6, 7E18.10)') ik, kpoint(1:3, ik), pop4(1:4, ik)
+    end do
+    write(fh, '(a)') ""
+    return
+end subroutine write_sbe_nex_k_lev_block
+
+
 subroutine write_sbe_intra_current_header(fh)
     use inputoutput, only: t_unit_current, t_unit_time
     implicit none
