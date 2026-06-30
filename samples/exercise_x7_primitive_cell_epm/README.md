@@ -14,10 +14,9 @@ Zener tunnelling estimate). Removing folding swings L/Γ by ~10⁵. See
 
 The ground state can come from **either** the in-SALMON **Fortran EPM**
 (`theory='epm'`, `epm_cell='primitive'` — now the DEFAULT) **or** the **Python EPM
-primitive references**. For GaAs/Si/graphene the two are **verified
-interchangeable** (identical k-points; band energies to 5e-11 Ha for GaAs/Si,
-~6e-8 eV for graphene), so you no longer need Python for those. CdS still uses the
-Python reference (`epm_cds_primitive.py`; the Fortran wurtzite path is pending).
+primitive references**. For **all four** materials the two are **verified
+interchangeable** (identical k-points; band energies to 5e-11 Ha for GaAs/Si/CdS,
+~6e-8 eV for graphene), so you no longer need Python to generate the GS.
 The clean SBE is **k-grid-agnostic** (it propagates band energies + momentum
 matrix elements, and the Coulomb kernel is metric-aware), so a non-orthogonal /
 triclinic k-grid needs no special handling — the reduced k it stores are labels.
@@ -27,7 +26,7 @@ triclinic k-grid needs no special handling — the reduced k it stores are label
 | GaAs (scalar) | FCC 2-atom rhombohedral | `GaAs_prim_epm_gs.inp` ✅ | `epm_gaas_primitive.py` | Γ 1.39 / L 2.68 / X 3.94 eV |
 | GaAs (spin-orbit) | same + SO | — (spinor Fortran pending) | `epm_gaas_primitive.py` (`INCLUDE_SPIN_ORBIT`) | Δ₀=0.341 eV, gap 1.27 eV |
 | Si | FCC 2-atom (diamond, V^A=0) | `Si_prim_epm_gs.inp` ✅ | `epm_si_primitive.py` | indirect 1.06 eV @ 0.85·X |
-| CdS | wurtzite 4-atom **hexagonal** | — (use Python) | `epm_cds_primitive.py` | direct 2.55 eV (BC1967 2.58) |
+| CdS | wurtzite 4-atom **hexagonal** | `CdS_prim_epm_gs.inp` ✅ | `epm_cds_primitive.py` | direct 2.55 eV (BC1967 2.58) |
 | graphene | 2-atom **hexagonal** (2D-in-vacuum) | `graphene_prim_epm_gs.inp` ✅ | `epm_graphene_primitive.py` | gapless Dirac at K |
 
 ## Build
@@ -67,8 +66,9 @@ python3 -c "import epm_si_primitive as s; s.configure_for_si('Si'); s.prim.main_
 ./build/salmon < Si_prim_sbe_rt.inp
 python3 plot_sbe_results.py -i . -o plots --snapshots --spectral
 
-# --- CdS (7x7x5 hexagonal) -------------------------------------------------
-python3 -c "import epm_cds_primitive as c; c.main_gs(); c.main_bandpath()"
+# --- CdS (7x7x5 hexagonal wurtzite) ----------------------------------------
+./build/salmon < CdS_prim_epm_gs.inp         # in-SALMON Fortran EPM (4-atom polar wurtzite)
+python3 -c "import epm_cds_primitive as c; c.main_bandpath()"
 ./build/salmon < CdS_prim_sbe_rt.inp
 python3 plot_sbe_results.py -i . -o plots --snapshots
 

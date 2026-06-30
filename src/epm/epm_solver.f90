@@ -59,7 +59,9 @@ module epm_solver
         logical :: noncubic = .false.
         integer :: natom = 0                 ! atoms in the basis (non-cubic)
         real(8) :: a_used = 0d0              ! in-plane lattice constant actually used [a.u.]
+        real(8) :: snorm  = 1d0              ! structure-factor normalisation (graphene 1 / CdS n)
         real(8), allocatable :: tau_atoms(:,:)  ! (3,natom) basis positions [a.u.]
+        real(8), allocatable :: spec(:)         ! (natom) species sign +1 cation / -1 anion
 
         ! Plane-wave basis (k-independent set of reciprocal lattice vectors G)
         integer :: npw
@@ -131,16 +133,16 @@ contains
             call build_plane_wave_basis_primitive(epm, epm_pw_cutoff_ry)
         else if (nc_is_noncubic(epm%material)) then
             ! ---- Non-orthogonal primitive cell with a GENERAL structure factor
-            ! (graphene honeycomb; CdS wurtzite pending): epm_noncubic supplies the
-            ! lattice + basis atoms + form factors. ----
+            ! (graphene honeycomb; CdS wurtzite): epm_noncubic supplies the
+            ! lattice + basis atoms (+ species) + form factors. ----
             epm%noncubic = .true.
             call nc_lattice_and_basis(epm%material, epm%a_lattice, epm%a_matrix, &
-                                      epm%natom, epm%tau_atoms, epm%a_used)
+                                      epm%natom, epm%tau_atoms, epm%spec, epm%snorm, epm%a_used)
             call calc_reciprocal_lattice(epm%a_matrix, epm%b_matrix, epm%volume)
             call build_plane_wave_basis_noncubic(epm, epm_pw_cutoff_ry)
         else
             if (irank == 0) write(*,'(a,a)') '# ERROR: Fortran EPM has no path for material ', trim(epm%material)
-            error stop 'epm_solver: unsupported epm_material (CdS primitive not yet ported -- use the Python reference)'
+            error stop 'epm_solver: unsupported epm_material'
         end if
 
         epm%nk = num_kgrid(1) * num_kgrid(2) * num_kgrid(3)
@@ -183,6 +185,7 @@ contains
         if (allocated(epm%kfrac))   deallocate(epm%kfrac)
         if (allocated(epm%kweight)) deallocate(epm%kweight)
         if (allocated(epm%tau_atoms)) deallocate(epm%tau_atoms)
+        if (allocated(epm%spec))      deallocate(epm%spec)
         if (allocated(epm%eigen))   deallocate(epm%eigen)
         if (allocated(epm%occup))   deallocate(epm%occup)
         if (allocated(epm%p_tm))    deallocate(epm%p_tm)
@@ -337,21 +340,22 @@ contains
 
 
     !=========================================================================
-    ! General non-orthogonal Hamiltonian (graphene; CdS pending):
-    !   H_ij = 0.5|k+G_i|^2 delta_ij + V_S(|dG|^2) * S(dG),
-    !   S(dG) = sum_a exp(-i dG . tau_a)   (general multi-atom structure factor;
-    !   V^A = 0 for the centrosymmetric materials handled here).
-    ! Mirrors epm_graphene.py::build_hamiltonian (struct_norm=1, primitive).
+    ! General non-orthogonal Hamiltonian (graphene; CdS wurtzite):
+    !   H_ij = 0.5|k+G_i|^2 delta_ij + S^S(dG) V^S(|dG|^2) + S^A(dG) V^A(|dG|^2)
+    !   S^S(dG) = (1/snorm) sum_a       exp(-i dG.tau_a)
+    !   S^A(dG) = (1/snorm) sum_a P_a   exp(-i dG.tau_a)   (P_a species sign)
+    ! Mirrors epm_graphene.py (V^A=0, snorm=1) and epm_wurtzite_cds.py
+    ! (V^A != 0 polar, snorm = total atoms n). Hermitian by construction.
     !=========================================================================
     subroutine build_hamiltonian_noncubic(epm, kvec, H)
-        use epm_noncubic, only: nc_form_factor
+        use epm_noncubic, only: nc_form_factors
         implicit none
         type(s_epm_info), intent(in) :: epm
         real(8), intent(in) :: kvec(3)
         complex(8), intent(out) :: H(epm%npw, epm%npw)
         integer :: i, j, ia
-        real(8) :: kpg(3), dG(3), VS, dg2, ph
-        complex(8) :: S
+        real(8) :: kpg(3), dG(3), VS, VA, dg2, ph
+        complex(8) :: Ss, Sa, e
 
         do j = 1, epm%npw
             do i = 1, epm%npw
@@ -361,16 +365,19 @@ contains
                 else
                     dG(1:3) = epm%Gcart(1:3, i) - epm%Gcart(1:3, j)
                     dg2 = dot_product(dG, dG)
-                    VS = nc_form_factor(epm%material, dg2, epm%a_used)
-                    if (VS == 0d0) then
+                    call nc_form_factors(epm%material, dg2, epm%a_used, VS, VA)
+                    if (VS == 0d0 .and. VA == 0d0) then
                         H(i, j) = (0d0, 0d0)
                     else
-                        S = (0d0, 0d0)
+                        Ss = (0d0, 0d0);  Sa = (0d0, 0d0)
                         do ia = 1, epm%natom
                             ph = dot_product(dG, epm%tau_atoms(1:3, ia))
-                            S = S + dcmplx(cos(ph), -sin(ph))   ! exp(-i dG.tau_a)
+                            e  = dcmplx(cos(ph), -sin(ph))            ! exp(-i dG.tau_a)
+                            Ss = Ss + e
+                            Sa = Sa + epm%spec(ia) * e
                         end do
-                        H(i, j) = dcmplx(VS, 0d0) * S
+                        Ss = Ss / epm%snorm;  Sa = Sa / epm%snorm
+                        H(i, j) = dcmplx(VS, 0d0) * Ss + dcmplx(VA, 0d0) * Sa
                     end if
                 end if
             end do
