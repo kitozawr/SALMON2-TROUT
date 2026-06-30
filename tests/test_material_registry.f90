@@ -13,7 +13,7 @@ program test_material_registry
     use sbe_superres_ssbe
     implicit none
     integer :: nfail
-    type(s_material_params) :: ga, si, sicb, cds, unk
+    type(s_material_params) :: ga, si, sicb, cds, gr, unk
     real(8), parameter :: TOL = 1d-12
 
     nfail = 0
@@ -21,6 +21,7 @@ program test_material_registry
     si   = get_material_params('Si')
     sicb = get_material_params('Si_cb')
     cds  = get_material_params('CdS')
+    gr   = get_material_params('graphene')
     unk  = get_material_params('Ge')
 
     ! --- found / unknown ---------------------------------------------------
@@ -28,6 +29,7 @@ program test_material_registry
     if (.not. si%found)   call bad('Si not found')
     if (.not. sicb%found) call bad('Si_cb not found')
     if (.not. cds%found)  call bad('CdS not found')
+    if (.not. gr%found)   call bad('graphene not found')
     if (unk%found)        call bad('unknown material reported as found')
 
     ! cubic materials: al(1:3) box is isotropic = a
@@ -106,6 +108,24 @@ program test_material_registry
     ! coefficients are the nonlocal-Auger task -- wiki/07).
     if (ga%auger_ok) call bad('GaAs Auger must be forbidden (not yet cited)')
     if (si%auger_ok) call bad('Si Auger must be forbidden (not yet cited)')
+
+    ! --- graphene (GAPLESS Dirac): ONLY e-ph cited; all gap-based channels off ---
+    ! V^A = 0 (centrosymmetric) -> flagged diamond like Si.
+    if (.not. gr%is_diamond)  call bad('graphene should be flagged diamond (V^A=0, centrosymmetric)')
+    ! e-ph IS cited (Piscanec 2004): two optical modes E2g(196) + A1'(160 meV).
+    if (.not. gr%eph_ok)      call bad('graphene e-ph should be enabled (Piscanec 2004)')
+    if (gr%eph_polar)         call bad('graphene must NOT be flagged polar (no Frohlich LO)')
+    call ichk('graphene eph_nph (E2g + A1'')', gr%eph_nph, 2)
+    call chk('graphene E2g hw = 196 meV', gr%eph_hw_mev(1), 196.0d0)
+    call chk('graphene A1'' hw = 160 meV', gr%eph_hw_mev(2), 160.0d0)
+    ! A1' (K, Kohn anomaly, x2 GW) must dominate the E2g (Gamma) weight.
+    if (gr%eph_wraw(2) <= gr%eph_wraw(1)) call bad('graphene A1'' weight should dominate E2g (Kohn anomaly)')
+    if (sum(gr%eph_wraw(1:gr%eph_nph)) <= 0d0) call bad('graphene eph weights non-positive')
+    ! ALL gap-based / many-body channels are FORBIDDEN on the gapless cone:
+    if (gr%ii_ok)      call bad('graphene impact ionization must be forbidden (gapless: no E_th)')
+    if (gr%auger_ok)   call bad('graphene Auger must be forbidden (gapless: no gap-recombination C)')
+    if (gr%eeh_ok)     call bad('graphene carrier-carrier must be forbidden (no cited FD rate)')
+    if (gr%coulomb_ok) call bad('graphene Coulomb HF must be forbidden (needs 2D V(q), not yet wired)')
 
     ! every cited phonon table's weights must be positive (normalizable)
     if (sum(ga%eph_wraw(1:ga%eph_nph)) <= 0d0) call bad('GaAs eph weights non-positive')

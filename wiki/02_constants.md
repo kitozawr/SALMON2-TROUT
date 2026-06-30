@@ -26,7 +26,7 @@ No channel code changes — every dissipation channel reads the struct. A materi
 | EPM band structure | ✅ CB1966 | ✅ Kunikiyo 1994 | ✅ **validated** (2.55 vs 2.58 eV) | ✅ **validated** (Dirac cone, v_F=9.6e5) | BC1967; exact 2-fold folding to the al-vector SBE cell |
 | Kuhn-Zurek decoherence | ✅ | ✅ | ✅ | ⛔ **disabled by policy** (G6) | material-independent (λ=k_B T/τ_m, user-supplied) |
 | Coulomb HF | ✅ ε=12.9 | ✅ ε=11.7 | ✅ ε=8.9 | 🚧 (2D V(q)=2πe²/εq) | static dielectric (isotropic avg) [Berlincourt 1963] |
-| Electron-phonon | ✅ Fischetti 1e14 | ✅ Meng 1.3e14 | ✅ Fröhlich LO 38 meV, ν_sat=2.9e13 | 🚧 E2g/A1'/acoustic (G4) | ħω_LO [Raman], α≈0.5 [cyclotron]; ν_sat = α·ω_LO (derived from the cited α, ħω_LO) |
+| Electron-phonon | ✅ Fischetti 1e14 | ✅ Meng 1.3e14 | ✅ Fröhlich LO 38 meV, ν_sat=2.9e13 | ✅ **E2g 196 + A1′ 160 meV** (ring-only) | graphene EPC ⟨g²_Γ⟩=0.0405, ⟨g²_K⟩=0.0994 eV² ×2 GW [Piscanec PRL 93,185503 (2004); Lazzeri PRB 78,081406 (2008)]; ν_sat~5e13 (OP-emission cap) |
 | Impact ionization | ✅ Stobbe quartic | ✅ Keldysh quadratic | ✅ E_th=3.6 eV; **prefactor = user fit param** | 🚧 Auger (gapless) | E_th=1.5·E_g [(3/2)E_g rule]; prefactor scarce → must set `sbe_ii_prefactor` |
 | Carrier-carrier (e-e/e-h) | ✅ | ✅ | ⛔ **forbidden** (no cited rate) | 🚧 (G5) | timescale only (sub-100fs at n > 1e18, Shah 1986; Elsaesser 1991) — no rate constant; the FD channel would borrow the GaAs/Si 1e14 |
 | Auger recombination | ⛔ (no verified C yet) | ⛔ (no verified C yet) | ⛔ (no verified C; "Haury 1998" was fabricated, removed) | 🚧 (gapless CM) | CPTP channel wired but **no material ships a cited C** — needs explicit `sbe_auger_c_cm6s`. Cited GaAs/Si/graphene coeffs = the nonlocal-Auger task (wiki/07) |

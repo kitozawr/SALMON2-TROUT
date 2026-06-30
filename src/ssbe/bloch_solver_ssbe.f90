@@ -340,6 +340,18 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
         sbe%flag_decoh   = .false.
     end if
 
+    ! Kuhn-Zurek (single-particle wave-packet) dephasing is UNPHYSICAL for gapless
+    ! Dirac carriers: in graphene coherence loss is an intrinsically many-body
+    ! effect, not a wave-packet-separation kernel. Forbid the combination rather
+    ! than silently producing a meaningless decoherence rate.
+    if (sbe%flag_decoh .and. trim(epm_material) == 'graphene') then
+        write(*, '(a)') '# ERROR: Kuhn-Zurek decoherence (sbe_decoh_*) is not valid for graphene.'
+        write(*, '(a)') '#        Gapless Dirac coherence loss is a many-body effect, not a'
+        write(*, '(a)') '#        single-particle wave-packet dephasing. Disable sbe_decoh_temperature_k'
+        write(*, '(a)') '#        / sbe_decoh_tau_m_fs for graphene.'
+        error stop 'Kuhn-Zurek decoherence forbidden for graphene (many-body coherence)'
+    end if
+
     ! =========================================================================
     ! ЛОГИКА is_active (Frozen Core)
     ! =========================================================================
