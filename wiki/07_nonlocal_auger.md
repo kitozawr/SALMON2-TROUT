@@ -25,6 +25,97 @@ nonlocal Auger is the **same kernel** with the Fermi factors swapped (and the
 energy δ-function direction/sign flipped). **Do not duplicate** the k-sampling or
 the umklapp G-sum — reuse them from the nonlocal impact-ionization path.
 
+## 0.1 Computation reuse — what is genuinely shared (and what is NOT)
+
+(Maintainer, 2026-06-30: *"эффективно использовать все расчёты — не только
+симметрию с impact ionization"*.) Auger should ride the existing stack and add
+little but the Fermi-factor reweighting — BUT the sharing must respect the
+self-energy decomposition (§0.2), or it double-counts. **What is genuinely shared
+(verified against the current code, 2026-06-30):**
+
+1. **The metric-aware *bare* Coulomb building block** `coulomb_kernel(sbe,gs,ik,iq)`
+   (bloch_solver):
+   $$V_{\rm bare}(\mathbf q)=\frac{\texttt{strength}\cdot 4\pi}{\varepsilon_{\rm bg}\,\Omega_{\rm cell}\,N_k\,(q^2+\kappa_0^2)},$$
+   metric-aware **minimum-image** $|\mathbf k-\mathbf q|$ via `gs%b_matrix` (correct
+   on the non-orthogonal primitive cells), $q{=}k$ self-term excluded, prefactor
+   `sbe%coul_pref`, Yukawa regulariser $\kappa_0^2=$`sbe%coul_screen2`. Today it is
+   used **only by Σ^HF** (as the bare exchange). The min-image/metric/self-term
+   machinery is what Auger/II reuse — **not** a ready-made screened $\tilde W$.
+2. **The ring gather** of the Houston spectrum + populations (`comm_summation` over
+   `sbe%icomm`; `sbe%glob_occ`, the gathered `eval,f`) — the SAME one nonlocal-II /
+   inter-k e-ph already do once per step. $n$, $E_F$, $k_F$ (hence $\lambda^2$) and
+   the occupation factors $f_{n\mathbf k}$ are read from it. No second gather.
+3. **The momentum-conserving k-index map** `mp_grid_triple` / `mp_partner_triple`
+   (the O(1) `klut` for $\mathbf k_1+\mathbf k_2=\mathbf k_1'+\mathbf k_2'\
+   (\mathrm{mod}\ \mathbf G)$ from nonlocal-II) — the umklapp $\mathbf G$-sum is the
+   loop over the lattice shifts folding $\mathbf k_4$ into the first BZ.
+4. **The GKLS/Lindblad primitive** `amp_damp_channel` — Auger is two such maps
+   (recombination $c_1\!\to\!v_1$ + hot promotion $c_1\!\to\!c_{\rm hot}$), exactly
+   as the current k-local `apply_auger_recombination`; only the source/target
+   $(\mathbf k,\text{band})$ pairs and the **rate** change.
+
+**What is NOT yet built and must be added by THIS task** (do not claim it exists):
+- The **screened** interaction $\tilde W(\mathbf q)=V_{\rm bare}(\mathbf q)/\varepsilon(\mathbf q,\omega)$.
+  The Part-G dielectric primitives (`eps_lindhard_static`, `eps_thomas_fermi`,
+  `tf_kappa2_degenerate`, `debye_kappa2`, `plasmon_freq2`, `lopc_branches`) exist
+  and are unit-tested **but are NOT consumed by any channel yet** — wiring them
+  into the collision kernel is part of this work.
+- A *microscopic* screened e-e: the present `carrier_carrier_relax` is a **flat-rate
+  FD-thermalisation** ($\alpha=1-e^{-\nu\tau}$ toward a fitted Fermi–Dirac) — it does
+  **not** use $\tilde W$, so there is no screened-e-e kernel to inherit. The screened
+  $\tilde W$ Auger needs is **new shared infrastructure** (which a future microscopic
+  e-e and the refined II would then also use).
+
+## 0.2 Consistency rules — no double-counting (answers the maintainer's questions)
+
+**(a) Exchange vs correlation — Σ^HF must NOT be screened like the collision channels.**
+The self-energy splits (GW-like) into the *coherent* Hartree–Fock exchange
+$\Sigma^{\rm HF}= i G v$ (uses the **bare** $v$ = `coulomb_kernel`; a Hermitian
+mean-field that renormalises the bands/Rabi, README §8) and the *dissipative*
+correlation $\Sigma^{\rm corr}= iG(W-v)$ (uses the **screened** $W=v/\varepsilon$;
+this is the e-e/II/Auger scattering). They are **different objects**: the
+screened-exchange energy shift lives **solely in Σ^HF**, the scattering uses
+$W-v$. So you may reuse the bare `coulomb_kernel` building block, but the **÷ε
+screening is applied ONLY to the collision channels (II/Auger/e-e), never to
+Σ^HF**. Reusing a single "global screened $\tilde W$" for both would double-count
+the screening and smear the exchange shift into the scattering — the standing
+**"No HF double-counting"** rule (decisions log: carrier-carrier is the 2nd-Born/GW
+correlation, dissipative only; the static screened-exchange shift stays in Σ^HF).
+
+**(b) BGR vs HF — they renormalise the SAME gap; do not apply both.**
+Σ^HF already renormalises the band energies dynamically — its diagonal gives
+$\tilde\varepsilon^\lambda_k=\varepsilon^\lambda_k-\sum_q V_{k-q}\,\delta f^\lambda_q$,
+so when `yn_sbe_coulomb='y'` the impact-ionization rate is evaluated in the
+Σ^HF-renormalized Houston basis and **already sees the carrier-shrunk gap**. The
+**BGR** model (Part C7) ADDS a phenomenological $E_{\rm th}(n)=E_{\rm th0}-|K\,n^{1/3}|$
+[Vashishta–Kalia] on top of the threshold. Vashishta–Kalia's $n^{1/3}$ law contains
+**both** exchange and correlation; Σ^HF captures **only** exchange. So:
+- **Σ^HF on ⇒ keep BGR off** (its exchange part is already in the renormalized
+  bands — running both double-counts the exchange gap shrinkage);
+- **Σ^HF off ⇒ BGR is the cheap stand-in** for the whole density-dependent gap
+  shift (the intended use of `yn_sbe_bgr_threshold`).
+The code currently lets both toggle independently → **this is a consistency hazard;
+the Auger task should add a guard / documented mutual-exclusion** (and, for Auger,
+the gap that enters $E_g$ in the hot-promotion energy must come from ONE source —
+the Σ^HF-renormalized bands if Coulomb is on, else the BGR-shifted gap, never both).
+
+**(c) Dynamic screening is material-specific — and the Auger frequency is high.**
+The collision screening $\varepsilon(\mathbf q,\omega)$ must dispatch on the material:
+**static Lindhard/Thomas–Fermi** (`eps_lindhard_static`, default, all materials) vs
+**dynamic LO-phonon–plasmon coupled (LOPC)** which is **GaAs-only** (`lopc_branches`,
+`plasmon_freq2`; Part G model c). Crucially, Auger transition energies are **~1 eV
+≫ the plasma/phonon frequencies**, so the *static* free-carrier screening is
+inappropriate at the Auger energy scale [Burt]:
+- **Si:** take $\lambda^2=0$ (no free-carrier screening; §3.6) — screen through the
+  background $\varepsilon_{\rm bg}(q)$ (K15 model $\varepsilon(q)$) only;
+- **GaAs:** use the dynamic/plasmon-pole form where the LOPC machinery provides it;
+- **graphene:** the 2D static↔dynamical RPA switch [R07/Tomadin] (§6).
+So "reuse the screening" means **reuse the Part-G *primitives*, dispatched per
+material to the right (static vs dynamic) model at the Auger frequency** — not a
+single static kernel applied globally. Where no cited dynamic model exists, fall
+back to the background $\varepsilon_{\rm bg}(q)$ + $\lambda^2=0$ rather than a wrong
+static free-carrier screen.
+
 Current code state to build on:
 - Impact ionization: **nonlocal** (`apply_ii_interk_ring` + `ii_interk_dpop` +
   MP map `mp_grid_triple`/`mp_partner_triple`), ring-gated.

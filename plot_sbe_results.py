@@ -1016,16 +1016,27 @@ def _iter_nex_k_lev_blocks(filepath):
         yield t_val, t_unit, np.array(kk), np.array(pp)
 
 
-def plot_primitive_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=150):
+def plot_primitive_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=150,
+                            occupation_mode=True):
     """A(k,E) spectral movie for a PRIMITIVE (unfolded) cell -- ONE FRAME PER STEP.
 
     Skeleton: the clean primitive bands from *_bandpath.data (thin grey lines).
     Decoration: if the FOUR-level file SYSNAME_sbe_nex_k_lev_real.data is present
-    every gap-edge band (VB-1, VB, CB1, CB2) is coloured by its CARRIER population
-    -- holes (occ - pop) in the valence bands, electrons (pop) in the conduction
-    bands -- so excitation shows up in all four bands on a shared scale. Otherwise
-    only CB1 is coloured from the LCB file (legacy). Two views/frame go into
-    `spectral_frames/` (path + kx projection); assemble with
+    every gap-edge band (VB-1, VB, CB1, CB2) is coloured. Two colouring modes:
+
+    * OCCUPATION (default, occupation_mode=True): each band coloured by its
+      FRACTIONAL OCCUPATION f = pop/occ_full in [0,1]. The valence bands start
+      FULL (f=1, bright) at t=0 and DEPLETE as holes form; the conduction bands
+      start EMPTY (f=0, dark) and FILL. This shows the population *and its
+      evolution* directly -- the valence band is visible from t=0 (fixing the
+      earlier "valence shows nothing until carriers appear" behaviour, which
+      coloured the valence by the hole density occ-pop = 0 at equilibrium).
+    * EXCITATION (occupation_mode=False): holes (occ-pop) in the valence bands,
+      electrons (pop) in the conduction bands -- both 0 at t=0, growing with
+      excitation (the carrier/excitation view; pass --spectral-excitation).
+
+    Otherwise only CB1 is coloured from the LCB file (legacy). Two views/frame go
+    into `spectral_frames/` (path + kx projection); assemble with
     `ffmpeg -i nex_k_prim_spectral_path_f%04d*.png movie.mp4`."""
     from matplotlib.collections import LineCollection
     dist, eig_ha, nv, spinor, nodes, qred = _load_bandpath(bpfile)
@@ -1052,6 +1063,13 @@ def plot_primitive_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=15
     else:
         col_levels = [('cb1', None, 'elec')]
 
+    # colour value per band: fractional occupation (default, valence visible from
+    # t=0) or fractional carrier/excitation (holes in VB, electrons in CB).
+    def colour_value(p, sign):
+        if occupation_mode:
+            return p / occ_full                       # f in [0,1], VB starts at 1
+        return ((occ_full - p) if sign == 'hole' else p) / occ_full   # excitation
+
     def frames():
         if use_lev:
             for t, tu, kpts, pop4 in _iter_nex_k_lev_blocks(lev_file):
@@ -1068,16 +1086,22 @@ def plot_primitive_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=15
         n_frames += 1
         for name, col, sign in col_levels:
             p = pcols[:, col] if col is not None else pcols[:, 0]
-            carrier = (occ_full - p) if sign == 'hole' else p
+            carrier = colour_value(p, sign)
             peak = max(peak, float(np.nanmax(carrier)) if carrier.size else 0.0)
     if n_frames == 0:
         print("  (skip) no data blocks found"); return
     spacing = _grid_spacing(gridk)
-    norm = mcolors.Normalize(vmin=0.0, vmax=max(peak, 1e-12))
+    # occupation: fixed [0,1] scale (full valence = 1); excitation: data peak.
+    norm = mcolors.Normalize(vmin=0.0, vmax=(1.0 if occupation_mode else max(peak, 1e-12)))
     stride = max(1, n_frames // max_frames)
     frame_dir = output_dir / 'spectral_frames'
     frame_dir.mkdir(parents=True, exist_ok=True)
-    clabel = 'carrier population (e in CB, h in VB)' if use_lev else 'CB1 real population'
+    if not use_lev:
+        clabel = 'CB1 real population'
+    elif occupation_mode:
+        clabel = 'occupation  f = pop/occ  (VB full = 1, CB empty = 0)'
+    else:
+        clabel = 'carrier / excitation (e in CB, h in VB)'
 
     n_written = 0
     for iframe, (t_val, t_unit, kpts, pcols) in enumerate(frames()):
@@ -1085,12 +1109,11 @@ def plot_primitive_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=15
             continue
         safe_t = f'{t_val:.4f}'.replace('-', 'm').replace('+', 'p')
         tag = f'f{iframe:04d}_t{safe_t}{t_unit}'
-        # carrier population mapped onto the path, per coloured level
+        # colour value mapped onto the path, per coloured level
         mapped = {}
         for name, col, sign in col_levels:
             p = pcols[:, col] if col is not None else pcols[:, 0]
-            carrier = (occ_full - p) if sign == 'hole' else p
-            mapped[name] = _map_primitive_population(qred, kpts, carrier, spacing)
+            mapped[name] = _map_primitive_population(qred, kpts, colour_value(p, sign), spacing)
 
         # view 1: along the high-symmetry path (thin skeleton + coloured bands)
         fig, ax = plt.subplots(figsize=(8, 6))
@@ -1118,9 +1141,10 @@ def plot_primitive_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=15
         ax.set_xlim(dist[0], dist[-1]); ax.set_ylim(-6, 8)
         ax.axhline(0.0, color='tab:red', lw=0.8, alpha=0.7)
         ax.set_ylabel('Energy [eV]  (VBM = 0)')
+        _what = 'occupation' if (use_lev and occupation_mode) else 'carrier population'
         ax.set_title(f'Primitive A(k,E): {"4 gap-edge bands" if use_lev else "CB1"} '
-                     f'coloured by carrier population,  t = {t_val:.3f} {t_unit}\n'
-                     f'colour = carrier population, width = carrier kinetic energy')
+                     f'coloured by {_what},  t = {t_val:.3f} {t_unit}\n'
+                     f'colour = {_what}, width = carrier kinetic energy')
         if lc_last is not None:
             plt.colorbar(lc_last, ax=ax, label=clabel)
         fig.tight_layout()
@@ -1913,6 +1937,11 @@ def main():
                         help='Also write an A(kx,E)-style spectral map of the '
                              'unfolded CB1 population (needs the 7-column '
                              '*_sbe_nex_k_unfold.data with the e_cb1 column).')
+    parser.add_argument('--spectral-excitation', action='store_true',
+                        help='Colour the primitive spectral A(k,E) frames by '
+                             'EXCITATION (holes in VB, electrons in CB; both 0 at '
+                             't=0) instead of the default OCCUPATION (f=pop/occ; '
+                             'valence full=1 from t=0, watch it deplete).')
     parser.add_argument('--instantaneous', action='store_true',
                         help='Also plot the instantaneous Houston-basis nex_k '
                              'maps (*_sbe_nex_k.data / *_unfold.data). These carry '
@@ -2036,7 +2065,8 @@ def main():
                 stem = f.name[:-len(suffix)]
                 bpfile = f.parent / f'{stem}_bandpath.data'
                 if bpfile.exists():
-                    plot_primitive_spectral(f, bpfile, output_dir, dpi=args.dpi)
+                    plot_primitive_spectral(f, bpfile, output_dir, dpi=args.dpi,
+                                            occupation_mode=not args.spectral_excitation)
                 else:
                     print(f"  (skip spectral) {bpfile.name} not found")
 
