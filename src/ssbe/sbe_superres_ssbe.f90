@@ -38,6 +38,7 @@ module sbe_superres_ssbe
               lindhard_F, eps_lindhard_static, plasmon_freq2, lopc_branches, &
               energy_partner_weights, fermi_dirac, fit_fermi_dirac, &
               carrier_carrier_relax, eph_interk_dpop, &
+              mp_grid_triple, mp_partner_triple, &
               vg_eta_admixture, vg_trunc_shift2, vg_conv_error, vg_ptop_exceeds, &
               get_material_params
 
@@ -809,6 +810,44 @@ contains
             end do
         end do
     end subroutine eph_interk_dpop
+
+    ! =====================================================================
+    ! Monkhorst-Pack momentum-conservation index map (for the inter-k / nonlocal
+    ! collision channels: impact ionization, e-e). A regular MP mesh has points
+    ! k_m = (2m - n + 1)/(2n) per dimension (m = 0..n-1), so crystal-momentum
+    ! conservation k1 + k2 - k1' (mod G) is EXACT integer arithmetic on the index
+    ! triples: m2' = mod(m1 + m2 - m1', n). mp_grid_triple recovers the triple
+    ! from the reduced coordinate and reports the residual (0 for a true MP point,
+    ! so the caller can gate the channel off on a non-MP / symmetry-reduced grid).
+    ! =====================================================================
+    pure subroutine mp_grid_triple(kred, n, m, resid)
+        real(8), intent(in)  :: kred(3)
+        integer, intent(in)  :: n(3)
+        integer, intent(out) :: m(3)
+        real(8), intent(out) :: resid     ! max wrapped |kred - reconstructed MP point|
+        integer :: d
+        real(8) :: km
+        resid = 0d0
+        do d = 1, 3
+            if (n(d) <= 0) then
+                m(d) = 0
+                cycle
+            end if
+            m(d) = modulo(nint(kred(d) * n(d) + (n(d) - 1) * 0.5d0), n(d))
+            km = (2d0 * m(d) - n(d) + 1d0) / (2d0 * n(d))
+            resid = max(resid, abs(modulo(kred(d) - km + 0.5d0, 1d0) - 0.5d0))
+        end do
+    end subroutine mp_grid_triple
+
+    ! Momentum-conserving partner index triple: m2' = mod(m1 + m2 - m1', n).
+    pure subroutine mp_partner_triple(m1, m2, m1p, n, m2p)
+        integer, intent(in)  :: m1(3), m2(3), m1p(3), n(3)
+        integer, intent(out) :: m2p(3)
+        integer :: d
+        do d = 1, 3
+            m2p(d) = modulo(m1(d) + m2(d) - m1p(d), max(n(d), 1))
+        end do
+    end subroutine mp_partner_triple
 
     ! =====================================================================
     ! Velocity-gauge basis sufficiency / N_b convergence primitives.
