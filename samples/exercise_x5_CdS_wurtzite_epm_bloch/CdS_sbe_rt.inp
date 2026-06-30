@@ -54,6 +54,7 @@
 
 &sbe
     ! all yn_sbe_* default OFF -> plain dissipation-free dynamics.
-    ! NOTE: CdS forbids the electron-hole carrier-carrier channel (yn_sbe_eeh) for
-    ! lack of a cited material constant; Auger (yn_sbe_auger) is available and CPTP.
+    ! NOTE: CdS forbids the electron-hole carrier-carrier channel (yn_sbe_eeh) and
+    ! Auger (yn_sbe_auger) for lack of a cited/verified material constant (the
+    ! former CdS Auger C was a fabricated citation, removed); both error stop if on.
 /

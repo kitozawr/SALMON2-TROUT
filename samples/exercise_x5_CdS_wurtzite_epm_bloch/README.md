@@ -45,9 +45,11 @@ where you will run `salmon` (or copy the `CdS_*.data` files next to the input).
 ## Notes / tuning
 
 - **Provenance gates:** CdS forbids the electron-hole carrier-carrier channel
-  (`yn_sbe_eeh`) — no cited material constant — and `error stop`s if you enable
-  it. **Auger** (`yn_sbe_auger`) is available with the cited CdS coefficient and
-  is exactly CPTP, but it is a rare, high-field event (see wiki/01 §13).
+  (`yn_sbe_eeh`) — no cited material rate — and **also Auger** (`yn_sbe_auger`):
+  there is no verified CdS Auger coefficient (the former "Haury 1998" value was a
+  fabricated citation and was removed). Both `error stop` if enabled; a user with
+  a verified Auger C may still opt in via `sbe_auger_c_cm6s` (see wiki/01 §13 and
+  the nonlocal-Auger task wiki/07).
 - **Field:** ω = 0.06 a.u. (1.63 eV) is below the 2.5 eV gap (multiphoton /
   tunnelling). Raise `I_wcm2_1` or ω for stronger excitation.
 - The EPM is a local optical model: it reproduces the direct gap and the

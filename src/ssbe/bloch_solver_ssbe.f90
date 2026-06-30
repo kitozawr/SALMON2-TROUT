@@ -658,7 +658,12 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     ! channel. A conduction electron recombines with a valence hole and the
     ! released gap energy promotes a second conduction electron to a hot state
     ! (gap-edge mean-field closure). Per-carrier rate gamma = C n^2 (R = C n^3).
-    ! Provenance-gated: the material must supply a cited C (CdS: Haury 1998).
+    ! Provenance-gated: the material must supply a cited C, or the user must set
+    ! sbe_auger_c_cm6s explicitly. NO material currently ships a verified default
+    ! C (the former CdS "Haury 1998" coefficient was fabricated and removed), so a
+    ! plain yn_sbe_auger='y' run aborts unless sbe_auger_c_cm6s is given. Cited
+    ! per-material coefficients (GaAs/Si/graphene) are the subject of the
+    ! nonlocal-Auger task -- see wiki/07_nonlocal_auger.md.
     ! =========================================================================
     sbe%flag_auger = (yn_sbe_auger == 'y')
     if (sbe%flag_auger) then
@@ -2225,11 +2230,13 @@ end subroutine apply_carrier_carrier
 ! mean-field (HF-factorization) order, like the impact-ionization channel.
 !
 ! NOTE: this acts on the HOUSTON/adiabatic (real-carrier) populations, not the
-! virtual driving polarization, and the rate is C n^2 with the tiny cited C
-! (CdS 2e-30 cm^6/s) -- so Auger is a RARE event that only becomes visible at
-! very high real carrier density / strong fields. Its job here is to be present
-! and exactly CPTP, not to dominate the dynamics.
-! [Auger coeff Haury PRB 57, 11513 (1998); GKLS: Taj-Rossi PRA 78, 052113 (2008)]
+! virtual driving polarization, and the rate is C n^2 with a typically tiny C
+! -- so Auger is a RARE event that only becomes visible at very high real
+! carrier density / strong fields. Its job here is to be present and exactly
+! CPTP, not to dominate the dynamics. The coefficient C must come from a cited
+! per-material value or an explicit sbe_auger_c_cm6s -- no material ships a
+! verified default today (the former CdS "Haury 1998" C was fabricated/removed).
+! [GKLS: Taj-Rossi PRA 78, 052113 (2008); cited C: see wiki/07_nonlocal_auger.md]
 !=============================================================================
 subroutine apply_auger_recombination(sbe, nba, rho_ad, evals, tau)
     use sbe_superres_ssbe, only: amp_damp_channel

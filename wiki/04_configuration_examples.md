@@ -38,9 +38,9 @@
 | sbe_eph_n | — | 2 | saturation shape exponent n. |
 | yn_sbe_eeh | — | 'n' | carrier-carrier (e-e/e-h) CPTP thermalization to a Fermi-Dirac (F). |
 | sbe_eeh_nu_sat | s⁻¹ | 1e14 | carrier-carrier rate scale. |
-| yn_sbe_auger | — | 'n' | Auger recombination (density-gated, number-conserving CPTP; Sec 13). γ=C·n² (R=C·n³). Provenance-gated: cited C required (CdS only; GaAs/Si/graphene → `error stop`). |
-| sbe_auger_c_cm6s | cm⁶/s | −1.0 | Auger coefficient C; ≤0 ⇒ material default (CdS 2.0e-30 [Haury 1998]). |
-| sbe_auger_n_gate_cm3 | cm⁻³ | −1.0 | activation density; ≤0 ⇒ material default (CdS 1e18 [Shah 1986]). |
+| yn_sbe_auger | — | 'n' | Auger recombination (density-gated, number-conserving CPTP; Sec 13). γ=C·n² (R=C·n³). Provenance-gated: **no material ships a verified C**, so requires an explicit `sbe_auger_c_cm6s` (else `error stop`). Cited GaAs/Si/graphene coeffs = nonlocal-Auger task (wiki/07). |
+| sbe_auger_c_cm6s | cm⁶/s | −1.0 | Auger coefficient C; ≤0 ⇒ material default, but **no material has a verified default** (the former CdS 2.0e-30 carried a fabricated citation, removed) — must be set explicitly. |
+| sbe_auger_n_gate_cm3 | cm⁻³ | −1.0 | activation density; ≤0 ⇒ material default (CdS 1e18 [Shah 1986], used only with a user-supplied C). |
 | yn_sbe_bgr_threshold | — | 'n' | density-dependent II threshold E_th(t)=E_th0−|ΔE_BGR(n)| (C7). |
 | sbe_bgr_n_gate | cm⁻³ | 5.0e18 | apply BGR shift only above this density. |
 | sbe_bgr_coeff | eV·cm | 1.9e-8 | BGR coefficient K (tunable [1.9,3.8]e-8). |
@@ -266,10 +266,11 @@ reference, which emits the orthorhombic `al(1:3)=(a, a√3, c)` cell dataset:
 python3 epm_wurtzite_cds.py        # -> CdS_k/_eigen/_tm.data, _bandpath.data, _unfold.data
 ```
 The orthorhombic cell vector is `al(1:3) = (7.8159, 13.5375, 12.6852)` Bohr.
-Per-channel provenance (registry, all cited): e-ph (Fröhlich LO 38 meV), Coulomb
-(ε₀=8.9), impact ionization (E_th=3.6 eV; **you must set `sbe_ii_prefactor`** —
-no cited CdS value), and **Auger** (C=2.0e-30 cm⁶/s). **Carrier-carrier is
-FORBIDDEN** for CdS (no cited e-e rate; `yn_sbe_eeh='y'` aborts).
+Per-channel provenance (registry): e-ph (Fröhlich LO 38 meV), Coulomb (ε₀=8.9),
+and impact ionization (E_th=3.6 eV; **you must set `sbe_ii_prefactor`** — no cited
+CdS value) are cited/enabled. **Carrier-carrier and Auger are both FORBIDDEN** for
+CdS (no cited e-e rate; and no verified Auger C — the former "Haury 1998" value was
+a fabricated citation, removed): `yn_sbe_eeh='y'` and `yn_sbe_auger='y'` both abort.
 ```fortran
 &calculation
   theory = 'sbe'

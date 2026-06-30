@@ -104,11 +104,18 @@ module sbe_superres_ssbe
     !   * Impact ionization: Keldysh soft threshold E_th ~ 1.5 E_g = 3.6 eV
     !     [md, (3/2)E_g rule]; the PREFACTOR is a fit parameter (CdS-specific
     !     value scarce -- md), so the user must set sbe_ii_prefactor explicitly.
-    ! Carrier-carrier (e-e/e-h) and Auger recombination are CITED and enabled,
-    ! density-gated: e-e sub-100fs thermalization at n >= 1e18 cm^-3 [Shah et al.,
-    ! IEEE JQE 22, 1728 (1986); Elsaesser PRL 66, 1757 (1991)]; Auger via C n^3,
-    ! C = 2.0e-30 cm^6/s [Haury et al., PRB 57, 11513 (1998)]. (The Auger Lindblad
-    ! jump-operator channel itself -- wiki Section 13 -- is still being wired.)
+    ! Carrier-carrier (e-e/e-h) and Auger recombination are FORBIDDEN for CdS:
+    ! the CdS literature only fixes an e-e *timescale* (sub-100fs thermalization
+    ! at n >= 1e18 cm^-3 [Shah et al., IEEE JQE 22, 1728 (1986); Elsaesser PRL 66,
+    ! 1757 (1991)]), NOT a carrier-carrier *rate*. There is NO verified CdS Auger
+    ! coefficient: the previously-cited "C = 2.0e-30 cm^6/s [Haury, PRB 57, 11513
+    ! (1998)]" was a FABRICATED reference -- the real Haury et al. paper is PRL 79,
+    ! 511 (1997) on ferromagnetism in CdMnTe quantum wells, unrelated to Auger in
+    ! CdS, and the coefficient is unconfirmed anywhere. It has been REMOVED; CdS
+    ! Auger is gated off (auger_ok=.false.). A user with a verified rate can still
+    ! opt in explicitly via sbe_auger_c_cm6s. (Physically CdS is wide-gap, Eg~2.4
+    ! eV, so direct Auger is exponentially suppressed and any future channel would
+    ! be the phonon/defect-assisted one -- see wiki/07, the nonlocal-Auger task.)
     ! Piezoelectric acoustic (e33/e31/e15 [Berlincourt PR 129,1009]) and
     ! deformation-potential acoustic are cited but NOT yet SBE Lindblad channels.
     ! =====================================================================
@@ -119,7 +126,8 @@ module sbe_superres_ssbe
     real(8), parameter, public :: CDS_EG_EV     = 2.58d0    ! direct gap at Gamma (low-T) [BC1967 Table I]
     real(8), parameter, public :: CDS_EPS0      = 8.9d0     ! static dielectric (isotropic avg) [Berlincourt 1963]
     real(8), parameter, public :: CDS_EPS_INF   = 5.3d0     ! high-frequency dielectric [Berlincourt 1963]
-    real(8), parameter, public :: CDS_AUGER_C   = 2.0d-30   ! Auger coeff [cm^6/s] [Haury PRB 57, 11513 (1998)]
+    ! (NO verified CdS Auger coefficient exists -- the former CDS_AUGER_C with its
+    !  "Haury PRB 57, 11513 (1998)" citation was fabricated and has been removed.)
     real(8), parameter, public :: CDS_EE_ACT_N  = 1.0d18    ! e-e activation density [cm^-3] [Shah JQE 22, 1728]
     real(8), parameter, public :: CDS_HW_LO_MEV = 38.0d0    ! Frohlich LO ~305 cm^-1 [Raman; md]
     real(8), parameter, public :: CDS_ALPHA_FR  = 0.5d0     ! Frohlich coupling alpha [md]
@@ -248,23 +256,30 @@ contains
             !     ONLY for GaAs/Si (Goodnick-Lugli PRB 37, 2578; Fischetti-Laux
             !     PRB 38, 9721) -- forbidden by the strict provenance rule. The
             !     CdS citations (sub-100fs thermalization @ n>=1e18 [Shah 1986;
-            !     Elsaesser 1991] and Auger C=2.0e-30 cm^6/s [Haury 1998]) describe
-            !     a DENSITY-GATED Auger Lindblad channel (CDS_AUGER_C / CDS_EE_ACT_N
-            !     above; wiki/02 Sec 13) that is NOT YET IMPLEMENTED. Until that
-            !     channel is wired, CdS e-e stays forbidden -- a user who supplies
-            !     their own rate can still opt in via sbe_eeh_nu_sat (the same
-            !     explicit-input escape hatch as the II prefactor).
+            !     Elsaesser 1991]) describe a *timescale*, not a rate. A user who
+            !     supplies their own rate can still opt in via sbe_eeh_nu_sat (the
+            !     same explicit-input escape hatch as the II prefactor).
+            !
+            ! FORBIDDEN channel (NO verified CdS Auger coefficient -> auger_ok=.false.):
+            !   * Auger recombination (yn_sbe_auger). The former default
+            !     "C = 2.0e-30 cm^6/s [Haury, PRB 57, 11513 (1998)]" was a
+            !     FABRICATED reference (the real Haury 1997 PRL is on CdMnTe
+            !     ferromagnetism, not CdS Auger) and was removed. CdS Auger is
+            !     gated off; a user with a verified C may still opt in via
+            !     sbe_auger_c_cm6s.
             mp%found = .true.
             mp%a_lattice_au = CDS_A_BOHR
             mp%cell_au = (/ CDS_A_BOHR, CDS_ASQ3_BOHR, CDS_C_BOHR /)  ! orthorhombic
             mp%is_diamond   = .false.                  ! V^A != 0 (broken inversion)
             mp%coulomb_ok = .true.; mp%eph_ok = .true.; mp%ii_ok = .true.
             mp%eeh_ok = .false.   ! no cited CdS carrier-carrier rate (see above)
-            ! Auger recombination IS cited for CdS: C = 2.0e-30 cm^6/s
-            ! [Haury et al., PRB 57, 11513 (1998)], density-gated at n >= 1e18
-            ! cm^-3 [Shah et al., IEEE JQE 22, 1728 (1986)].
-            mp%auger_ok = .true.
-            mp%auger_c_cm6s = CDS_AUGER_C;  mp%auger_n_gate_cm3 = CDS_EE_ACT_N
+            ! Auger recombination FORBIDDEN for CdS: no verified coefficient (the
+            ! former "Haury PRB 57, 11513" C was fabricated, removed). A density
+            ! gate is kept (Shah 1986) only for a user who supplies their own C
+            ! via sbe_auger_c_cm6s; with auger_ok=.false. the default C is 0, so a
+            ! plain yn_sbe_auger='y' run aborts (provenance) unless C is given.
+            mp%auger_ok = .false.
+            mp%auger_c_cm6s = 0d0;  mp%auger_n_gate_cm3 = CDS_EE_ACT_N
             mp%eps0 = CDS_EPS0;  mp%eps_inf = CDS_EPS_INF
             ! Frohlich polar-optical: a single dominant LO mode at 38 meV; the
             ! rate scale nu_sat = alpha*omega_LO is the cited Frohlich coupling.
