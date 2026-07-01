@@ -676,9 +676,37 @@ def _heatmap_ax(ax, k_a, k_b, grid2d, label_a, label_b, title,
     return im
 
 
+def _cubic_valleys(b_matrix, delta_frac=0.85):
+    """High-symmetry markers for an FCC/diamond cell in Cartesian a.u.: Gamma,
+    the six X points (2*pi/a along the cubic axes; 2*pi/a = |b1|/sqrt3 for FCC),
+    and the six Delta-valley minima (delta_frac*X, Si CBM at ~0.85*X). Returns
+    a list of (kx,ky,kz, marker, color, ms, label) overlay points."""
+    kX = float(np.linalg.norm(b_matrix[0]) / np.sqrt(3.0))
+    ov = [(0.0, 0.0, 0.0, '+', 'lime', 12, 'Γ')]
+    for ax in range(3):
+        for s in (+1.0, -1.0):
+            X = [0.0, 0.0, 0.0]; X[ax] = s * kX
+            D = [0.0, 0.0, 0.0]; D[ax] = s * delta_frac * kX
+            ov.append((X[0], X[1], X[2], 'x', 'cyan', 9, 'X'))
+            ov.append((D[0], D[1], D[2], 'o', 'red', 6, 'Δ'))
+    return ov, kX
+
+
+def _overlay_valleys(ax, ia, ib, valleys):
+    """Project the 3D valley markers onto panel axes (ia,ib) and plot them."""
+    seen = set()
+    for p in valleys:
+        a, b, mk, col, ms = p[ia], p[ib], p[3], p[4], p[5]
+        key = (round(a, 6), round(b, 6), mk)
+        if key in seen:
+            continue
+        seen.add(key)
+        ax.plot(a, b, marker=mk, color=col, ms=ms, mew=2, ls='none', zorder=5)
+
+
 def _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi,
                    log_scale=False, tag='nex_k', basis_label='Houston-basis',
-                   unit='reduced'):
+                   unit='reduced', valleys=None):
     vmin = np.nanmin(pop3d)
     vmax = max(np.nanmax(pop3d), vmin + 1e-30)
 
@@ -692,6 +720,10 @@ def _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi,
     _heatmap_ax(axes[2], ky_u, kz_u, _project(pop3d, 0),
                 'ky', 'kz', 'pop_lcb: ky-kz (avg kx)',
                 vmin=vmin, vmax=vmax, log_scale=log_scale, unit=unit)
+    if valleys is not None:
+        _overlay_valleys(axes[0], 0, 1, valleys)   # kx-ky
+        _overlay_valleys(axes[1], 0, 2, valleys)   # kx-kz
+        _overlay_valleys(axes[2], 1, 2, valleys)   # ky-kz
 
     zone = 'Cartesian BZ (a.u.)' if unit != 'reduced' else 'reduced k'
     fig.suptitle(f'{basis_label} LCB population [{zone}],  t = {t_val:.6f} {t_unit}')
@@ -790,7 +822,8 @@ def plot_intra_current(filepath, rt_filepath, output_dir, dpi=150):
 
 
 def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
-               unfold=False, subtract_baseline=False, real=False, b_matrix=None):
+               unfold=False, subtract_baseline=False, real=False, b_matrix=None,
+               mark_valleys=False):
     print(f"Processing {filepath.name}  "
           f"(cmap={'log' if log_scale else 'linear'}, "
           f"snapshots={'on' if snapshots else 'off'}"
@@ -853,9 +886,10 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
                            log_scale=log_scale, tag=tag, basis_label=basis_label)
             if b_matrix is not None:
                 cx, cy, cz, cpop3d = _cartesian_bz_grid(kpoints, pop, b_matrix, cnbin)
+                vlys = _cubic_valleys(b_matrix)[0] if mark_valleys else None
                 _save_snapshot(cpop3d, cx, cy, cz, t_val, t_unit, output_dir, dpi,
                                log_scale=log_scale, tag=tag + '_cart',
-                               basis_label=basis_label, unit='a.u.')
+                               basis_label=basis_label, unit='a.u.', valleys=vlys)
         times.append(t_val)
         marg_kx.append(np.nanmean(pop3d, axis=(1, 2)))
         marg_ky.append(np.nanmean(pop3d, axis=(0, 2)))
@@ -1942,6 +1976,12 @@ def main():
                              'EXCITATION (holes in VB, electrons in CB; both 0 at '
                              't=0) instead of the default OCCUPATION (f=pop/occ; '
                              'valence full=1 from t=0, watch it deplete).')
+    parser.add_argument('--valleys', action='store_true',
+                        help='Overlay the FCC/diamond high-symmetry markers on the '
+                             'Cartesian-BZ snapshot maps: Gamma (+), the six X '
+                             'points (x), and the six Delta-valley minima at 0.85*X '
+                             '(o) -- e.g. to check the Si hot spots sit in the '
+                             'correct Delta valleys.')
     parser.add_argument('--instantaneous', action='store_true',
                         help='Also plot the instantaneous Houston-basis nex_k '
                              'maps (*_sbe_nex_k.data / *_unfold.data). These carry '
@@ -2010,7 +2050,8 @@ def main():
             found_any = True
             plot_nex_k(f, output_dir, dpi=args.dpi,
                        log_scale=args.log_cmap, snapshots=args.snapshots, real=True,
-                       b_matrix=_bmatrix_for(f, '_sbe_nex_k_real.data'))
+                       b_matrix=_bmatrix_for(f, '_sbe_nex_k_real.data'),
+                       mark_valleys=args.valleys)
         for f in real_uk:
             found_any = True
             plot_nex_k(f, output_dir, dpi=args.dpi,
@@ -2024,7 +2065,8 @@ def main():
                 found_any = True
                 plot_nex_k(f, output_dir, dpi=args.dpi,
                            log_scale=args.log_cmap, snapshots=args.snapshots,
-                           b_matrix=_bmatrix_for(f, '_sbe_nex_k.data'))
+                           b_matrix=_bmatrix_for(f, '_sbe_nex_k.data'),
+                           mark_valleys=args.valleys)
                 if args.subtract_baseline:
                     plot_nex_k(f, output_dir, dpi=args.dpi,
                                log_scale=args.log_cmap, snapshots=args.snapshots,
