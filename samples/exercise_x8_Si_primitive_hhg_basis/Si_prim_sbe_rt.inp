@@ -29,9 +29,9 @@
 
 &system
   yn_periodic  = 'y'
-  al_vec1(1:3) = 0.000000d0, 2.714650d0, 2.714650d0   ! Si FCC primitive a/2 (a=10.26 Bohr)
-  al_vec2(1:3) = 2.714650d0, 0.000000d0, 2.714650d0
-  al_vec3(1:3) = 2.714650d0, 2.714650d0, 0.000000d0
+  al_vec1(1:3) = 0.0000000d0, 2.7146791d0, 2.7146791d0   ! Si FCC primitive a/2 = 5.13 Bohr = 2.7146791 Ang (a=10.26 Bohr)
+  al_vec2(1:3) = 2.7146791d0, 0.0000000d0, 2.7146791d0
+  al_vec3(1:3) = 2.7146791d0, 2.7146791d0, 0.0000000d0
   nelec  = 8
   nstate = 20                          ! MUST match the GS (VG headroom: 16 conduction bands)
 /
