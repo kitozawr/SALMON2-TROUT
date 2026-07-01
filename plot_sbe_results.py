@@ -899,6 +899,8 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
     pop_baseline = None       # per-k population of the first non-zero frame
     times, marg_kx, marg_ky, marg_kz = [], [], [], []
     fmarg_kx, fmarg_ky, fmarg_kz = [], [], []
+    cx_u = cy_u = cz_u = None                       # un-sheared Cartesian axes (a.u.)
+    cmarg_kx, cmarg_ky, cmarg_kz = [], [], []       # Cartesian-BZ k-t marginals
     t_unit_last = ''
     n_blocks = 0
 
@@ -932,8 +934,17 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
         if snapshots:
             _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi,
                            log_scale=log_scale, tag=tag, basis_label=basis_label)
-            if b_matrix is not None:
-                cx, cy, cz, cpop3d = _cartesian_bz_grid(kpoints, pop, b_matrix, cnbin)
+        # Un-shear into the true Cartesian BZ (when the reciprocal vectors are
+        # known): used BOTH for the Cartesian snapshot AND the Cartesian k-t maps,
+        # so both the k-k and the k-t views exist in reduced AND Cartesian coords.
+        if b_matrix is not None:
+            cx, cy, cz, cpop3d = _cartesian_bz_grid(kpoints, pop, b_matrix, cnbin)
+            if cx_u is None:
+                cx_u, cy_u, cz_u = cx, cy, cz
+            cmarg_kx.append(np.nanmean(cpop3d, axis=(1, 2)))
+            cmarg_ky.append(np.nanmean(cpop3d, axis=(0, 2)))
+            cmarg_kz.append(np.nanmean(cpop3d, axis=(0, 1)))
+            if snapshots:
                 vlys = _cubic_valleys(b_matrix)[0] if mark_valleys else None
                 _save_snapshot(cpop3d, cx, cy, cz, t_val, t_unit, output_dir, dpi,
                                log_scale=log_scale, tag=tag + '_cart',
@@ -971,6 +982,17 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
                  log_scale=log_scale, tag=tag)
     _save_kt_map(times, t_unit_last, kz_u, 'kz', marg_kz, output_dir, dpi,
                  log_scale=log_scale, tag=tag)
+
+    # Cartesian (un-sheared, a.u.) k-t maps -- the same evolution against the
+    # PHYSICAL k-axis, so it can be read together with the *_cart_snap_* frames.
+    if cmarg_kx:
+        print(f"  writing Cartesian-BZ time-k maps ...")
+        _save_kt_map(times, t_unit_last, cx_u, 'kx', cmarg_kx, output_dir, dpi,
+                     log_scale=log_scale, tag=tag + '_cart')
+        _save_kt_map(times, t_unit_last, cy_u, 'ky', cmarg_ky, output_dir, dpi,
+                     log_scale=log_scale, tag=tag + '_cart')
+        _save_kt_map(times, t_unit_last, cz_u, 'kz', cmarg_kz, output_dir, dpi,
+                     log_scale=log_scale, tag=tag + '_cart')
 
     if unfold and fmarg_kx:
         print(f"  writing folded cubic-zone time-k maps ...")
