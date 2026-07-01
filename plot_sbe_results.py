@@ -657,18 +657,28 @@ def _make_norm(vmin, vmax, log_scale):
 
 
 def _heatmap_ax(ax, k_a, k_b, grid2d, label_a, label_b, title,
-                vmin=None, vmax=None, factor=8, log_scale=False, unit='reduced'):
+                vmin=None, vmax=None, factor=8, log_scale=False, unit='reduced',
+                clip_poly=None):
     if grid2d.size == 0 or np.all(np.isnan(grid2d)):
         ax.set_title(title + " (no data)")
         return None
     ka_f, kb_f, gf = _interp2d(grid2d, k_a, k_b, factor=factor)
+    if clip_poly is not None:
+        # mask interpolated pixels OUTSIDE the BZ silhouette so the map shows the
+        # true zone shape (and the fade-out) instead of a filled square.
+        from matplotlib.path import Path as _Path
+        GA, GB = np.meshgrid(ka_f, kb_f, indexing='ij')
+        inside = _Path(clip_poly).contains_points(
+            np.column_stack([GA.ravel(), GB.ravel()])).reshape(GA.shape)
+        gf = np.where(inside, gf, np.nan)
+    cmap = plt.get_cmap(CMAP_POP).copy(); cmap.set_bad(alpha=0.0)
     norm = _make_norm(vmin if vmin is not None else np.nanmin(gf),
                       vmax if vmax is not None else np.nanmax(gf),
                       log_scale)
     im = ax.imshow(
         gf.T, origin='lower', aspect='equal' if unit != 'reduced' else 'auto',
         extent=[ka_f[0], ka_f[-1], kb_f[0], kb_f[-1]],
-        cmap=CMAP_POP, norm=norm, interpolation='nearest')
+        cmap=cmap, norm=norm, interpolation='nearest')
     plt.colorbar(im, ax=ax, shrink=0.8)
     ax.set_xlabel(f'{label_a} [{unit}]')
     ax.set_ylabel(f'{label_b} [{unit}]')
@@ -692,8 +702,33 @@ def _cubic_valleys(b_matrix, delta_frac=0.85):
     return ov, kX
 
 
-def _overlay_valleys(ax, ia, ib, valleys):
-    """Project the 3D valley markers onto panel axes (ia,ib) and plot them."""
+def _bz_outline_2d(b_matrix, ia, ib, nsamp=6000):
+    """Closed polygon = the silhouette (projection onto Cartesian axes ia,ib) of
+    the Brillouin zone, i.e. the Wigner-Seitz cell of the reciprocal lattice
+    `b_matrix`. General: FCC -> truncated octahedron (square-with-cut-corners in
+    kx-ky), hexagonal -> hexagon, etc. So the map shows the TRUE zone boundary,
+    not just the square plot frame. Returns None if scipy is unavailable."""
+    rng = (-2, -1, 0, 1, 2)
+    G = np.array([i*b_matrix[0] + j*b_matrix[1] + k*b_matrix[2]
+                  for i in rng for j in rng for k in rng if (i, j, k) != (0, 0, 0)])
+    half = 0.5 * (G * G).sum(1)                         # Bragg planes k.G = |G|^2/2
+    s = np.arange(nsamp) + 0.5                          # Fibonacci-sphere directions
+    phi = np.arccos(1.0 - 2.0*s/nsamp); th = np.pi*(1.0 + 5.0**0.5)*s
+    u = np.column_stack([np.sin(phi)*np.cos(th), np.sin(phi)*np.sin(th), np.cos(phi)])
+    with np.errstate(divide='ignore', invalid='ignore'):
+        r = np.where(u @ G.T > 1e-9, half[None, :] / (u @ G.T), np.inf).min(axis=1)
+    pts = (u * r[:, None])[:, [ia, ib]]                 # BZ-surface points, projected
+    try:
+        from scipy.spatial import ConvexHull
+        poly = pts[ConvexHull(pts).vertices]
+    except Exception:
+        return None
+    return np.vstack([poly, poly[:1]])
+
+
+def _overlay_valleys(ax, ia, ib, valleys, b_matrix=None):
+    """Project the 3D valley markers onto panel axes (ia,ib) and plot them, and
+    (if b_matrix given) draw the true BZ boundary silhouette + size the axes to it."""
     seen = set()
     for p in valleys:
         a, b, mk, col, ms = p[ia], p[ib], p[3], p[4], p[5]
@@ -702,28 +737,41 @@ def _overlay_valleys(ax, ia, ib, valleys):
             continue
         seen.add(key)
         ax.plot(a, b, marker=mk, color=col, ms=ms, mew=2, ls='none', zorder=5)
+    if b_matrix is not None:
+        poly = _bz_outline_2d(b_matrix, ia, ib)
+        if poly is not None:
+            ax.plot(poly[:, 0], poly[:, 1], '-', color='magenta', lw=1.4, zorder=4)
+            m = 1.08 * float(np.abs(poly).max())
+            ax.set_xlim(-m, m); ax.set_ylim(-m, m)      # extend past the coarse-grid data
 
 
 def _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi,
                    log_scale=False, tag='nex_k', basis_label='Houston-basis',
-                   unit='reduced', valleys=None):
+                   unit='reduced', valleys=None, b_matrix=None):
     vmin = np.nanmin(pop3d)
     vmax = max(np.nanmax(pop3d), vmin + 1e-30)
+
+    # clip the Cartesian heatmaps to the BZ silhouette (so the map shows the true
+    # zone shape + fade-out, not a filled square from the interpolation)
+    cp = [None, None, None]
+    if b_matrix is not None:
+        cp = [_bz_outline_2d(b_matrix, 0, 1), _bz_outline_2d(b_matrix, 0, 2),
+              _bz_outline_2d(b_matrix, 1, 2)]
 
     fig, axes = plt.subplots(1, 3, figsize=(19, 5.5))
     _heatmap_ax(axes[0], kx_u, ky_u, _project(pop3d, 2),
                 'kx', 'ky', 'pop_lcb: kx-ky (avg kz)',
-                vmin=vmin, vmax=vmax, log_scale=log_scale, unit=unit)
+                vmin=vmin, vmax=vmax, log_scale=log_scale, unit=unit, clip_poly=cp[0])
     _heatmap_ax(axes[1], kx_u, kz_u, _project(pop3d, 1),
                 'kx', 'kz', 'pop_lcb: kx-kz (avg ky)',
-                vmin=vmin, vmax=vmax, log_scale=log_scale, unit=unit)
+                vmin=vmin, vmax=vmax, log_scale=log_scale, unit=unit, clip_poly=cp[1])
     _heatmap_ax(axes[2], ky_u, kz_u, _project(pop3d, 0),
                 'ky', 'kz', 'pop_lcb: ky-kz (avg kx)',
-                vmin=vmin, vmax=vmax, log_scale=log_scale, unit=unit)
+                vmin=vmin, vmax=vmax, log_scale=log_scale, unit=unit, clip_poly=cp[2])
     if valleys is not None:
-        _overlay_valleys(axes[0], 0, 1, valleys)   # kx-ky
-        _overlay_valleys(axes[1], 0, 2, valleys)   # kx-kz
-        _overlay_valleys(axes[2], 1, 2, valleys)   # ky-kz
+        _overlay_valleys(axes[0], 0, 1, valleys, b_matrix)   # kx-ky
+        _overlay_valleys(axes[1], 0, 2, valleys, b_matrix)   # kx-kz
+        _overlay_valleys(axes[2], 1, 2, valleys, b_matrix)   # ky-kz
 
     zone = 'Cartesian BZ (a.u.)' if unit != 'reduced' else 'reduced k'
     fig.suptitle(f'{basis_label} LCB population [{zone}],  t = {t_val:.6f} {t_unit}')
@@ -889,7 +937,8 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
                 vlys = _cubic_valleys(b_matrix)[0] if mark_valleys else None
                 _save_snapshot(cpop3d, cx, cy, cz, t_val, t_unit, output_dir, dpi,
                                log_scale=log_scale, tag=tag + '_cart',
-                               basis_label=basis_label, unit='a.u.', valleys=vlys)
+                               basis_label=basis_label, unit='a.u.', valleys=vlys,
+                               b_matrix=b_matrix if mark_valleys else None)
         times.append(t_val)
         marg_kx.append(np.nanmean(pop3d, axis=(1, 2)))
         marg_ky.append(np.nanmean(pop3d, axis=(0, 2)))
