@@ -1,6 +1,16 @@
-# Nonlocal Auger recombination — implementation spec (TODO)
+# Nonlocal Auger recombination — implementation spec
 
-**Status: NOT STARTED (spec only).** Recorded 2026-06-30 from the maintainer's
+**Status: CORE IMPLEMENTED (2026-07-02, branch `claude/nonlocal-auger-bgr`).**
+The detailed-balance kernel reuse (§0/§5) is done: `auger_interk_dpop` (the
+exact time-reverse of `ii_interk_dpop` — same quadruples, |V(q)|², broadened δ
+and cited II magnitude; reversed occupations; hot-gain capped), wired as *one
+gather, two kernels* inside `apply_ii_interk_ring`, ring-gated, requiring the
+II channel (shared constants — no separate C), with the k-local C·n³ Auger off
+when the ring is on. Unit test incl. the **Fermi-Dirac detailed-balance fixed
+point** (net II+Auger dpop < 1e-6). The **BGR↔Σ^HF guard** (§0.2b) is in
+(mutual exclusion, error stop). Remaining: the graphene 2D Rana branch (§6),
+the K15 ε(q)/umklapp overlap refinements (§3-4), per-material C validation
+against [S14]/[L90] (§7). Originally recorded 2026-06-30 from the maintainer's
 prompt. This is the next major dissipation-physics task: rebuild Auger
 recombination from the current **k-local** approximation (initial states pinned
 at the band extrema — the first-generation impact-ionization approximation) into
