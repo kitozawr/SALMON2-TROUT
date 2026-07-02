@@ -726,6 +726,85 @@ def _bz_outline_2d(b_matrix, ia, ib, nsamp=6000):
     return np.vstack([poly, poly[:1]])
 
 
+def _bz_wireframe_3d(b_matrix):
+    """Edge list [(p0,p1), ...] of the first Brillouin zone (the Wigner-Seitz
+    cell of the reciprocal lattice `b_matrix`), via the Voronoi cell of the
+    origin: FCC -> truncated octahedron, hexagonal -> hexagonal prism. Each
+    ridge polygon shared with the origin contributes its edges. Returns None
+    if scipy is unavailable."""
+    try:
+        from scipy.spatial import Voronoi
+    except Exception:
+        return None
+    rng = (-1, 0, 1)
+    pts = np.array([i*b_matrix[0] + j*b_matrix[1] + k*b_matrix[2]
+                    for i in rng for j in rng for k in rng])
+    i0 = int(np.argmin((pts * pts).sum(1)))            # the origin
+    vor = Voronoi(pts)
+    edges, seen = [], set()
+    for (p1, p2), rv in zip(vor.ridge_points, vor.ridge_vertices):
+        if i0 not in (p1, p2) or -1 in rv:
+            continue
+        poly = vor.vertices[rv]
+        for a in range(len(rv)):
+            i, j = rv[a], rv[(a + 1) % len(rv)]
+            key = (min(i, j), max(i, j))
+            if key in seen:
+                continue
+            seen.add(key)
+            edges.append((poly[a], poly[(a + 1) % len(rv)]))
+    return edges
+
+
+def _save_bz3d(kfrac, pop, b_matrix, t_val, t_unit, output_dir, dpi,
+               tag='nex_k', basis_label='real-carrier', vmax=None,
+               valleys=None, pop_floor=0.02):
+    """Paper-style 3D Brillouin-zone population plot: the BZ wireframe (Wigner-
+    Seitz cell) + the Monkhorst-Pack k-points as a scatter coloured AND sized by
+    the population. Weakly-populated points fade out (alpha, size -> small) and
+    below pop_floor*max they are dropped entirely, so only the populated valleys
+    show -- the 3D analogue of the *_cart_snap_* maps."""
+    edges = _bz_wireframe_3d(b_matrix)
+    kc = (kfrac - np.round(kfrac)) @ b_matrix           # un-shear
+    ijk = np.array([[i, j, k] for i in (-1, 0, 1) for j in (-1, 0, 1) for k in (-1, 0, 1)])
+    G = ijk @ b_matrix
+    d2 = ((kc[:, None, :] - G[None, :, :]) ** 2).sum(axis=2)
+    kc = kc - G[np.argmin(d2, axis=1)]                  # Wigner-Seitz wrap
+
+    vmax = float(vmax if vmax is not None else max(np.nanmax(pop), 1e-30))
+    m = np.clip(np.nan_to_num(pop) / vmax, 0.0, 1.0)
+    sel = m > pop_floor                                  # transparent below the floor
+
+    fig = plt.figure(figsize=(8.5, 8))
+    ax = fig.add_subplot(projection='3d')
+    if edges is not None:
+        for p0, p1 in edges:
+            ax.plot([p0[0], p1[0]], [p0[1], p1[1]], [p0[2], p1[2]],
+                    color='cornflowerblue', lw=0.9, alpha=0.9)
+    if np.any(sel):
+        sc = ax.scatter(kc[sel, 0], kc[sel, 1], kc[sel, 2],
+                        s=4.0 + 120.0 * m[sel] ** 1.5, c=pop[sel],
+                        cmap=CMAP_POP, vmin=0.0, vmax=vmax,
+                        alpha=None, depthshade=True)
+        sc.set_alpha(np.clip(0.15 + 0.85 * m[sel], 0.0, 1.0))
+        fig.colorbar(sc, ax=ax, shrink=0.6, pad=0.08, label='population')
+    if valleys is not None:
+        for p in valleys:
+            ax.plot([p[0]], [p[1]], [p[2]], marker=p[3], color=p[4],
+                    ms=p[5], mew=2, ls='none')
+    lim = max(np.linalg.norm(b_matrix[i]) for i in range(3)) * 0.62
+    ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.set_zlim(-lim, lim)
+    ax.set_box_aspect((1, 1, 1))
+    ax.set_xlabel('kx [a.u.]'); ax.set_ylabel('ky [a.u.]'); ax.set_zlabel('kz [a.u.]')
+    ax.set_title(f'{basis_label} LCB population in the 3D BZ,  t = {t_val:.3f} {t_unit}\n'
+                 f'(point size & opacity ∝ population; < {pop_floor:.0%} of max hidden)')
+    safe_t = f'{t_val:.6f}'.replace('-', 'm').replace('+', 'p')
+    out = output_dir / f'{tag}_bz3d_t{safe_t}{t_unit}.png'
+    fig.savefig(out, dpi=dpi, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  saved {out.name}")
+
+
 def _overlay_valleys(ax, ia, ib, valleys, b_matrix=None):
     """Project the 3D valley markers onto panel axes (ia,ib) and plot them, and
     (if b_matrix given) draw the true BZ boundary silhouette + size the axes to it."""
@@ -871,7 +950,7 @@ def plot_intra_current(filepath, rt_filepath, output_dir, dpi=150):
 
 def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
                unfold=False, subtract_baseline=False, real=False, b_matrix=None,
-               mark_valleys=False):
+               mark_valleys=False, bz3d=False):
     print(f"Processing {filepath.name}  "
           f"(cmap={'log' if log_scale else 'linear'}, "
           f"snapshots={'on' if snapshots else 'off'}"
@@ -950,6 +1029,10 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
                                log_scale=log_scale, tag=tag + '_cart',
                                basis_label=basis_label, unit='a.u.', valleys=vlys,
                                b_matrix=b_matrix if mark_valleys else None)
+            if bz3d:
+                _save_bz3d(kpoints, pop, b_matrix, t_val, t_unit, output_dir, dpi,
+                           tag=tag, basis_label=basis_label,
+                           valleys=_cubic_valleys(b_matrix)[0] if mark_valleys else None)
         times.append(t_val)
         marg_kx.append(np.nanmean(pop3d, axis=(1, 2)))
         marg_ky.append(np.nanmean(pop3d, axis=(0, 2)))
@@ -2042,6 +2125,12 @@ def main():
                         help='Also write an A(kx,E)-style spectral map of the '
                              'unfolded CB1 population (needs the 7-column '
                              '*_sbe_nex_k_unfold.data with the e_cb1 column).')
+    parser.add_argument('--bz3d', action='store_true',
+                        help='Paper-style 3D Brillouin-zone population plot per '
+                             'time step: the BZ wireframe (Wigner-Seitz cell) + '
+                             'the MP k-points coloured & sized by population '
+                             '(weak points fade/hidden). Needs the reciprocal '
+                             'vectors in the k.data header (primitive datasets).')
     parser.add_argument('--spectral-excitation', action='store_true',
                         help='Colour the primitive spectral A(k,E) frames by '
                              'EXCITATION (holes in VB, electrons in CB; both 0 at '
@@ -2122,7 +2211,7 @@ def main():
             plot_nex_k(f, output_dir, dpi=args.dpi,
                        log_scale=args.log_cmap, snapshots=args.snapshots, real=True,
                        b_matrix=_bmatrix_for(f, '_sbe_nex_k_real.data'),
-                       mark_valleys=args.valleys)
+                       mark_valleys=args.valleys, bz3d=args.bz3d)
         for f in real_uk:
             found_any = True
             plot_nex_k(f, output_dir, dpi=args.dpi,
@@ -2137,7 +2226,7 @@ def main():
                 plot_nex_k(f, output_dir, dpi=args.dpi,
                            log_scale=args.log_cmap, snapshots=args.snapshots,
                            b_matrix=_bmatrix_for(f, '_sbe_nex_k.data'),
-                           mark_valleys=args.valleys)
+                           mark_valleys=args.valleys, bz3d=args.bz3d)
                 if args.subtract_baseline:
                     plot_nex_k(f, output_dir, dpi=args.dpi,
                                log_scale=args.log_cmap, snapshots=args.snapshots,
