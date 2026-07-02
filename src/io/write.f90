@@ -25,6 +25,7 @@ contains
   !! export SYSNAME_k.data file
   subroutine write_k_data(system,stencil)
     use structures
+    use math_constants, only: pi
     use salmon_global, only: base_directory,sysname,yn_periodic
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root,comm_sync_all
@@ -34,7 +35,8 @@ contains
     type(s_stencil),intent(in) :: stencil
     !
     integer :: fh_k
-    integer :: ik,NK
+    integer :: ik,NK,i
+    real(8) :: k_red(3)
     character(100) :: file_k_data
     
     if(yn_periodic=='n') then
@@ -69,25 +71,34 @@ contains
         write(fh_k, '(3E23.15E3)') system%primitive_b(1,1), system%primitive_b(2,2), system%primitive_b(3,3) 
 
       else
+        ! NON-ORTHOGONAL cell: same file contract as the EPM writer and the SBE
+        ! reader (gs_info_ssbe::read_k_data skips any number of '#' lines, then
+        ! reads "ik kx ky kz wk" with kx,ky,kz in REDUCED coordinates; the
+        ! reciprocal vectors travel in '# b1/# b2/# b3' comment lines, which the
+        ! plotter parses to un-shear the grid). The previous layout -- a bare
+        ! 9-float brl row before the data and Cartesian k in the rows -- crashed
+        ! the SBE reader on the brl row and would have double-transformed k.
         write(fh_k, '("#",1X,A)') "k-point distribution (nonorthogonal coordinate)"
-        write(fh_k, '("#",1X,A,":",1X,A)') "brl", "reciprocal primitive vectors"
         write(fh_k, '("#",1X,A,":",1X,A)') "ik", "k-point index"
-        write(fh_k, '("#",1X,A,":",1X,A)') "kx,ky,kz", "k-vectors"
+        write(fh_k, '("#",1X,A,":",1X,A)') "kx,ky,kz", "Reduced coordinate of k-points"
         write(fh_k, '("#",1X,A,":",1X,A)') "wk", "Weight of k-point"
-        write(fh_k, '("#",A,"[",A,"]")') "brl(1:3,1:3)", "a.u."
-        write(fh_k, '(9(1X,E23.15E3))') system%primitive_b(1:3,1:3)
+        do i = 1, 3
+          write(fh_k, '("# b",I1," = ",3E18.10,A)') i, system%primitive_b(1:3,i), '  [a.u.]'
+        end do
         write(fh_k, '("#",99(1X,I0,":",A,"[",A,"]"))') &
           & 1, "ik", "none", &
-          & 2, "kx", "a.u.", &
-          & 3, "ky", "a.u.", &
-          & 4, "kz", "a.u.", &
+          & 2, "kx", "none", &
+          & 3, "ky", "none", &
+          & 4, "kz", "none", &
           & 5, "wk", "none"
         do ik = 1, NK
+          ! k_red(i) = a_i . k_cart / (2*pi)   (a_i . b_j = 2*pi delta_ij)
+          k_red(:) = matmul( transpose(system%primitive_a), system%vec_k(:,ik) )/(2.0d0*pi)
           write(fh_k, '(I6,99(1X,E23.15E3))') &
             & ik, &
-            & system%vec_k(1,ik), &
-            & system%vec_k(2,ik), &
-            & system%vec_k(3,ik), &
+            & k_red(1), &
+            & k_red(2), &
+            & k_red(3), &
             & system%wtk(ik)
         end do !ik
       end if
@@ -390,8 +401,10 @@ contains
           enddo
           enddo
           enddo
-!9000     format(3i8,6e18.10)
-9000     format(3i8,6e18.5)
+          ! Full double precision: this file is the SBE's momentum-matrix input
+          ! (gs_info_ssbe::read_tm_data), 5 significant digits truncate the
+          ! dynamics. Parsed list-directed, so the width change is safe.
+9000     format(3i8,6e25.16e3)
 
           ! -i*<u_mk|[r_j,V_nl]|u_nk>  (j=x,y,z)
           write(fh_tm,*) "# -i* <u_mk|[r_j,V_nl]|u_nk>  (j=x,y,z)"

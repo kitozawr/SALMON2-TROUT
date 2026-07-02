@@ -248,7 +248,11 @@ subroutine init_dft_system(lg,system,stencil)
   if(stencil%if_orthogonal) then
     stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
   else
-    if(nproc_rgrid(1)*nproc_rgrid(2)*nproc_rgrid(3)/=1) &
+    ! Only reject an EXPLICIT r-space decomposition request here: the default
+    ! nproc_rgrid=0 means "decide automatically" (resolved only later, in
+    ! init_process_distribution, which both avoids the domain distribution for
+    ! non-orthogonal cells and re-checks the resolved value).
+    if(nproc_rgrid(1)*nproc_rgrid(2)*nproc_rgrid(3) > 1) &
       stop "error: nonorthogonal lattice and r-space parallelization"
     stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*  &
                       & ( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
@@ -263,7 +267,7 @@ subroutine init_dft_system(lg,system,stencil)
   if(stencil%if_orthogonal) then
     stencil%coef_lap0_nd1 = -0.5d0*cNmat(0,1)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
   else
-    if(nproc_rgrid(1)*nproc_rgrid(2)*nproc_rgrid(3)/=1) &
+    if(nproc_rgrid(1)*nproc_rgrid(2)*nproc_rgrid(3) > 1) &
       stop "error: nonorthogonal lattice and r-space parallelization"
     stencil%coef_lap0_nd1 = -0.5d0*cNmat(0,1)*  &
                       & ( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
@@ -297,10 +301,18 @@ subroutine init_process_distribution(system,icomm1,info)
   integer, intent(in)                 :: icomm1 ! Communicator for single DFT system.
   type(s_parallel_info),intent(inout) :: info
   logical :: if_stop
+  logical :: if_orthogonal_cell
+
+  ! Non-orthogonal cells do not support r-space domain decomposition (the
+  ! non-orthogonal stencil needs the whole domain): steer the automatic
+  ! distribution to k/orbital and verify the resolved value below.
+  if_orthogonal_cell = ( system%primitive_a(2,1)==0d0 .and. system%primitive_a(3,1)==0d0 .and. &
+                       & system%primitive_a(1,2)==0d0 .and. system%primitive_a(3,2)==0d0 .and. &
+                       & system%primitive_a(1,3)==0d0 .and. system%primitive_a(2,3)==0d0 )
 
   if((info%nporbital + sum(info%nprgrid)) == 0) then
     ! Process distribution is automatically decided by SALMON.
-    if (system%ngrid > 16**3) then
+    if (system%ngrid > 16**3 .and. if_orthogonal_cell) then
       call set_numcpu_general(iprefer_domain_distribution,system%nk,system%no,icomm1,info)
     else
       select case(theory)
@@ -314,6 +326,16 @@ subroutine init_process_distribution(system,icomm1,info)
     end if
   else
     ! Process distribution is explicitly specified by user.
+  end if
+
+  if (.not. if_orthogonal_cell .and. product(info%nprgrid) /= 1) then
+    if (comm_is_root(nproc_id_global)) then
+      write(*,'(a)') 'error: nonorthogonal lattice and r-space parallelization'
+      write(*,'(a,3i5)') '  resolved nproc_rgrid =', info%nprgrid
+      write(*,'(a)') '  choose a process count that fits k/orbital parallelization' // &
+                   & ' (or set nproc_rgrid = 1,1,1 and nproc_k/nproc_ob explicitly)'
+    end if
+    stop 'error: nonorthogonal lattice and r-space parallelization'
   end if
 
   if (comm_is_root(nproc_id_global)) then

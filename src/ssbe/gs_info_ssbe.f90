@@ -215,23 +215,33 @@ contains
     end subroutine read_k_data
 
 
-    ! Read eigenvalue data from SALMON's output file
+    ! Read eigenvalue data from SALMON's output file.
+    ! Unit-aware: the SBE works in Hartree, but a DFT ground state run with
+    ! unit_system='A_eV_fs' writes esp in eV -- write_eigen states its unit in
+    ! the 3rd header line ("# 1:io, 2:esp[eV], 3:occ"). Detect that tag and
+    ! convert; files without it (EPM writers, unit_system='au') are already a.u.
     subroutine read_eigen_data()
         implicit none
         character(256) :: dummy
         integer :: fh, i, ik, iik, iib, ib
         real(8) :: tmp(2)
+        real(8) :: e_conv
 
         fh = open_filehandle(trim(gs_directory) // trim(sysname) // '_eigen.data', 'old')
+        e_conv = 1d0
         read(fh, "(a)") dummy
         read(fh, "(a)") dummy
         read(fh, "(a)") dummy
+        if (index(dummy, 'esp[eV]') > 0) then
+            e_conv = 1d0 / au_ev
+            write(*, '(a)') "# read_eigen_data: esp[eV] header detected -> converting to Hartree"
+        end if
         do ik = 1, nk
             read(fh, "(a)") dummy
             do ib = 1, nb
                 read(fh, *) iib, tmp(1:2)
                 if (ib .ne. iib) stop "ib mismatch"
-                gs%eigen(ib, ik) = tmp(1)
+                gs%eigen(ib, ik) = tmp(1) * e_conv
                 ! gs%occup(ib, ik) = ctmp(2)
             end do
         end do

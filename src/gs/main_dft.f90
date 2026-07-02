@@ -199,6 +199,8 @@ call scf_iteration_dft( Miter,rion_update,sum1,  &
 
 if(theory=='dft_band')then
    call write_band(system,energy)
+   ! SYSNAME_bandpath.data: the plotter/SBE-spectral band-path contract
+   call write_bandpath_data(iter_band_kpt,system,band,energy)
 end if
 
 ! output the wavefunctions for next GS calculations
