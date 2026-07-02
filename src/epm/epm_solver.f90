@@ -76,13 +76,31 @@ module epm_solver
         real(8), allocatable :: kfrac(:,:)   ! (3,nk) reduced fractional coords (MP f_i)
         real(8), allocatable :: kweight(:)   ! (nk)
 
+        ! Spin-orbit (spinor) mode: yn_spinorbit='y' promotes the scalar problem
+        ! to 2npw x 2npw (H = 1_2 (x) H_loc + mu H_SO), nb spinor bands with
+        ! occupation 1 each. Cited SO calibration exists for GaAs only
+        ! (Delta0 = 0.341 eV Gamma8-Gamma7); mirrors epm_gaas_reference.py.
+        logical :: spinor = .false.
+        real(8) :: so_mu = 0d0               ! calibrated SO strength [Ha*Bohr^4]
+
         ! Output data (filled by run_epm_calculation; full arrays on every rank
         ! after the cross-rank reduction so that rank 0 alone can write files)
         integer :: nb, ne
         real(8),    allocatable :: eigen(:,:)      ! (nb,nk)  [Ha]
         real(8),    allocatable :: occup(:,:)      ! (nb,nk)
         complex(8), allocatable :: p_tm(:,:,:,:)   ! (nb,nb,3,nk) = <u_m|p|u_n>
+        ! SO velocity correction v_SO = grad_k H_SO in the band basis -> block 2
+        ! (rvnl_tm) of the tm file. Allocated ONLY in spinor mode (scalar EPM is
+        ! local -> block 2 is written as literal zeros, byte-unchanged).
+        complex(8), allocatable :: rvnl_tm(:,:,:,:)
     end type s_epm_info
+
+    ! --- spin-orbit constants (from the Python reference, the source of truth:
+    !     epm_gaas_reference.py SO_* block; GaAs-cited calibration target) -----
+    real(8), parameter :: SO_ALPHA            = 1.5d0    ! lam_anion/lam_cation
+    real(8), parameter :: SO_ZETA_AU          = 2.0d0    ! B(K) inverse-length scale [Bohr^-1]
+    real(8), parameter :: SO_MU_GUESS         = 1.0d-4   ! initial mu [Ha*Bohr^4]
+    real(8), parameter :: SO_DELTA0_GAAS_EV   = 0.341d0  ! GaAs Gamma8-Gamma7 split
 
 contains
 
@@ -91,7 +109,7 @@ contains
     !=========================================================================
     subroutine init_epm_info(epm, icomm)
         use salmon_global, only: epm_material, epm_lattice_constant_au, epm_pw_cutoff_ry, &
-                                 epm_cell, num_kgrid, nstate, nelec
+                                 epm_cell, num_kgrid, nstate, nelec, yn_spinorbit
         use epm_noncubic, only: nc_is_noncubic, nc_lattice_and_basis
         implicit none
         type(s_epm_info), intent(out) :: epm
@@ -104,6 +122,17 @@ contains
         epm%material   = epm_material
         epm%a_lattice  = epm_lattice_constant_au
         epm%cell       = epm_cell
+
+        ! Spin-orbit (spinor) mode: provenance rule -- the cited SO calibration
+        ! target (Delta0 = 0.341 eV) exists for GaAs only; the SO structure
+        ! factor is the zincblende one (tau = a/8(1,1,1)), so the general
+        ! non-cubic cells are excluded too.
+        epm%spinor = (yn_spinorbit == 'y')
+        if (epm%spinor .and. trim(epm%material) /= 'GaAs') then
+            if (irank == 0) write(*,'(a,a)') '# ERROR: spinor EPM has cited SO parameters ' // &
+                & 'for GaAs only (Delta0 = 0.341 eV); got material = ', trim(epm%material)
+            error stop 'epm_solver: spinor mode requires epm_material = GaAs'
+        end if
 
         ! Material class: zincblende/diamond (GaAs/Si/Si_cb -- the Cohen-Bergstresser
         ! cubic form factors) vs the genuinely non-orthogonal cells (graphene; CdS
@@ -153,12 +182,22 @@ contains
         epm%nb = nstate
         epm%ne = nelec
 
+        if (epm%spinor) then
+            if (epm%nb > 2*epm%npw) error stop 'epm_solver: nstate exceeds the spinor basis (2*npw)'
+        else
+            if (epm%nb > epm%npw) error stop 'epm_solver: nstate exceeds the plane-wave basis (npw)'
+        end if
+
         allocate(epm%eigen(1:epm%nb, 1:epm%nk))
         allocate(epm%occup(1:epm%nb, 1:epm%nk))
         allocate(epm%p_tm(1:epm%nb, 1:epm%nb, 1:3, 1:epm%nk))
         epm%eigen = 0d0
         epm%occup = 0d0
         epm%p_tm  = (0d0, 0d0)
+        if (epm%spinor) then
+            allocate(epm%rvnl_tm(1:epm%nb, 1:epm%nb, 1:3, 1:epm%nk))
+            epm%rvnl_tm = (0d0, 0d0)
+        end if
 
         if (irank == 0) then
             write(*,'(a)')          '# EPM (local empirical pseudopotential)'
@@ -169,7 +208,12 @@ contains
                 write(*,'(a)')      '#   cell               = primitive (non-orthogonal, no folding)'
             end if
             write(*,'(a,es12.5,a)') '#   lattice constant a = ', epm%a_lattice, ' a.u.'
-            write(*,'(a,i8)')       '#   plane waves        = ', epm%npw
+            if (epm%spinor) then
+                write(*,'(a,i8,a,i8)') '#   plane waves        = ', epm%npw, '  -> spinor dim ', 2*epm%npw
+                write(*,'(a)')      '#   spin-orbit         = y (spinor bands, occ 1 per band)'
+            else
+                write(*,'(a,i8)')   '#   plane waves        = ', epm%npw
+            end if
             write(*,'(a,i8)')       '#   k-points           = ', epm%nk
             write(*,'(a,i6,a,i6)')  '#   bands requested    = ', epm%nb, ' / valence electrons = ', epm%ne
         end if
@@ -190,6 +234,7 @@ contains
         if (allocated(epm%eigen))   deallocate(epm%eigen)
         if (allocated(epm%occup))   deallocate(epm%occup)
         if (allocated(epm%p_tm))    deallocate(epm%p_tm)
+        if (allocated(epm%rvnl_tm)) deallocate(epm%rvnl_tm)
     end subroutine finalize_epm_info
 
 
@@ -557,6 +602,205 @@ contains
 
 
     !=========================================================================
+    ! Spin-orbit (spinor) machinery -- exact port of epm_gaas_reference.py
+    ! (so_radial_kernel / build_so_matrices / build_hamiltonian_spinor /
+    ! momentum_matrix_spinor / calibrate_so_mu). Spin-block ordering: up
+    ! plane waves 1..npw, down npw+1..2npw; kappa.sigma assembles as
+    ! [[Az, Ax - i Ay], [Ax + i Ay, -Az]].
+    !=========================================================================
+
+    ! B(K) = K / (1 + (K/zeta)^2)^3 -- l=1 kernel with B(K)/K -> 1 as K -> 0
+    pure function so_bkernel(K) result(B)
+        implicit none
+        real(8), intent(in) :: K
+        real(8) :: B, x
+        x = (K / SO_ZETA_AU)**2
+        B = K / (1d0 + x)**3
+    end function so_bkernel
+
+    ! dB/dK = (1 - 5x) / (1 + x)^4,  x = (K/zeta)^2
+    pure function so_bkernel_deriv(K) result(Bp)
+        implicit none
+        real(8), intent(in) :: K
+        real(8) :: Bp, x
+        x = (K / SO_ZETA_AU)**2
+        Bp = (1d0 - 5d0 * x) / (1d0 + x)**4
+    end function so_bkernel_deriv
+
+    ! Per-unit-mu spin-orbit Hamiltonian H_SO/mu (2npw x 2npw) and, when
+    ! with_velocity, the analytic velocity correction v_SO/mu = grad_k (H_SO/mu).
+    ! Zincblende two-atom structure factor on dG (same tau = a/8(1,1,1) and
+    ! parity selection as the local potential).
+    subroutine build_so_term(epm, kvec, H_so, v_so)
+        implicit none
+        type(s_epm_info), intent(in) :: epm
+        real(8), intent(in) :: kvec(3)
+        complex(8), intent(out) :: H_so(2*epm%npw, 2*epm%npw)
+        complex(8), intent(out), optional :: v_so(:, :, :)   ! (2npw, 2npw, 3)
+        logical :: with_velocity
+        integer :: i, j, d, npw, dh, dk, dl
+        real(8) :: c_s, c_a, phase, dGji(3), kap(3), dkap(3), e_d(3)
+        real(8) :: Ki(3), Kj(3), Kmi, Kmj, Bi, Bj, Bpi, Bpj, Khi(3), Khj(3)
+        complex(8) :: F0, BB, dBB, Ax, Ay, Az, cx, cy, cz
+
+        with_velocity = present(v_so)
+        npw = epm%npw
+        c_s = 0.5d0 * (1d0 + SO_ALPHA)
+        c_a = 0.5d0 * (1d0 - SO_ALPHA)
+        H_so = (0d0, 0d0)
+        if (with_velocity) v_so = (0d0, 0d0)
+
+        do j = 1, npw
+            Kj(1:3) = kvec(1:3) + epm%Gcart(1:3, j)
+            Kmj = sqrt(dot_product(Kj, Kj))
+            Bj  = so_bkernel(Kmj)
+            Bpj = so_bkernel_deriv(Kmj)
+            if (Kmj > 1d-12) then
+                Khj = Kj / Kmj
+            else
+                Khj = 0d0
+            end if
+            do i = 1, npw
+                ! parity selection rule (same as the local potential)
+                dh = epm%Gindex(1, i) - epm%Gindex(1, j)
+                dk = epm%Gindex(2, i) - epm%Gindex(2, j)
+                dl = epm%Gindex(3, i) - epm%Gindex(3, j)
+                if (.not. (mod(dh - dk, 2) == 0 .and. mod(dk - dl, 2) == 0)) cycle
+
+                ! pair prefactor / mu (without B B'): -i [c_s S_S + i c_a S_A]
+                phase = dot_product(epm%Gcart(1:3, i) - epm%Gcart(1:3, j), epm%tau)
+                F0 = -zi * dcmplx(c_s * cos(phase), c_a * sin(phase))
+
+                Ki(1:3) = kvec(1:3) + epm%Gcart(1:3, i)
+                Kmi = sqrt(dot_product(Ki, Ki))
+                Bi  = so_bkernel(Kmi)
+                BB  = F0 * (Bi * Bj)
+
+                ! kappa = K x K'
+                kap(1) = Ki(2)*Kj(3) - Ki(3)*Kj(2)
+                kap(2) = Ki(3)*Kj(1) - Ki(1)*Kj(3)
+                kap(3) = Ki(1)*Kj(2) - Ki(2)*Kj(1)
+
+                Ax = BB * kap(1);  Ay = BB * kap(2);  Az = BB * kap(3)
+                H_so(i, j)         =  Az
+                H_so(i, npw+j)     =  Ax - zi * Ay
+                H_so(npw+i, j)     =  Ax + zi * Ay
+                H_so(npw+i, npw+j) = -Az
+
+                if (.not. with_velocity) cycle
+                Bpi = so_bkernel_deriv(Kmi)
+                if (Kmi > 1d-12) then
+                    Khi = Ki / Kmi
+                else
+                    Khi = 0d0
+                end if
+                dGji(1:3) = epm%Gcart(1:3, j) - epm%Gcart(1:3, i)   ! G' - G
+                do d = 1, 3
+                    ! d/dk_d [B B'] and d/dk_d [K x K'] = e_d x (G' - G)
+                    dBB = F0 * (Bpi * Khi(d) * Bj + Bi * Bpj * Khj(d))
+                    e_d = 0d0;  e_d(d) = 1d0
+                    dkap(1) = e_d(2)*dGji(3) - e_d(3)*dGji(2)
+                    dkap(2) = e_d(3)*dGji(1) - e_d(1)*dGji(3)
+                    dkap(3) = e_d(1)*dGji(2) - e_d(2)*dGji(1)
+                    cx = dBB * kap(1) + BB * dkap(1)
+                    cy = dBB * kap(2) + BB * dkap(2)
+                    cz = dBB * kap(3) + BB * dkap(3)
+                    v_so(i, j, d)         =  cz
+                    v_so(i, npw+j, d)     =  cx - zi * cy
+                    v_so(npw+i, j, d)     =  cx + zi * cy
+                    v_so(npw+i, npw+j, d) = -cz
+                end do
+            end do
+        end do
+    end subroutine build_so_term
+
+    ! H_spinor = 1_2 (x) H_loc + mu * (H_SO/mu); optionally also v_SO = mu*(v_SO/mu)
+    subroutine build_hamiltonian_spinor(epm, kvec, mu, H2, v_so)
+        implicit none
+        type(s_epm_info), intent(in) :: epm
+        real(8), intent(in) :: kvec(3), mu
+        complex(8), intent(out) :: H2(2*epm%npw, 2*epm%npw)
+        complex(8), intent(out), optional :: v_so(:, :, :)   ! (2npw, 2npw, 3)
+        complex(8), allocatable :: H_loc(:,:), H_so(:,:)
+        integer :: npw
+
+        npw = epm%npw
+        allocate(H_loc(npw, npw), H_so(2*npw, 2*npw))
+        call build_hamiltonian(epm, kvec, H_loc)
+        if (present(v_so)) then
+            call build_so_term(epm, kvec, H_so, v_so)
+            v_so = mu * v_so
+        else
+            call build_so_term(epm, kvec, H_so)
+        end if
+        H2 = (0d0, 0d0)
+        H2(1:npw, 1:npw)             = H_loc
+        H2(npw+1:2*npw, npw+1:2*npw) = H_loc
+        H2 = H2 + mu * H_so
+        deallocate(H_loc, H_so)
+    end subroutine build_hamiltonian_spinor
+
+    ! Local momentum p (x) 1_2 in the spinor band basis (diagonal k+G per spin block)
+    subroutine calc_momentum_matrix_spinor(epm, kvec, evec, p_mn)
+        implicit none
+        type(s_epm_info), intent(in) :: epm
+        real(8), intent(in) :: kvec(3)
+        complex(8), intent(in)  :: evec(2*epm%npw, epm%nb)
+        complex(8), intent(out) :: p_mn(epm%nb, epm%nb, 3)
+        complex(8), allocatable :: Dc(:,:)
+        integer :: idir, ig
+        real(8) :: kpg
+
+        allocate(Dc(2*epm%npw, epm%nb))
+        do idir = 1, 3
+            do ig = 1, epm%npw
+                kpg = kvec(idir) + epm%Gcart(idir, ig)
+                Dc(ig, 1:epm%nb)         = dcmplx(kpg, 0d0) * evec(ig, 1:epm%nb)
+                Dc(epm%npw+ig, 1:epm%nb) = dcmplx(kpg, 0d0) * evec(epm%npw+ig, 1:epm%nb)
+            end do
+            call ZGEMM('C', 'N', epm%nb, epm%nb, 2*epm%npw, dcmplx(1d0,0d0), &
+                       evec, 2*epm%npw, Dc, 2*epm%npw, dcmplx(0d0,0d0), p_mn(:,:,idir), epm%nb)
+        end do
+        deallocate(Dc)
+    end subroutine calc_momentum_matrix_spinor
+
+    ! Fit mu so the Gamma8-Gamma7 splitting at Gamma equals the cited GaAs
+    ! Delta0 = 0.341 eV. Delta0 is (nearly) linear in mu -> proportional update.
+    ! ne = spinor valence electrons (top six valence states at Gamma:
+    ! Gamma7 doublet [ne-5:ne-4] + Gamma8 quadruplet [ne-3:ne], 1-based).
+    function calibrate_so_mu(epm) result(mu)
+        implicit none
+        type(s_epm_info), intent(in) :: epm
+        real(8) :: mu
+        real(8) :: kgamma(3), target_ha, delta0, g7, g8
+        complex(8), allocatable :: H2(:,:), evec2(:,:)
+        real(8), allocatable :: eval2(:)
+        integer :: it, ne
+
+        ne = epm%ne
+        kgamma = 0d0
+        target_ha = SO_DELTA0_GAAS_EV / au_ev
+        mu = SO_MU_GUESS
+        delta0 = 0d0
+        allocate(H2(2*epm%npw, 2*epm%npw), evec2(2*epm%npw, 2*epm%npw), eval2(2*epm%npw))
+        do it = 1, 30
+            call build_hamiltonian_spinor(epm, kgamma, mu, H2)
+            call eigen_zheev_wrap(H2, eval2, evec2)
+            g7 = 0.5d0  * (eval2(ne-5) + eval2(ne-4))
+            g8 = 0.25d0 * (eval2(ne-3) + eval2(ne-2) + eval2(ne-1) + eval2(ne))
+            delta0 = g8 - g7
+            if (abs(delta0 - target_ha) < 1d-9) exit
+            mu = mu * target_ha / delta0
+        end do
+        write(*,'(a,es16.8,a)') '#   SO calibration: mu = ', mu, ' [a.u.]'
+        write(*,'(a,f8.4,a,f6.3,a)') '#   Delta0 (Gamma8-Gamma7) = ', delta0*au_ev, &
+            & ' eV (target ', SO_DELTA0_GAAS_EV, ' eV)'
+        write(*,'(a,f8.4,a)') '#   direct gap Eg(Gamma)   = ', (eval2(ne+1)-eval2(ne))*au_ev, ' eV'
+        deallocate(H2, evec2, eval2)
+    end function calibrate_so_mu
+
+
+    !=========================================================================
     ! Main driver: distribute k-points over MPI ranks (split_range, as in
     ! init_sbe_bloch_solver), diagonalize H(k) and build p_mn for each local k
     ! (OpenMP-parallel over k within a rank), then reduce the disjoint
@@ -570,13 +814,14 @@ contains
         implicit none
         type(s_epm_info), intent(inout) :: epm
         integer, intent(in) :: icomm
-        integer :: irank, nproc, ik_min, ik_max, ik, ib
+        integer :: irank, nproc, ik_min, ik_max, ik, ib, idir
         integer, allocatable :: itbl_min(:), itbl_max(:)
         real(8),    allocatable :: eigen_local(:,:), occup_local(:,:)
-        complex(8), allocatable :: p_tm_local(:,:,:,:)
-        complex(8), allocatable :: H(:,:), evec(:,:), p_mn(:,:,:)
+        complex(8), allocatable :: p_tm_local(:,:,:,:), rvnl_local(:,:,:,:)
+        complex(8), allocatable :: H(:,:), evec(:,:), p_mn(:,:,:), v_so(:,:,:), tmp(:,:)
         real(8),    allocatable :: eval(:)
-        integer :: nb, npw, nocc
+        integer :: nb, npw, ndim, nocc
+        real(8) :: occ_val
 
         call comm_get_groupinfo(icomm, irank, nproc)
 
@@ -593,13 +838,30 @@ contains
         occup_local = 0d0
         p_tm_local  = (0d0, 0d0)
 
-        nocc = epm%ne / 2  ! doubly-occupied valence bands (closed-shell GaAs: 8 valence e- / 2 atoms)
+        if (epm%spinor) then
+            ! spinor: one electron per spin-orbit-split band; mu calibrated ONCE
+            ! at Gamma on THIS basis (deterministic -> identical on every rank)
+            ndim    = 2 * npw
+            nocc    = epm%ne
+            occ_val = 1.0d0
+            if (irank == 0) write(*,'(a)') '#   calibrating spin-orbit mu at Gamma ...'
+            epm%so_mu = calibrate_so_mu(epm)
+            allocate(rvnl_local(nb, nb, 3, epm%nk))
+            rvnl_local = (0d0, 0d0)
+        else
+            ndim    = npw
+            nocc    = epm%ne / 2  ! doubly-occupied valence bands
+            occ_val = 2.0d0
+        end if
 
-        !$omp parallel default(shared) private(ik, ib, H, evec, p_mn, eval)
-        allocate(H(npw, npw), evec(npw, npw), eval(npw), p_mn(nb, nb, 3))
+        !$omp parallel default(shared) private(ik, ib, idir, H, evec, p_mn, eval, v_so, tmp)
+        allocate(H(ndim, ndim), evec(ndim, ndim), eval(ndim), p_mn(nb, nb, 3))
+        if (epm%spinor) allocate(v_so(ndim, ndim, 3), tmp(ndim, nb))
         !$omp do schedule(dynamic)
         do ik = ik_min, ik_max
-            if (epm%noncubic) then
+            if (epm%spinor) then
+                call build_hamiltonian_spinor(epm, epm%kpoint(1:3, ik), epm%so_mu, H, v_so)
+            else if (epm%noncubic) then
                 call build_hamiltonian_noncubic(epm, epm%kpoint(1:3, ik), H)
             else
                 call build_hamiltonian(epm, epm%kpoint(1:3, ik), H)
@@ -609,17 +871,30 @@ contains
             do ib = 1, nb
                 eigen_local(ib, ik) = eval(ib)
                 if (ib <= nocc) then
-                    occup_local(ib, ik) = 2.0d0
+                    occup_local(ib, ik) = occ_val
                 else
                     occup_local(ib, ik) = 0.0d0
                 end if
             end do
 
-            call calc_momentum_matrix(epm, epm%kpoint(1:3, ik), evec(1:npw, 1:nb), p_mn)
-            p_tm_local(1:nb, 1:nb, 1:3, ik) = p_mn(1:nb, 1:nb, 1:3)
+            if (epm%spinor) then
+                call calc_momentum_matrix_spinor(epm, epm%kpoint(1:3, ik), evec(1:ndim, 1:nb), p_mn)
+                p_tm_local(1:nb, 1:nb, 1:3, ik) = p_mn(1:nb, 1:nb, 1:3)
+                ! SO velocity correction in the band basis -> rvnl block
+                do idir = 1, 3
+                    call ZGEMM('N', 'N', ndim, nb, ndim, dcmplx(1d0,0d0), &
+                               v_so(:,:,idir), ndim, evec, ndim, dcmplx(0d0,0d0), tmp, ndim)
+                    call ZGEMM('C', 'N', nb, nb, ndim, dcmplx(1d0,0d0), &
+                               evec, ndim, tmp, ndim, dcmplx(0d0,0d0), rvnl_local(:,:,idir,ik), nb)
+                end do
+            else
+                call calc_momentum_matrix(epm, epm%kpoint(1:3, ik), evec(1:npw, 1:nb), p_mn)
+                p_tm_local(1:nb, 1:nb, 1:3, ik) = p_mn(1:nb, 1:nb, 1:3)
+            end if
         end do
         !$omp end do
         deallocate(H, evec, eval, p_mn)
+        if (epm%spinor) deallocate(v_so, tmp)
         !$omp end parallel
 
         ! Disjoint-range reduction: sum over ranks reproduces the full array
@@ -627,6 +902,10 @@ contains
         call comm_summation(eigen_local, epm%eigen, size(epm%eigen), icomm)
         call comm_summation(occup_local, epm%occup, size(epm%occup), icomm)
         call comm_summation(p_tm_local,  epm%p_tm,  size(epm%p_tm),  icomm)
+        if (epm%spinor) then
+            call comm_summation(rvnl_local, epm%rvnl_tm, size(epm%rvnl_tm), icomm)
+            deallocate(rvnl_local)
+        end if
 
         deallocate(eigen_local, occup_local, p_tm_local)
         deallocate(itbl_min, itbl_max)
@@ -735,14 +1014,28 @@ contains
                 end do
             end do
         end do
-        write(fh, '(A)') '# block 2: rvnl_tm = -i[r,Vnl]  (all zero: local pseudopotential, no nonlocal correction)'
-        do ik = 1, epm%nk
-            do ib = 1, epm%nb
-                do jb = 1, epm%nb
-                    write(fh, '(3I6, 6E18.10)') ik, ib, jb, 0d0, 0d0, 0d0, 0d0, 0d0, 0d0
+        if (allocated(epm%rvnl_tm)) then
+            ! spinor: block 2 carries the nonlocal SO velocity correction
+            ! v_SO = -i[r, H_SO] = grad_k H_SO in the band basis
+            write(fh, '(A)') '# block 2: rvnl_tm = v_SO (spin-orbit velocity correction, band basis)'
+            do ik = 1, epm%nk
+                do ib = 1, epm%nb
+                    do jb = 1, epm%nb
+                        write(fh, '(3I6, 6E18.10)') ik, ib, jb, &
+                            & (real(epm%rvnl_tm(ib,jb,idir,ik)), aimag(epm%rvnl_tm(ib,jb,idir,ik)), idir = 1, 3)
+                    end do
                 end do
             end do
-        end do
+        else
+            write(fh, '(A)') '# block 2: rvnl_tm = -i[r,Vnl]  (all zero: local pseudopotential, no nonlocal correction)'
+            do ik = 1, epm%nk
+                do ib = 1, epm%nb
+                    do jb = 1, epm%nb
+                        write(fh, '(3I6, 6E18.10)') ik, ib, jb, 0d0, 0d0, 0d0, 0d0, 0d0, 0d0
+                    end do
+                end do
+            end do
+        end if
         close(fh)
 
         write(*,'(a,a)') '# EPM: wrote ground-state data files for sysname = ', trim(sysname)
@@ -836,14 +1129,23 @@ contains
            & action='write', status='replace')
         write(fh, '(A)') '# band path from theory=epm ('//trim(epm%material)//', '// &
                        & trim(epm%cell)//' cell)'
-        write(fh, '(A)') '# spinor = 0'
-        write(fh, '(A,I0)') '# nv = ', epm%ne / 2
+        if (epm%spinor) then
+            write(fh, '(A)') '# spinor = 1'
+            write(fh, '(A,I0)') '# nv = ', epm%ne
+        else
+            write(fh, '(A)') '# spinor = 0'
+            write(fh, '(A,I0)') '# nv = ', epm%ne / 2
+        end if
         write(fh, '(A,I0)') '# nb = ', epm%nb
         write(fh, '(A,*(2X,A,1X,F0.7))') '# nodes:', &
            & ( trim(lbl(i)), node_dist(i), i = 1, nnode )
         write(fh, '(A)') '# ik, dist, q1, q2, q3 (reduced), E_1..E_nb [Ha]'
 
-        allocate(H(epm%npw, epm%npw), evec(epm%npw, epm%npw), eval(epm%npw))
+        if (epm%spinor) then
+            allocate(H(2*epm%npw, 2*epm%npw), evec(2*epm%npw, 2*epm%npw), eval(2*epm%npw))
+        else
+            allocate(H(epm%npw, epm%npw), evec(epm%npw, epm%npw), eval(epm%npw))
+        end if
         ik = 0
         dist = 0d0
         kcart_prev = matmul(transpose(epm%b_matrix), kred_node(:,1))
@@ -868,7 +1170,9 @@ contains
             kcart = matmul(transpose(epm%b_matrix), kred)
             dist  = dist + sqrt(sum((kcart - kcart_prev)**2))
             kcart_prev = kcart
-            if (epm%noncubic) then
+            if (epm%spinor) then
+                call build_hamiltonian_spinor(epm, kcart, epm%so_mu, H)
+            else if (epm%noncubic) then
                 call build_hamiltonian_noncubic(epm, kcart, H)
             else
                 call build_hamiltonian(epm, kcart, H)
