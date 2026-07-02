@@ -24,6 +24,9 @@ subroutine main_epm(icomm)
 
     if (comm_is_root(irank)) then
         call write_epm_files(epm, sysname, base_directory)
+        ! clean primitive band path for the plotter / SBE spectral tooling
+        ! (same contract as the Python refs and theory='dft_band')
+        call write_epm_bandpath(epm, sysname, base_directory)
     end if
 
     call comm_sync_all(icomm)

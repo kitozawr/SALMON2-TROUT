@@ -41,7 +41,8 @@ module epm_solver
     implicit none
 
     private
-    public :: s_epm_info, init_epm_info, run_epm_calculation, write_epm_files, finalize_epm_info
+    public :: s_epm_info, init_epm_info, run_epm_calculation, write_epm_files, &
+            & write_epm_bandpath, finalize_epm_info
 
     type s_epm_info
         character(32) :: material
@@ -746,5 +747,138 @@ contains
 
         write(*,'(a,a)') '# EPM: wrote ground-state data files for sysname = ', trim(sysname)
     end subroutine write_epm_files
+
+
+    !=========================================================================
+    ! Write SYSNAME_bandpath.data: the clean primitive-cell bands along the
+    ! material's high-symmetry path, in the exact format the plotter
+    ! (plot_sbe_results.py::_load_bandpath) and the SBE spectral tooling read
+    ! -- the same contract as the Python EPM references and theory='dft_band':
+    !   # spinor = 0
+    !   # nv / # nb / # nodes: LBL dist ...
+    !   rows: ik dist q1 q2 q3 E_1..E_nb   (q reduced, E in Hartree)
+    ! Primitive cells only (the folded cubic supercell has folded branches --
+    ! its unfolded path comes from the Python refs' unfold pipeline). Root-only
+    ! and serial: the path is ~65 cheap diagonalizations.
+    !=========================================================================
+    subroutine write_epm_bandpath(epm, sysname, gs_directory)
+        use filesystem, only: get_filehandle
+        implicit none
+        type(s_epm_info), intent(in) :: epm
+        character(*), intent(in) :: sysname
+        character(*), intent(in) :: gs_directory
+        integer, parameter :: NDIV = 16          ! points per segment
+        integer :: fh, nseg, nnode, np, i, iseg, j, ik, ib
+        real(8) :: kred_node(3, 6), kred(3), kcart(3), kcart_prev(3), dist
+        real(8), allocatable :: node_dist(:)
+        character(8) :: lbl(6)
+        complex(8), allocatable :: H(:,:), evec(:,:)
+        real(8),    allocatable :: eval(:)
+
+        if (trim(epm%cell) == 'folded') then
+            write(*,'(a)') '# EPM: bandpath emission skipped for the folded cubic cell ' // &
+                         & '(folded branches; use the Python unfold pipeline)'
+            return
+        end if
+
+        ! High-symmetry path per material, REDUCED coords of this cell's (b1,b2,b3)
+        select case (trim(epm%material))
+        case ('GaAs', 'Si', 'Si_kunikiyo', 'Si_cb')
+            ! FCC primitive: L - Gamma - X - W - K - Gamma
+            ! (the same path the Python refs emit -- interchangeable output)
+            nnode = 6
+            lbl(1:6) = (/ 'L       ', 'Gamma   ', 'X       ', 'W       ', 'K       ', 'Gamma   ' /)
+            kred_node(:,1) = (/ 0.50d0,  0.50d0,  0.50d0 /)
+            kred_node(:,2) = (/ 0.00d0,  0.00d0,  0.00d0 /)
+            kred_node(:,3) = (/ 0.50d0,  0.00d0,  0.50d0 /)
+            kred_node(:,4) = (/ 0.50d0,  0.25d0,  0.75d0 /)
+            kred_node(:,5) = (/ 0.375d0, 0.375d0, 0.75d0 /)
+            kred_node(:,6) = (/ 0.00d0,  0.00d0,  0.00d0 /)
+        case ('graphene')
+            ! Hexagonal: Gamma - M - K - Gamma. In THIS module's 60-degree
+            ! convention (nc_lattice_and_basis: a2 = a(1/2, sqrt3/2)) the Dirac
+            ! corner ADJACENT to M = b1/2 is K = (2/3,1/3) -> Cartesian
+            ! (4pi/3a, 0), giving the standard short M-K leg (|MK|/|GM| = 0.577).
+            nnode = 4
+            lbl(1:4) = (/ 'Gamma   ', 'M       ', 'K       ', 'Gamma   ' /)
+            kred_node(:,1) = (/ 0.00d0,      0.00d0,      0.00d0 /)
+            kred_node(:,2) = (/ 0.50d0,      0.00d0,      0.00d0 /)
+            kred_node(:,3) = (/ 2.0d0/3.0d0, 1.0d0/3.0d0, 0.00d0 /)
+            kred_node(:,4) = (/ 0.00d0,      0.00d0,      0.00d0 /)
+        case ('CdS')
+            ! Wurtzite: A - Gamma - M - K - Gamma. 120-degree convention
+            ! (a2 = a(-1/2, sqrt3/2)) -> corner K = (1/3, 1/3, 0).
+            nnode = 5
+            lbl(1:5) = (/ 'A       ', 'Gamma   ', 'M       ', 'K       ', 'Gamma   ' /)
+            kred_node(:,1) = (/ 0.00d0,      0.00d0,      0.50d0 /)
+            kred_node(:,2) = (/ 0.00d0,      0.00d0,      0.00d0 /)
+            kred_node(:,3) = (/ 0.50d0,      0.00d0,      0.00d0 /)
+            kred_node(:,4) = (/ 1.0d0/3.0d0, 1.0d0/3.0d0, 0.00d0 /)
+            kred_node(:,5) = (/ 0.00d0,      0.00d0,      0.00d0 /)
+        case default
+            write(*,'(a,a)') '# EPM: no band path defined for material ', trim(epm%material)
+            return
+        end select
+        nseg = nnode - 1
+        np   = nseg * NDIV + 1                   ! includes the final endpoint
+
+        ! node distances (cumulative Cartesian path length)
+        allocate(node_dist(nnode))
+        node_dist(1) = 0d0
+        do i = 2, nnode
+            kcart      = matmul(transpose(epm%b_matrix), kred_node(:,i))
+            kcart_prev = matmul(transpose(epm%b_matrix), kred_node(:,i-1))
+            node_dist(i) = node_dist(i-1) + sqrt(sum((kcart - kcart_prev)**2))
+        end do
+
+        fh = get_filehandle()
+        open(unit=fh, file=trim(gs_directory)//trim(sysname)//'_bandpath.data', &
+           & action='write', status='replace')
+        write(fh, '(A)') '# band path from theory=epm ('//trim(epm%material)//', '// &
+                       & trim(epm%cell)//' cell)'
+        write(fh, '(A)') '# spinor = 0'
+        write(fh, '(A,I0)') '# nv = ', epm%ne / 2
+        write(fh, '(A,I0)') '# nb = ', epm%nb
+        write(fh, '(A,*(2X,A,1X,F0.7))') '# nodes:', &
+           & ( trim(lbl(i)), node_dist(i), i = 1, nnode )
+        write(fh, '(A)') '# ik, dist, q1, q2, q3 (reduced), E_1..E_nb [Ha]'
+
+        allocate(H(epm%npw, epm%npw), evec(epm%npw, epm%npw), eval(epm%npw))
+        ik = 0
+        dist = 0d0
+        kcart_prev = matmul(transpose(epm%b_matrix), kred_node(:,1))
+        do iseg = 1, nseg
+            do j = 0, NDIV - 1
+                kred = kred_node(:,iseg) + (kred_node(:,iseg+1) - kred_node(:,iseg)) * dble(j) / dble(NDIV)
+                call bandpath_point()
+            end do
+        end do
+        kred = kred_node(:,nnode)
+        call bandpath_point()
+        close(fh)
+        deallocate(H, evec, eval, node_dist)
+
+        write(*,'(a,i0,a)') '# EPM: wrote band path ('//trim(gs_directory)//trim(sysname)// &
+                          & '_bandpath.data, ', np, ' k-points)'
+
+    contains
+
+        subroutine bandpath_point()
+            implicit none
+            kcart = matmul(transpose(epm%b_matrix), kred)
+            dist  = dist + sqrt(sum((kcart - kcart_prev)**2))
+            kcart_prev = kcart
+            if (epm%noncubic) then
+                call build_hamiltonian_noncubic(epm, kcart, H)
+            else
+                call build_hamiltonian(epm, kcart, H)
+            end if
+            call eigen_zheev_wrap(H, eval, evec)
+            ik = ik + 1
+            write(fh, '(I6,F14.7,3F10.5,*(E18.10))') ik, dist, kred(1:3), &
+               & ( eval(ib), ib = 1, epm%nb )
+        end subroutine bandpath_point
+
+    end subroutine write_epm_bandpath
 
 end module epm_solver

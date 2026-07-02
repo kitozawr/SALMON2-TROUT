@@ -46,10 +46,12 @@ what the generator used.
 
 ```sh
 # --- GaAs scalar (8x8x8) ---------------------------------------------------
-# in-SALMON Fortran EPM (default primitive) -- no Python needed:
-./build/salmon < GaAs_prim_epm_gs.inp        # writes GaAs_prim_k/_eigen/_tm.data
-#   (equivalently: python3 -c "import epm_gaas_primitive as p; p.main_gs()")
-python3 -c "import epm_gaas_primitive as p; p.main_bandpath()"   # optional clean bandpath
+# in-SALMON Fortran EPM (default primitive) -- no Python needed: writes
+# GaAs_prim_k/_eigen/_tm.data AND GaAs_prim_bandpath.data (the clean primitive
+# band path along L-Gamma-X-W-K-Gamma, verified interchangeable with the
+# Python p.main_bandpath() to 5e-11 Ha at every node).
+./build/salmon < GaAs_prim_epm_gs.inp
+#   (equivalently: python3 -c "import epm_gaas_primitive as p; p.main_gs(); p.main_bandpath()")
 ./build/salmon < GaAs_prim_sbe_rt.inp
 python3 plot_sbe_results.py -i . -o plots --snapshots --spectral
 
