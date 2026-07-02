@@ -444,6 +444,14 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
         if (sbe%active_idx(ib) <= homo_idx) sbe%nv_act = sbe%nv_act + 1
     end do
 
+    ! Super-mode ring flag -- set UNCONDITIONALLY and BEFORE every channel block:
+    ! it gates the inter-k (ring) variants of e-ph, impact ionization and Auger,
+    ! and the ring-vs-allgather choice inside Coulomb HF. (BUG FIXED 2026-07-02:
+    ! this used to be set inside the Coulomb block only, so with yn_sbe_coulomb='n'
+    ! the inter-k channels were SILENTLY OFF even with yn_sbe_superres='y' --
+    ! runs fell back to the k-local / BZ-averaged paths without warning.)
+    sbe%flag_ring = (yn_sbe_superres == 'y')
+
     sbe%flag_impact = (yn_sbe_impact_ionization == 'y')
     if (sbe%flag_impact .and. .not. mp%ii_ok) &
         call stop_forbidden_channel(epm_material, 'impact ionization (yn_sbe_impact_ionization)')
@@ -545,9 +553,6 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
                       / (max(coul_eps_eff, 1d-12) * gs%volume * dble(gs%nk))
         sbe%coul_screen2 = sbe_coulomb_screen_au**2
         ! sbe%icomm already set above (used by all collectives, not just Coulomb)
-        ! Use the systolic ring (Part D) for the non-local exchange sum in
-        ! super-mode (memory O(Nk/P)); otherwise the all-gather (memory O(Nk)).
-        sbe%flag_ring = (yn_sbe_superres == 'y')
         if (sbe%n_active_bands > 0) &
             allocate(sbe%sigma_hf(1:sbe%n_active_bands, 1:sbe%n_active_bands, &
                                   sbe%ik_min:sbe%ik_max))
@@ -678,7 +683,30 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     ! nonlocal-Auger task -- see wiki/07_nonlocal_auger.md.
     ! =========================================================================
     sbe%flag_auger = (yn_sbe_auger == 'y')
-    if (sbe%flag_auger) then
+    if (sbe%flag_auger .and. sbe%flag_ring) then
+        ! ---- NONLOCAL (ring) Auger: the exact time-reverse of the nonlocal
+        ! impact ionization -- same |M|^2 kernel (momentum map, screened |V(q)|^2,
+        ! broadened energy delta, cited Stobbe/Keldysh magnitude), swapped Fermi
+        ! factors [detailed balance; Rana 2007; Kioupakis 2015]. NO separate
+        ! coefficient C is needed or used: the rate scale IS the II kernel's.
+        ! It therefore REQUIRES the impact-ionization channel configured (the
+        ! shared constants live in sbe%ii_*): enable yn_sbe_impact_ionization.
+        if (.not. sbe%flag_impact) then
+            write(*, '(a)') '# ERROR: the nonlocal (ring) Auger is the time-reverse of the'
+            write(*, '(a)') '#        nonlocal impact ionization and shares its kernel constants.'
+            write(*, '(a)') '#        Enable yn_sbe_impact_ionization=''y'' together with'
+            write(*, '(a)') '#        yn_sbe_auger=''y'' when yn_sbe_superres=''y''.'
+            error stop 'ring Auger requires the impact-ionization channel (shared kernel)'
+        end if
+        sbe%auger_eg_au = gs%eg_au
+        if (lprint) then
+            write(*, '(a)') '# Auger recombination: NONLOCAL inter-k (ring) mode enabled:'
+            write(*, '(a)') '#   time-reverse of the nonlocal impact ionization (same |M|^2,'
+            write(*, '(a)') '#   swapped Fermi factors, detailed balance) -- no separate C.'
+            write(*, '(a)') '#   k-local C*n^3 channel gated OFF (no double count).'
+        end if
+    else if (sbe%flag_auger) then
+        ! ---- k-LOCAL (C n^3) Auger: needs a verified coefficient. ----
         if (.not. mp%found) call stop_unknown_material(epm_material, 'Auger (yn_sbe_auger)')
         if (.not. mp%auger_ok .and. sbe_auger_c_cm6s <= 0d0) &
             call stop_forbidden_channel(epm_material, 'Auger recombination (yn_sbe_auger, no cited C)')
@@ -715,6 +743,20 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     sbe%au_dens_cm3 = 1d24 / (0.52917721067d0)**3     ! a.u.^-3 -> cm^-3 (Bohr in Angstrom)
     sbe%ii_eth0_au  = sbe%ii_eth_au                   ! fixed reference threshold
     sbe%flag_bgr    = (yn_sbe_bgr_threshold == 'y') .and. sbe%flag_impact
+    ! GUARD -- BGR and Sigma^HF are mutually exclusive (wiki/07 Sec 0.2b): both
+    ! renormalise the gap with carrier density. With Coulomb HF on, the Houston
+    ! eigenvalues already carry the dynamic gap shrinkage (diagonal
+    ! eps~ = eps - sum_q V_{k-q} f_q), so ALSO lowering the II threshold by the
+    ! Vashishta-Kalia n^(1/3) law would count the same physics twice. BGR is the
+    ! cheap STAND-IN for the HF shift when Coulomb is off -- never both.
+    if (sbe%flag_bgr .and. sbe%flag_coulomb) then
+        write(*, '(a)') '# ERROR: yn_sbe_bgr_threshold=''y'' together with yn_sbe_coulomb=''y'''
+        write(*, '(a)') '#        double-counts the density-driven gap renormalisation:'
+        write(*, '(a)') '#        Sigma^HF already shifts the Houston eigenvalues the impact-'
+        write(*, '(a)') '#        ionization threshold is measured against. Use BGR only as the'
+        write(*, '(a)') '#        stand-in when Coulomb HF is off (see wiki/07 Sec 0.2b).'
+        error stop 'BGR threshold + Coulomb HF are mutually exclusive (gap double-count)'
+    end if
     if (sbe%flag_bgr) then
         sbe%bgr_n_gate = sbe_bgr_n_gate
         sbe%bgr_coeff  = sbe_bgr_coeff
@@ -1137,10 +1179,13 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     ! outside the OpenMP region and called by every rank.
     if (sbe%flag_eph .and. sbe%flag_ring) call apply_eph_interk_ring(sbe, gs, Ac_end, dt)
 
-    ! Momentum-conserving nonlocal impact ionization through the ring (once per
-    ! step, after the unitary evolution; k-local II gated off in houston_dissipate
-    ! when the ring is on). MPI-collective -> outside the OpenMP region.
-    if (sbe%flag_impact .and. sbe%flag_ring) call apply_ii_interk_ring(sbe, gs, Ac_end, dt)
+    ! Momentum-conserving nonlocal impact ionization AND its time-reverse
+    ! (Auger recombination) through the ring -- one gather, two kernels (once
+    ! per step, after the unitary evolution; the k-local II and the k-local
+    ! C n^3 Auger are gated off in houston_dissipate when the ring is on).
+    ! MPI-collective -> outside the OpenMP region.
+    if ((sbe%flag_impact .or. sbe%flag_auger) .and. sbe%flag_ring) &
+        call apply_ii_interk_ring(sbe, gs, Ac_end, dt)
 
 end subroutine dt_evolve_bloch_cf4
 
@@ -1588,7 +1633,7 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
             m_sub = max(m_sub, min(20, max(1, ceiling(10d0 * sbe%eph_numax_au * tau))))
         if (sbe%flag_eeh) &
             m_sub = max(m_sub, min(20, max(1, ceiling(10d0 * sbe%eeh_nu_au * tau))))
-        if (sbe%flag_auger) &
+        if (sbe%flag_auger .and. .not. sbe%flag_ring) &
             m_sub = max(m_sub, min(20, max(1, ceiling(10d0 * &
                     sbe%auger_c_au * sbe%n_exc_cm3**2 * tau))))
         tau_sub_d = tau / dble(m_sub)
@@ -1602,7 +1647,10 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
                 call apply_eph_relaxation(sbe, nba, t2, evals, Ac, tau_sub_d)
             if (sbe%flag_eeh) &
                 call apply_carrier_carrier(sbe, nba, t2, evals, tau_sub_d)
-            if (sbe%flag_auger) &
+            ! k-LOCAL (C n^3) Auger only when the ring is OFF; with the ring the
+            ! momentum-conserving inter-k Auger (the II time-reverse) runs once
+            ! per step in apply_ii_interk_ring (outside).
+            if (sbe%flag_auger .and. .not. sbe%flag_ring) &
                 call apply_auger_recombination(sbe, nba, t2, evals, tau_sub_d)
         end do
     end if
@@ -2046,7 +2094,7 @@ end subroutine apply_eph_interk_ring
 ! coherence factor) to each local rho(k). Exactly trace-conserving / carrier-
 ! multiplying.
 subroutine apply_ii_interk_ring(sbe, gs, Ac, tau)
-    use sbe_superres_ssbe, only: ii_interk_dpop, mp_grid_triple
+    use sbe_superres_ssbe, only: ii_interk_dpop, auger_interk_dpop, mp_grid_triple
     use eigen_lapack, only: eigen_zheev
     use communication, only: comm_summation
     use salmon_global, only: num_kgrid
@@ -2158,9 +2206,28 @@ subroutine apply_ii_interk_ring(sbe, gs, Ac, tau)
     call comm_summation(eval_loc, eval_all, nba*nk, sbe%icomm)
     call comm_summation(f_loc,    f_all,    nba*nk, sbe%icomm)
 
-    call ii_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
-                        sbe%ii_ecbm_au, sbe%ii_eth_au, sbe%ii_pref_au, sbe%ii_exponent, &
-                        iv, ic, sbe%kmap_idx, sbe%kmap_n, sbe%kmap_lut, kappa2, sig, tau, dpop)
+    ! One gather, two detailed-balance-partner kernels: impact ionization
+    ! (generation) and its exact time-reverse, Auger recombination -- same
+    ! quadruples, |V(q)|^2 and energy broadening, swapped occupation factors.
+    ! The Auger rate scale IS the cited II magnitude (shared |M|^2): no
+    ! separate coefficient. Both ride the same Houston spectrum + ring gather.
+    dpop = 0d0
+    if (sbe%flag_impact) then
+        call ii_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
+                            sbe%ii_ecbm_au, sbe%ii_eth_au, sbe%ii_pref_au, sbe%ii_exponent, &
+                            iv, ic, sbe%kmap_idx, sbe%kmap_n, sbe%kmap_lut, kappa2, sig, tau, dpop)
+    end if
+    if (sbe%flag_auger) then
+        block
+            real(8), allocatable :: dpop_a(:,:)
+            allocate(dpop_a(nba, nk))
+            call auger_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
+                                   sbe%ii_ecbm_au, sbe%ii_eth_au, sbe%ii_pref_au, sbe%ii_exponent, &
+                                   iv, ic, sbe%kmap_idx, sbe%kmap_n, sbe%kmap_lut, kappa2, sig, tau, dpop_a)
+            dpop = dpop + dpop_a
+            deallocate(dpop_a)
+        end block
+    end if
 
     ! Pass 2: apply to each LOCAL rho(k). Amplitude-damping coherence factor:
     ! a level that loses population damps its coherences by sqrt(f_new/f_old).

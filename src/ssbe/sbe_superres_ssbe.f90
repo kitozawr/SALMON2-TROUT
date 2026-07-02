@@ -38,7 +38,7 @@ module sbe_superres_ssbe
               lindhard_F, eps_lindhard_static, plasmon_freq2, lopc_branches, &
               energy_partner_weights, fermi_dirac, fit_fermi_dirac, &
               carrier_carrier_relax, eph_interk_dpop, ii_interk_dpop, &
-              mp_grid_triple, mp_partner_triple, &
+              auger_interk_dpop, mp_grid_triple, mp_partner_triple, &
               vg_eta_admixture, vg_trunc_shift2, vg_conv_error, vg_ptop_exceeds, &
               get_material_params
 
@@ -981,6 +981,93 @@ contains
             end do
         end do
     end subroutine ii_interk_dpop
+
+    ! =====================================================================
+    ! INTER-K (momentum-conserving) AUGER RECOMBINATION through the ring --
+    ! the EXACT TIME-REVERSE of ii_interk_dpop (detailed balance).
+    ! ---------------------------------------------------------------------
+    ! The reverse 2-particle event: two conduction e- at (k1',ic) and (k2',ic)
+    ! + a hole at (k2,iv) -> one e- recombines into the hole and the released
+    ! energy promotes the other to the hot state (k1,ih). SAME quadruples,
+    ! SAME weights g0*|V(q)|^2*delta_sigma as the impact-ionization kernel (no
+    ! new constant: the rate scale IS the cited Stobbe/Keldysh II magnitude --
+    ! Auger and II share |M|^2, only the occupation factors swap [Rana 2007;
+    ! Kioupakis 2015]), REVERSED occupation product
+    !   pauli_rev = (1 - f_v/occ) * (f_c1'/occ) * (f_c2'/occ)
+    ! and NEGATED dpop signs: +hot, -c1', +valence, -c2'. Trace-conserving by
+    ! construction (sum(dpop)=0). The hot-state gain is capped at
+    ! (occ - f(ih,k1))*(1-exp(-Gamma*tau)) (no over-filling), mirroring the
+    ! II primary-out cap. DETAILED BALANCE: for Fermi-Dirac occupations and an
+    ! energy-conserving quadruple, f1 f2 (1-f3)(1-f4) = (1-f1)(1-f2) f3 f4, so
+    ! in the linear (Gamma*tau -> 0) regime the net II + Auger dpop vanishes
+    ! identically -- the equilibrium-fixed-point unit test.
+    ! =====================================================================
+    subroutine auger_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
+                                 pref, expo, iv, ic, kidx, kn, klut, kappa2, sigma, tau, dpop)
+        implicit none
+        integer, intent(in)  :: nk, nba, iv, ic, kidx(3, nk), kn(3), klut(0:nk-1)
+        real(8), intent(in)  :: eval(nba, nk), f(nba, nk), occ_max, a2half
+        real(8), intent(in)  :: ecbm, eth, pref, expo, kappa2, sigma, tau
+        real(8), intent(out) :: dpop(nba, nk)
+        integer :: i1, i1p, i2, ih, ipass, jj, m2p(3), d
+        real(8) :: ekin, dd, g0, etgt, vq, q2, dq, shp, pauli, gpart, gamtot, in_tot, amt, room
+        real(8), parameter :: occ_eps = 1d-12
+
+        dpop = 0d0
+        if (iv < 1 .or. ic > nba .or. ic <= iv) return
+
+        do i1 = 1, nk
+            do ih = ic, nba
+                room = occ_max - f(ih, i1)          ! empty hot-state phase space
+                if (room < occ_eps) cycle
+                ekin = eval(ih, i1) + a2half - ecbm
+                dd = ekin - eth
+                if (dd <= 0d0) cycle
+                g0 = pref * dd ** expo              ! same II magnitude (shared |M|^2)
+
+                gamtot = 0d0
+                in_tot = 0d0
+                do ipass = 1, 2
+                    if (ipass == 2) then
+                        if (gamtot * tau < 1d-14) exit
+                        in_tot = room * (1d0 - exp(-gamtot * tau))
+                    end if
+                    do i1p = 1, nk
+                        q2 = 0d0
+                        do d = 1, 3
+                            dq = dble(kidx(d, i1) - kidx(d, i1p)) / dble(max(kn(d), 1))
+                            dq = dq - anint(dq)
+                            q2 = q2 + dq * dq
+                        end do
+                        vq = 1d0 / (q2 + kappa2)    ! same screened-Coulomb shape
+                        do i2 = 1, nk
+                            call mp_partner_triple(kidx(:,i1), kidx(:,i2), kidx(:,i1p), kn, m2p)
+                            jj = klut(m2p(1) + kn(1) * (m2p(2) + kn(2) * m2p(3)))
+                            if (jj < 1) cycle
+                            etgt = eval(ih,i1) + eval(iv,i2) - eval(ic,i1p) - eval(ic,jj)
+                            shp = gaussian_shape(etgt, sigma)
+                            if (shp <= 0d0) cycle
+                            ! REVERSED occupations: hole present at (iv,i2), both
+                            ! conduction sources occupied at (ic,i1p) and (ic,jj).
+                            pauli = min(max(1d0 - f(iv,i2)/occ_max, 0d0), 1d0) &
+                                  * (f(ic,i1p) / occ_max) &
+                                  * (f(ic,jj ) / occ_max)
+                            gpart = g0 * vq * shp * pauli
+                            if (ipass == 1) then
+                                gamtot = gamtot + gpart
+                            else
+                                amt = in_tot * gpart / gamtot
+                                dpop(ih, i1)  = dpop(ih, i1)  + amt   ! promoted to hot
+                                dpop(ic, i1p) = dpop(ic, i1p) - amt   ! promoted-source leaves
+                                dpop(iv, i2)  = dpop(iv, i2)  + amt   ! hole filled (recombination)
+                                dpop(ic, jj)  = dpop(ic, jj)  - amt   ! recombining e- leaves
+                            end if
+                        end do
+                    end do
+                end do
+            end do
+        end do
+    end subroutine auger_interk_dpop
 
     ! =====================================================================
     ! Monkhorst-Pack momentum-conservation index map (for the inter-k / nonlocal
