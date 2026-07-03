@@ -293,12 +293,19 @@ implement as its own branch.
   **collinear**; overlaps → 1; the process is nearly forbidden (lifetimes > 1 ps).
 - Overlaps $|\langle u_{s'k'}|u_{sk}\rangle|^2=\tfrac12[1+ss'\cos\theta]\xrightarrow{\rm collinear}1$.
 - Recombination rate $R_{\rm CCCV}$, matrix elements $M_d,M_e$ with Thomas–Fermi
-  vector $Q_{\rm TF}=\frac{e^2k_BT}{\pi\varepsilon_\infty\hbar^2v^2}\log[(e^{E_{f+1}/k_BT}+1)(e^{-E_{f-1}/k_BT}+1)]$.
-- δ-collapsed to a 3D integral [R07 main result]:
-  $$R_{\rm CCCV}=\frac{1}{\hbar^2v}\!\int_0^\infty\!\frac{dk_1}{2\pi}\!\int_0^\infty\!\frac{dk_2}{2\pi}\!\int_{k_2}^\infty\!\frac{dQ}{2\pi}\frac{|M(k_1,k_2,Q)|^2}{\sqrt{(k_1{+}Q)(Q{-}k_2)k_1k_2}}[1{-}f_{-1}(Q{-}k_2)][1{-}f_{+1}(k_1{+}Q)]f_{+1}(k_1)f_{+1}(k_2)$$
+  vector [R07 Eq. (13)] $Q_{\rm TF}=\frac{e^2k_BT}{\pi\varepsilon_\infty\hbar^2v^2}\log[(e^{E_{f+1}/k_BT}+1)(e^{-E_{f-1}/k_BT}+1)]$
+  (in Hartree a.u. with $\varepsilon_\infty=\varepsilon_r/4\pi$: $Q_{\rm TF}=4k_BT\log[\cdots]/(\varepsilon_r v^2)$).
+- δ-collapsed to a 3D integral [R07 Eq. (14), the paper's main result — **the √ is
+  a NUMERATOR factor**; an earlier draft of this line had it inverted, corrected
+  2026-07-03 against the journal text, `rana_rcccv`]:
+  $$R_{\rm CCCV}=\frac{1}{\hbar^2v}\!\int_0^\infty\!\frac{dk_1}{2\pi}\!\int_0^\infty\!\frac{dk_2}{2\pi}\!\int_{k_2}^\infty\!\frac{dQ}{2\pi}\,|M(k_1,k_2,Q)|^2\,\sqrt{(k_1{+}Q)(Q{-}k_2)k_1k_2}\,[1{-}f_{-1}(Q{-}k_2)][1{-}f_{+1}(k_1{+}Q)]f_{+1}(k_1)f_{+1}(k_2)$$
   $R=R_{\rm CCCV}(n,p)+R_{\rm CVVV}(n,p)$, $R_{\rm CVVV}(n,p)=R_{\rm CCCV}(p,n)$,
   $1/\tau_r=R/\min(n,p)$. Units: **cm⁻²·s⁻¹** (2D!). **No single C [cm⁶/s]** —
-  validate by lifetime curves, not by C.
+  validate by lifetime curves, not by C. ✅ **IMPLEMENTED & validated**
+  (`rana_rcccv`/`dirac_mu_2d`/`rana_qtf`, `test_rana_2d`): τ_r(10¹², 300 K,
+  ε_r=10)=1.48 ps (Fig. 4), τ_r(10¹¹)=7.4 ps (>5), τ_r(10¹², 77 K)=1.34 ps
+  (>1), G=R at equilibrium. **Still to wire:** the CPTP SBE channel applying
+  R−G=(n−n₀)/τ_r to the cone (graphene `auger_ok` stays `.false.` until then).
 
 ## 7. Per-material parameters & validation targets (T=300 K unless noted)
 
@@ -311,9 +318,34 @@ implement as its own branch.
 > approximations", each costing ~an order of magnitude — the direct
 > motivation of the merged CDRB-ε(q)+umklapp kernel weight, PR #57).
 > The §6 graphene targets were re-derived from [R07] directly (PR #58).
-> NEXT STEP of this section: compute the EFFECTIVE C(n) of the ring
-> II/Auger kernel on the Si/GaAs grids and compare order-of-magnitude
-> against these verified tables (plots to the maintainer).
+>
+> ✅ **C(n) ORDER-OF-MAGNITUDE CHECK DONE (2026-07-03, `tests/validate_auger_c.f90`).**
+> The effective ring-Auger coefficient C_eff = R/(n²p) was extracted from the
+> `auger_interk_dpop` kernel on the real Si primitive **4³** EPM spectrum with
+> FD electron/hole populations at n=p, T=300 K (quasi-Fermi levels by
+> bisection), in the linear regime (τ=1e-2 a.u.t):
+>
+> | n=p [cm⁻³] | C_eff (σ=0.01 Ha) | C_eff (σ=0.02 Ha) |
+> |---|---|---|
+> | 10¹⁸ | ~0 (grid-unresolved: <1e-4 e⁻/cell) | ~0 |
+> | 10¹⁹ | 2.6×10⁻³⁰ | 1.2×10⁻²⁹ |
+> | 10²⁰ | 2.8×10⁻³⁰ | 1.2×10⁻²⁹ |
+>
+> **Findings:** (1) C_eff is **n-independent** across 10¹⁹→10²⁰ (2.6 vs 2.8e-30),
+> confirming the **R ∝ n³** pair-density scaling the extraction assumes — the
+> single most important structural check. (2) The magnitude lands **within
+> ~1 order of magnitude** of the source-verified Dziewior–Schmid Si Cₙ=2.8×10⁻³¹
+> (ratio ~9–10× at the tighter σ=0.01 Ha) — exactly the order-of-magnitude
+> agreement [L90]/[S14] describe for this class of calculation. (3) The ×4
+> σ-sensitivity (0.01 vs 0.02 Ha) is the energy-conservation broadening on the
+> coarse 4³ mesh; a finer grid + smaller σ converges downward (σ=0.01 already
+> halves it). **Honest caveat:** the magnitude is tied to the cited Keldysh II
+> fit (P=2×10¹² s⁻¹ eV⁻², a=2) by detailed balance, NOT a first-principles
+> pure-Auger C — this validates that the II↔Auger detailed-balance construction
+> yields a **physically reasonable** recombination coefficient, and that its C is
+> the right order of magnitude, not a first-principles reproduction of the exp C.
+> Run: `gfortran -O2 src/ssbe/sbe_superres_ssbe.f90 tests/validate_auger_c.f90 -o v`
+> then `./v` in a dir with `Si_prim_eigen.data`/`Si_prim_k.data` (4³, nstate=20).
 
 Keep the gap a tunable parameter (rigid scissor of the conduction band) for
 alloys / DFT-gap correction.
