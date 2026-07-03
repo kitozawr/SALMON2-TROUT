@@ -26,8 +26,29 @@ need the plane-wave coefficients the SBE does not carry — still a refinement.
 Same weight in both kernels ⇒ detailed balance preserved exactly (the FD
 fixed-point test passes with the linear-regime τ=1e-7; the CDRB weight raised
 Γ so the old τ=1e-6 left a visible 1.7e-6 nonlinear tail — not a balance
-violation). Remaining: the graphene 2D Rana branch (§6), the overlap factors
-I(G), per-material C validation against [S14]/[L90] (§7). Originally recorded 2026-06-30 from the maintainer's
+violation).
+
+**UPDATE 2026-07-03 (branch `claude/graphene-rana-2d`): the graphene 2D Rana
+branch (§6) is implemented as SHAPE-VALIDATED primitives — ⚠️ ABSOLUTE
+NORMALIZATION PENDING the [R07] equation text.** `dirac_mu_2d` (quasi-Fermi of
+the Dirac gas, g=4), `rana_qtf` (the [R07] thermal Thomas–Fermi vector) and
+`rana_rcccv` (the collinear-collapsed CCCV integral with the antisymmetrized
+2D screened Coulomb; `reverse=.true.` = the generation/impact-ionization
+partner) live in `sbe_superres_ssbe.f90`; `test_rana_2d` validates every
+RELATIVE property: **equilibrium detailed balance exact**, the
+CVVV(n,p)=CCCV(p,n) mirror, smaller ε ⇒ larger rate, n/T monotonicity.
+**BUT:** the §6 transcription of the collapsed integral is dimensionally
+E·L² instead of E·L⁻² — the angular δ-collapse Jacobians were lost when this
+page was written, and the raw integral comes out ~10 orders faster than the
+cited τ_r≈1.1 ps benchmark. The arXiv/journal text is **unreachable from the
+dev environment (network-policy 403)**, and the strict provenance rule forbids
+guessing the missing factors. → The channel is **NOT wired into the SBE**
+(graphene `auger_ok` stays `.false.`); the test prints the uncalibrated τ for
+the record. **To finish:** obtain [R07] Eqs. (the maintainer has journal
+access), fix the prefactor, re-enable the cited lifetime asserts
+(τ_r≈1.1 ps @ n=10¹², 300 K, ε=10; >5 ps @ 10¹¹; >1 ps @ 77 K), then wire the
+CPTP channel. Remaining otherwise: the overlap factors I(G), per-material C
+validation against [S14]/[L90] (§7). Originally recorded 2026-06-30 from the maintainer's
 prompt. This is the next major dissipation-physics task: rebuild Auger
 recombination from the current **k-local** approximation (initial states pinned
 at the band extrema — the first-generation impact-ionization approximation) into
