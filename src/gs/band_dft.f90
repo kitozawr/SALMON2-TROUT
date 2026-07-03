@@ -28,9 +28,9 @@ subroutine init_band_dft(system,band)
   type(s_band_dft), intent(inout) ::band
 
   system%wtk(:) = 0.0d0
-  
-  call get_band_kpt( band%band_kpt, band%nref_band, system )
-  
+
+  call get_band_kpt( band, system )
+
   band%num_band_kpt = size( band%band_kpt, 2 )
   !write(*,*) "num_band_kpt=",band%num_band_kpt
 
@@ -176,14 +176,15 @@ subroutine check_data_format( unit, iformat )
 9 iformat=0 ! 3 data
 end subroutine check_data_format
 
-subroutine get_band_kpt( kpt, nref_band, system )
-   use structures, only: s_dft_system
+subroutine get_band_kpt( band, system )
+   use structures, only: s_dft_system, s_band_dft
    use parallelization, only: nproc_id_global
    use communication, only: comm_is_root
    implicit none
-   real(8),allocatable,intent(inout) :: kpt(:,:)
-   integer,intent(out) :: nref_band ! convergence is checked up to nref_band
-   type(s_dft_system),intent(in) :: system 
+   type(s_band_dft),intent(inout) :: band  ! fills band_kpt, nref_band + path metadata
+   type(s_dft_system),intent(in) :: system
+   real(8),allocatable :: kpt(:,:)
+   integer :: nref_band ! convergence is checked up to nref_band
    real(8) :: G(3),X(3),M(3),R(3),L(3),W(3) ! XYZ coordinates of high-symmetry
    real(8) :: H(3),N(3),P(3),A(3),Q(3)      ! points in the 1st Brillouin zone
    real(8) :: al,cl ! length of the real-space lattice vectors (a- and c-axis)
@@ -323,7 +324,7 @@ subroutine get_band_kpt( kpt, nref_band, system )
       write(*,*) "Whole number of bands(system%no):",system%no
       write(*,*) "array size of wf for k points(system%nk):",nk
       write(*,*) "Number of segments:",num_of_segments
-      write(*,*) "Total number of k points:",nnk 
+      write(*,*) "Total number of k points:",nnk
       write(*,*) "k points in Cartesian coordinates:"
       do i=1,size(kpt,2)
          write(*,'(1x,i4,3f10.5)') i,kpt(:,i)
@@ -331,7 +332,98 @@ subroutine get_band_kpt( kpt, nref_band, system )
       write(*,'(a60)') repeat("-",43)//"get_band_kpt(end)"
    end if
 
+   ! --- path metadata for SYSNAME_bandpath.data (write_bandpath_data) --------
+   ! cumulative |dk| distance of every path point and of the high-symmetry
+   ! nodes (kpt_ holds the node coordinates in Cartesian in both branches).
+   if ( allocated(band%kpt_dist)   ) deallocate( band%kpt_dist )
+   if ( allocated(band%node_label) ) deallocate( band%node_label )
+   if ( allocated(band%node_dist)  ) deallocate( band%node_dist )
+   allocate( band%kpt_dist(nnk) )
+   band%kpt_dist(1) = 0.0d0
+   do i=2,nnk
+      band%kpt_dist(i) = band%kpt_dist(i-1) + sqrt(sum( (kpt(:,i)-kpt(:,i-1))**2 ))
+   end do
+   band%num_of_nodes = num_of_segments + 1
+   allocate( band%node_label(band%num_of_nodes), band%node_dist(band%num_of_nodes) )
+   band%node_dist(1) = 0.0d0
+   do i=1,band%num_of_nodes
+      if ( kpt_label(i) == 'G' ) then
+         band%node_label(i) = 'Gamma'   ! the plotter's Γ spelling
+      else
+         band%node_label(i) = kpt_label(i)
+      end if
+      if ( i >= 2 ) band%node_dist(i) = band%node_dist(i-1) &
+                                      + sqrt(sum( (kpt_(:,i)-kpt_(:,i-1))**2 ))
+   end do
+
+   band%nref_band = nref_band
+   if ( allocated(band%band_kpt) ) deallocate( band%band_kpt )
+   call move_alloc( kpt, band%band_kpt )
+
 end subroutine get_band_kpt
+
+
+!! export SYSNAME_bandpath.data for theory='dft_band': the REAL DFT levels
+!! along the high-symmetry path, in the exact format the plotter
+!! (plot_sbe_results.py::_load_bandpath) and the SBE spectral tooling read --
+!! the same contract as the Python EPM bandpath writers:
+!!   # spinor = 0/1
+!!   # nv = <valence states per k>
+!!   # nb = <states per line>
+!!   # nodes: LBL dist  LBL dist ...
+!!   rows: ik dist q1 q2 q3 E_1..E_nb   (q reduced, E in Hartree)
+!! Called once per Band_Iteration block (system%nk path points each); the
+!! header is written with the first block, later blocks append.
+subroutine write_bandpath_data(iter_band_kpt,system,band,energy)
+  use structures, only: s_dft_system,s_band_dft,s_dft_energy
+  use salmon_global, only: base_directory,sysname,nelec,yn_spinorbit
+  use filesystem, only: get_filehandle
+  use math_constants, only: pi
+  implicit none
+  integer,intent(in) :: iter_band_kpt
+  type(s_dft_system),intent(in) :: system
+  type(s_band_dft),intent(in) :: band
+  type(s_dft_energy),intent(in) :: energy
+  integer :: fh,ik,ikg,ib,nv,i
+  real(8) :: k_red(3)
+  character(256) :: file_bp
+
+  if ( .not.comm_is_root(nproc_id_global) ) return
+  if ( system%nspin /= 1 ) then
+     write(*,*) "write_bandpath_data: skipped (contract is nspin=1)"
+     return
+  end if
+
+  file_bp = trim(base_directory)//trim(sysname)//'_bandpath.data'
+  fh = get_filehandle()
+  if ( iter_band_kpt == 1 ) then
+     open(unit=fh, file=trim(file_bp), status='replace', action='write')
+     write(fh,'(a)') '# band path from theory=dft_band (real DFT levels)'
+     if ( yn_spinorbit == 'y' ) then
+        nv = nelec
+        write(fh,'(a)') '# spinor = 1'
+     else
+        nv = nelec/2
+        write(fh,'(a)') '# spinor = 0'
+     end if
+     write(fh,'(a,i0)') '# nv = ', nv
+     write(fh,'(a,i0)') '# nb = ', system%no
+     write(fh,'(a,*(2x,a,1x,f0.7))') '# nodes:', &
+        & ( trim(band%node_label(i)), band%node_dist(i), i=1,band%num_of_nodes )
+     write(fh,'(a)') '# ik, dist, q1, q2, q3 (reduced), E_1..E_nb [Ha]'
+  else
+     open(unit=fh, file=trim(file_bp), status='old', action='write', position='append')
+  end if
+  do ik=1,system%nk
+     ikg = iter_band_kpt + ik - 1
+     ! q_red(i) = a_i . k_cart / (2*pi)
+     k_red(:) = matmul( transpose(system%primitive_a), band%band_kpt(:,ikg) )/(2.0d0*pi)
+     write(fh,'(i6,f14.7,3f10.5,*(e18.10))') ikg, band%kpt_dist(ikg), k_red(1:3), &
+        & ( energy%esp(ib,ik,1), ib=1,system%no )
+  end do
+  close(fh)
+
+end subroutine write_bandpath_data
 
 
 end module band_dft_sub

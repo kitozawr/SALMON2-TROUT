@@ -1,0 +1,85 @@
+!########################################################################################!
+! Si DFT ground state (step 1/3) -- REAL DFT levels for the SBE, instead of the EPM.     !
+!----------------------------------------------------------------------------------------!
+! PRIMITIVE FCC 2-atom cell, spelled with EXPLICIT al_vec1..3 (a/2 off-diagonal rows,     !
+! a = 10.26 Bohr = 5.4293582 Ang -- the same cell the EPM/SBE examples use). This is      !
+! DIFFERENT from the original SALMON exercise_04 (cubic 8-atom cell, al(1:3)=5.43):      !
+! the SBE runs on the primitive cell, so the DFT must too.                               !
+!                                                                                        !
+! DELIBERATELY ROUGH (proof of concept): sparse 4x4x4 k-grid, coarse 12^3 real-space     !
+! grid, loose SCF threshold. What matters here is the correct TRANSFER of                !
+! Si_k.data / Si_eigen.data / Si_tm.data into the SBE (formats + units + reduced         !
+! k-coordinates), not converged eigenvalues. Tighten num_rgrid/num_kgrid/threshold       !
+! for production.                                                                        !
+!                                                                                        !
+!   ../../build/salmon < Si_dft_gs.inp | tee dft_gs.out                                  !
+!                                                                                        !
+! Outputs: Si_k.data (reduced coords + '# b1/b2/b3' header -- non-orthogonal cell),      !
+!          Si_eigen.data (esp[eV] -- the SBE reader detects the unit and converts),      !
+!          Si_tm.data (<u|p|u> + <u|-i[r,Vnl]|u>, a.u., full double precision),          !
+!          data_for_restart/ (used by the dft_band step).                                !
+!########################################################################################!
+
+&calculation
+  theory = 'dft'
+/
+
+&control
+  sysname = 'Si'
+/
+
+&units
+  unit_system = 'A_eV_fs'
+/
+
+&system
+  yn_periodic = 'y'
+
+  !Si FCC primitive vectors a/2*(011),(101),(110); a/2 = 5.13 Bohr = 2.7146791 Ang
+  al_vec1(1:3) = 0.0000000d0, 2.7146791d0, 2.7146791d0
+  al_vec2(1:3) = 2.7146791d0, 0.0000000d0, 2.7146791d0
+  al_vec3(1:3) = 2.7146791d0, 2.7146791d0, 0.0000000d0
+
+  !2-atom primitive basis: 8 valence electrons, 12 bands (4 valence + 8 conduction)
+  nelem  = 1
+  natom  = 2
+  nelec  = 8
+  nstate = 12
+/
+
+&pseudo
+  file_pseudo(1) = './Si_rps.dat'
+  izatom(1) = 14
+  lloc_ps(1) = 2
+/
+
+&functional
+  xc = 'PZ'
+/
+
+&rgrid
+  !coarse on purpose (proof of concept)
+  num_rgrid(1:3) = 12, 12, 12
+/
+
+&kgrid
+  !sparse on purpose; MUST match num_kgrid of the SBE step (it sizes nk)
+  num_kgrid(1:3) = 4, 4, 4
+/
+
+&scf
+  !low convergence on purpose -- correct k/eigen/tm TRANSFER is the goal here
+  nscf      = 80
+  threshold = 1.0d-6
+/
+
+&analysis
+  !write Si_tm.data (+ Si_k.data) for the SBE
+  yn_out_tm = 'y'
+/
+
+&atomic_red_coor
+  !diamond basis in the primitive-vector frame: (0,0,0) and (1/4,1/4,1/4)
+  'Si'  .0    .0    .0    1
+  'Si'  .25   .25   .25   1
+/

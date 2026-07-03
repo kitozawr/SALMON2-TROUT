@@ -1512,15 +1512,20 @@ def _load_kpoints(kfile):
 
 def _load_eigenvalues(eigenfile, nk):
     """
-    Parse SYSNAME_eigen.data (EPM/SALMON format).
-    Block headers are comment lines '# ik = N'.
-    Data lines: 'ib  energy_Ha  occup'.
+    Parse SYSNAME_eigen.data.
+    EPM format: block headers are comment lines '# ik = N', energies in Ha.
+    DFT format (theory='dft' + yn_out_tm): block headers are data-ish lines
+    'k=     N,  spin=     M', energies in the unit named by the '# 1:io,
+    2:esp[eV], 3:occ' header (eV for unit_system='A_eV_fs') — converted to Ha.
+    Data lines (both): 'ib  energy  occup'.
     Returns (eigen[nb, nk] in Ha, occup[nb, nk], vbm_ha).
     """
     ik_re = re.compile(r'#\s*ik\s*=\s*(\d+)')
+    dft_k_re = re.compile(r'k\s*=\s*(\d+)\s*,\s*spin\s*=\s*(\d+)')
     eigen_map = {}     # 1-based ik → list of (energy_Ha, occup)
     current_k = None
     vbm = -np.inf
+    e_conv = 1.0       # → Ha
 
     with open(eigenfile, 'r') as f:
         for line in f:
@@ -1528,10 +1533,20 @@ def _load_eigenvalues(eigenfile, nk):
             if not s:
                 continue
             if s.startswith('#'):
+                if 'esp[eV]' in s:
+                    e_conv = 1.0 / HA_TO_EV
                 m = ik_re.match(s)
                 if m:
                     current_k = int(m.group(1))
                     eigen_map.setdefault(current_k, [])
+                continue
+            m = dft_k_re.match(s)
+            if m:
+                if int(m.group(2)) != 1:      # spin-2 block: keep spin-1 only
+                    current_k = None
+                    continue
+                current_k = int(m.group(1))
+                eigen_map.setdefault(current_k, [])
                 continue
             if current_k is None:
                 continue
@@ -1539,7 +1554,7 @@ def _load_eigenvalues(eigenfile, nk):
             if len(parts) < 3:
                 continue
             try:
-                e, occ = float(parts[1]), float(parts[2])
+                e, occ = float(parts[1]) * e_conv, float(parts[2])
                 eigen_map[current_k].append((e, occ))
                 if occ > 0.1 and e > vbm:
                     vbm = e

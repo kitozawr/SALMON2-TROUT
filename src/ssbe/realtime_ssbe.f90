@@ -57,9 +57,13 @@ subroutine main_realtime_ssbe(icomm)
     call init_sbe_bloch_solver(sbe, gs, nstate_sbe(1), icomm)
     sbe%flag_vnl_correction = (yn_vnl_correction == 'y')
 
-    ! Prepare external pulse (allocated from -1 to nt+1 for safe central differences)
+    ! Prepare external pulse (allocated from -1 to nt+1 for safe central differences).
+    ! Pass the FULL index range: calc_Ac_ext_t's dummy is explicit-shape (is:ie),
+    ! so passing the whole (-1:nt+1) array with is=0 sequence-associates it one
+    ! slot early -- the field was shifted by one dt and slot nt+1 was left
+    ! uninitialized (a dA/dt spike in the last step). i=-1 (t=-dt) fills as 0.
     allocate(Ac_ext_t(1:3, -1:nt+1))
-    call calc_Ac_ext_t(0.0d0, dt, 0, nt+1, Ac_ext_t)
+    call calc_Ac_ext_t(0.0d0, dt, -1, nt+1, Ac_ext_t)
     
     ! Initial energy and fields
     energy = 0.0d0

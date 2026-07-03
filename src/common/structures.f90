@@ -453,6 +453,11 @@ module structures
     integer :: num_band_kpt, nref_band
     real(8),allocatable :: band_kpt(:,:)
     logical,allocatable :: check_conv_esp(:,:,:)
+    ! high-symmetry-path metadata for SYSNAME_bandpath.data (theory='dft_band')
+    integer :: num_of_nodes = 0
+    character(8),allocatable :: node_label(:)
+    real(8),allocatable :: node_dist(:)  ! cumulative path distance of each node [a.u.]
+    real(8),allocatable :: kpt_dist(:)   ! cumulative path distance of each k-point [a.u.]
   end type s_band_dft
 
 ! DFT_k_expand

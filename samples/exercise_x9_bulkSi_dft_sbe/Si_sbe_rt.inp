@@ -1,0 +1,67 @@
+!########################################################################################!
+! Si SBE real-time on REAL DFT levels (step 3/3) -- reads the step-1 DFT files.          !
+!----------------------------------------------------------------------------------------!
+! Same velocity-gauge SBE as exercise_x8, but the ground state is the ROUGH DFT of       !
+! step 1 (Si_k.data / Si_eigen.data / Si_tm.data) instead of the EPM: real               !
+! pseudopotential levels, real <u|p|u> AND the nonlocal <u|-i[r,Vnl]|u> block (the       !
+! EPM writes zeros there -- with DFT it is genuinely nonzero).                           !
+!                                                                                        !
+! ACTIVE-CORE WINDOW: unlike the EPM (which only ever had the gap-edge bands), DFT       !
+! drags the low-lying bonding s-bands along (band 1 sits ~12 eV below the gap at        !
+! Gamma). frozen_core_threshold_ev freezes everything deeper than E_F - 8 eV out of      !
+! the dynamics -- they stay filled and inert, shrinking the active subspace.             !
+! Remove the &sbe block to propagate all 12 bands.                                       !
+!                                                                                        !
+!   ../../build/salmon < Si_sbe_rt.inp | tee sbe_rt.out                                  !
+!                                                                                        !
+! Check electrons stay at 8.000 ('# electron number' column of Si_sbe_rt.data /          !
+! grep 'trace' sbe_rt.out) and plot: python3 ../../plot_sbe_results.py .                 !
+!########################################################################################!
+
+&calculation
+  theory = 'sbe'
+/
+
+&control
+  sysname = 'Si'
+/
+
+&units
+  unit_system = 'A_eV_fs'
+/
+
+&system
+  yn_periodic  = 'y'
+  !MUST match the DFT cell of step 1
+  al_vec1(1:3) = 0.0000000d0, 2.7146791d0, 2.7146791d0
+  al_vec2(1:3) = 2.7146791d0, 0.0000000d0, 2.7146791d0
+  al_vec3(1:3) = 2.7146791d0, 2.7146791d0, 0.0000000d0
+  nelec  = 8
+  nstate = 12                          ! MUST match nstate of the DFT step
+/
+
+&kgrid
+  num_kgrid(1:3) = 4, 4, 4             ! MUST match the DFT step (sizes nk)
+/
+
+&tgrid
+  dt = 0.1d0
+  nt = 600                             ! 60 fs
+/
+
+&emfield
+  ae_shape1   = 'input'                ! vector potential A(t) from file (A/eV/fs units)
+  file_input1 = '10.txt'               ! A_max=0.28 pulse along z; '1.txt' = 10x weaker
+/
+
+&analysis
+  out_projection_k_step    = 100       ! k-resolved population snapshots every 10 fs
+  yn_out_intraband_current = 'y'
+/
+
+&sbe
+  !ACTIVE CORE: freeze the deep DFT s-bands below E_F - 8 eV (they never respond
+  !at these field strengths); keep everything up to E_F + 100 eV active.
+  frozen_core_threshold_ev = -8.0d0
+  frozen_free_threshold_ev = 100.0d0
+/

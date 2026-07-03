@@ -78,11 +78,14 @@ subroutine main_multiscale_ssbe(icomm)
 
     flag_1d_model = ((ny_m == 1) .and. (nz_m == 1))
 
-    ! Prepare external pulse
+    ! Prepare external pulse. Full index range: the explicit-shape dummy (is:ie)
+    ! sequence-associates, so the range must match the (-1:mt+1) allocation
+    ! (same off-by-one fix as in realtime_ssbe).
     mt = max(nt, int(abs(nxvac_m(1)) * fs%hgs(1) / cspeed_au / dt))
     allocate(Ac_ext_t(1:3, -1:mt+1))
-    call calc_Ac_ext_t(0.0d0, dt, 0, mt, Ac_ext_t)
-    call set_incident_field(mt, Ac_ext_t, fs, fw)
+    call calc_Ac_ext_t(0.0d0, dt, -1, mt+1, Ac_ext_t)
+    ! aligned slice: set_incident_field's dummy is (0:mt)
+    call set_incident_field(mt, Ac_ext_t(:, 0:mt), fs, fw)
 
     ! Macropoint and media setup
     nmacro_max = nx_m * ny_m * nz_m
