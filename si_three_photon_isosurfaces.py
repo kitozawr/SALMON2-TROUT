@@ -75,7 +75,13 @@ Usage
   python3 si_three_photon_isosurfaces.py --orders 3      # just the 3-photon case
   python3 si_three_photon_isosurfaces.py --show          # also open in a browser
 
-Outputs standalone HTML (self-contained plotly) into ./si_3ph_plots/ .
+Outputs into ./si_3ph_plots/ :
+  * standalone 3D plotly HTML per order (rate isosurfaces, E_direct resonance
+    shells, rate cloud) and the Gamma-L/Gamma-X/Gamma-K line scans;
+  * si_multiphoton_summed_3d_projections.png (matplotlib/Agg): the SUMMED rate
+    W_total = W_3 + W_4 with the two orders on ONE common absolute scale (the
+    I^N prefactor), shown as a 3D scatter plus the three axis-AVERAGED
+    projections (mean over k_x, k_y, k_z) for 3-photon, 4-photon and the total.
 """
 import argparse
 import itertools
@@ -249,6 +255,17 @@ def nphoton_strength_k(ev, p, N, hw_au, eta_au, nocc, nband, window_ev):
     return out
 
 
+def mp_prefactor(field_mvcm, hw_ev, N):
+    """Absolute multiphoton prefactor 2*pi*(E0/2w)^{2N} (velocity gauge, a.u.).
+    This is what puts the different orders on ONE common scale: the N-photon
+    rate carries (E0/2w)^{2N} ~ I^N, so raising the field by (E0/2w)^2 lifts the
+    (N+1)-photon channel relative to the N-photon one. Using it, W_3 and W_4 are
+    correctly comparable and can be summed into W_total = W_3 + W_4."""
+    E0 = field_mvcm * MVCM_TO_AU
+    w = hw_ev / HA
+    return 2.0 * np.pi * (E0 / (2.0 * w)) ** (2 * N)
+
+
 def rate_from_contribs(contribs, N, hw_ev, hth_ev, eta_ev):
     """Combine the stored (dE, |M|^2) contributions with the FK resonance kernel."""
     if not contribs:
@@ -302,6 +319,8 @@ def compute_maps(ctx, orders, hw_ev, eta_ev, nband, N_grid, k_lim,
     hth = hbar_theta_ev(F_au, mu)
     # window must cover the FK tail (a few electro-optic energies)
     window = max(1.2, 4.0 * hth)
+    # absolute prefactor per order -> W_N on ONE common scale (I^N weighting)
+    pref = {N: mp_prefactor(field_mvcm, hw_ev, N) for N in orders}
 
     print(f"# grid {N_grid}^3 | BZ {n_bz} pts | IBZ {n_ibz} "
           f"(x{n_bz / n_ibz:.1f}) | bands kept {nband}")
@@ -317,7 +336,7 @@ def compute_maps(ctx, orders, hw_ev, eta_ev, nband, N_grid, k_lim,
         for N in orders:
             contribs = nphoton_strength_k(ev, p, N, hw_au, eta_au,
                                           ctx['nocc'], nband, window)
-            w_here[N] = rate_from_contribs(contribs, N, hw_ev, hth, eta_ev)
+            w_here[N] = pref[N] * rate_from_contribs(contribs, N, hw_ev, hth, eta_ev)
         for (i, j, l) in cells:
             E_dir[i, j, l] = gap
             for N in orders:
@@ -333,8 +352,13 @@ def compute_maps(ctx, orders, hw_ev, eta_ev, nband, N_grid, k_lim,
     E_dir[edge] = np.nan
     for N in orders:
         Wmaps[N][edge] = np.nan
+    # summed rate on the common absolute scale: W_total(k) = sum_N W_N(k)
+    W_total = np.full(shape, np.nan)
+    valid = ~np.isnan(E_dir)
+    W_total[valid] = np.nansum([Wmaps[N][valid] for N in orders], axis=0)
     return dict(kr=kr, KX=KX, KY=KY, KZ=KZ, E_dir=E_dir, Wmaps=Wmaps,
-                hth=hth, window=window)
+                W_total=W_total, orders=list(orders), hth=hth, window=window,
+                pref=pref, field_mvcm=field_mvcm, hw_ev=hw_ev)
 
 
 # --------------------------------------------------------------------------- #
@@ -521,7 +545,8 @@ def fig_line_scans(make_subplots, go, ctx, orders, hw_ev, eta_ev, nband, mu,
         for name, (svals, gaps, contribs_line) in scan.items():
             for fi, Fmv in enumerate(fields_mvcm):
                 hth = hbar_theta_ev(Fmv * MVCM_TO_AU, mu)
-                w = [rate_from_contribs(cl[N], N, hw_ev, hth, eta_ev)
+                pf = mp_prefactor(Fmv, hw_ev, N)   # I^N field scaling
+                w = [pf * rate_from_contribs(cl[N], N, hw_ev, hth, eta_ev)
                      for cl in contribs_line]
                 fig.add_trace(go.Scatter(
                     x=svals, y=w, mode='lines',
@@ -530,7 +555,7 @@ def fig_line_scans(make_subplots, go, ctx, orders, hw_ev, eta_ev, nband, mu,
                     name=f'{name}, {Fmv:g} MV/cm',
                     legendgroup=name, showlegend=(r == 2)),
                     row=r, col=1)
-        fig.update_yaxes(title_text=f'W_{N} [arb.]', row=r, col=1)
+        fig.update_yaxes(title_text=f'W_{N} [a.u.]', type='log', row=r, col=1)
     fig.update_yaxes(title_text='E_direct [eV]', row=1, col=1)
     fig.update_xaxes(title_text='|k| [2π/a]', row=rows, col=1)
     fig.update_layout(height=360 * rows, width=1000,
@@ -538,6 +563,99 @@ def fig_line_scans(make_subplots, go, ctx, orders, hw_ev, eta_ev, nband, mu,
                             '(Franz-Keldysh field dependence up to 10 MV/cm)',
                       legend=dict(font=dict(size=10)))
     return fig
+
+
+def fig_summed_3d_projections_mpl(data, ctx, outpath, dpi=150):
+    """matplotlib (Agg) figure written straight to PNG:
+
+      * a 3D scatter of the SUMMED rate W_total(k) = W_3 + W_4 (log colour), the
+        3- and 4-photon parts already on one common absolute scale (I^N prefactor);
+      * a 3x3 block of the axis-AVERAGED projections -- rows = {3-photon,
+        4-photon, total}, columns = {mean over k_z -> (k_x,k_y), mean over k_y ->
+        (k_x,k_z), mean over k_x -> (k_y,k_z)} -- all sharing ONE log colour
+        normalisation, so the relative 3γ vs 4γ weight and where each channel
+        lives are read off directly.
+
+    Everything (3D + projections) is a single Agg render, no browser needed."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import LogNorm
+    from matplotlib import gridspec
+
+    kr = data['kr']
+    KX, KY, KZ = data['KX'], data['KY'], data['KZ']
+    orders = data['orders']
+    tot_sum = np.nansum(data['W_total'])
+    share = {N: 100.0 * np.nansum(data['Wmaps'][N]) / tot_sum for N in orders}
+    rows = [(f'{N}-photon  (W_{N}, {share[N]:.0f}% of Σ)', data['Wmaps'][N])
+            for N in orders]
+    rows.append((f'Σ  ({"+".join(str(N) for N in orders)}-photon total)',
+                 data['W_total']))
+
+    # shared log colour scale over every projection (positive finite values)
+    ax_specs = [(2, r'$\langle\cdot\rangle_{k_z}$: $(k_x,k_y)$', r'$k_x$', r'$k_y$'),
+                (1, r'$\langle\cdot\rangle_{k_y}$: $(k_x,k_z)$', r'$k_x$', r'$k_z$'),
+                (0, r'$\langle\cdot\rangle_{k_x}$: $(k_y,k_z)$', r'$k_y$', r'$k_z$')]
+    projs = {}
+    allpos = []
+    for lab, W in rows:
+        for axis, _, _, _ in ax_specs:
+            P = np.nanmean(np.where(np.isnan(W), np.nan, W), axis=axis)
+            projs[(lab, axis)] = P
+            allpos.append(P[np.isfinite(P) & (P > 0)])
+    allpos = np.concatenate(allpos) if allpos else np.array([1.0])
+    vmax = float(allpos.max())
+    vmin = vmax / 1e4
+    norm = LogNorm(vmin=vmin, vmax=vmax)
+    ext = [kr[0], kr[-1], kr[0], kr[-1]]
+
+    fig = plt.figure(figsize=(17, 4.3 * len(rows)))
+    gs = gridspec.GridSpec(len(rows), 4, width_ratios=[1.7, 1, 1, 1],
+                           wspace=0.30, hspace=0.34)
+
+    # ---- 3D scatter of the summed rate --------------------------------------
+    ax3d = fig.add_subplot(gs[:, 0], projection='3d')
+    Wt = data['W_total']
+    m = np.isfinite(Wt) & (Wt > vmax / 3e3)
+    order = np.argsort(Wt[m])                       # draw strong points last
+    sc = ax3d.scatter(KX[m][order], KY[m][order], KZ[m][order], c=Wt[m][order],
+                      norm=norm, cmap='turbo', s=11, alpha=0.7, linewidths=0,
+                      depthshade=False)
+    for name, pt, col in [('Γ', (0, 0, 0), 'k'), ('X', (1, 0, 0), 'dimgray'),
+                          ('L', (0.5, 0.5, 0.5), 'saddlebrown')]:
+        ax3d.scatter(*[[c] for c in pt], color=col, s=55, marker='o',
+                     edgecolors='white', zorder=6)
+        ax3d.text(*pt, f' {name}', fontsize=11, weight='bold')
+    ax3d.set_xlabel(r'$k_x$ (2π/a)'); ax3d.set_ylabel(r'$k_y$ (2π/a)')
+    ax3d.set_zlabel(r'$k_z$ (2π/a)')
+    ax3d.set_title(f'3D summed rate  $W_{{tot}}=\\Sigma_N W_N$\n'
+                   f'ħω={data["hw_ev"]:.2f} eV, F={data["field_mvcm"]:g} MV/cm '
+                   f'(bright arms = Γ→L)', fontsize=11)
+    ax3d.set_box_aspect((1, 1, 1))
+    ax3d.view_init(elev=20, azim=-55)
+
+    # ---- 3x3 axis-averaged projections --------------------------------------
+    im = None
+    for r, (lab, W) in enumerate(rows):
+        for c, (axis, ttl, xl, yl) in enumerate(ax_specs):
+            ax = fig.add_subplot(gs[r, c + 1])
+            P = projs[(lab, axis)]
+            Pm = np.ma.masked_invalid(np.where(P > 0, P, np.nan)).T
+            im = ax.imshow(Pm, origin='lower', extent=ext, aspect='equal',
+                           norm=norm, cmap='turbo')
+            ax.set_title(f'{lab}\n{ttl}', fontsize=9)
+            ax.set_xlabel(xl, fontsize=9); ax.set_ylabel(yl, fontsize=9)
+            ax.plot(0, 0, 'w+', ms=7, mew=1.4)
+    cax = fig.add_axes([0.92, 0.12, 0.013, 0.76])
+    fig.colorbar(im, cax=cax, label='rate W [a.u., common scale]')
+
+    fig.suptitle('Si direct multiphoton ionisation: summed rate '
+                 '(3-photon + 4-photon, common absolute scale) and its '
+                 'axis-averaged projections', fontsize=13, y=0.995)
+    fig.savefig(outpath, dpi=dpi, bbox_inches='tight')
+    plt.close(fig)
+    return outpath
 
 
 def _style3d(fig, title, subtitle):
@@ -638,6 +756,18 @@ def main():
     fL.write_html(pL); written.append(pL)
     if args.show:
         fL.show()
+
+    # summed rate (3-photon + 4-photon on a common scale) + axis-averaged
+    # projections, straight to PNG via matplotlib/Agg
+    if len(args.orders) >= 1:
+        pP = os.path.join(args.outdir, 'si_multiphoton_summed_3d_projections.png')
+        fig_summed_3d_projections_mpl(data, ctx, pP)
+        written.append(pP)
+        wt = data['W_total']
+        ratio = {N: np.nansum(data['Wmaps'][N]) / np.nansum(wt) for N in args.orders}
+        print("# summed rate W_total = " + " + ".join(f"W_{N}" for N in args.orders)
+              + f"  (BZ-integrated share: "
+              + ", ".join(f"{N}γ {100 * ratio[N]:.1f}%" for N in args.orders) + ")")
 
     print("=" * 72)
     print("PHYSICS SUMMARY")
