@@ -72,16 +72,25 @@ Usage
   python3 si_three_photon_isosurfaces.py --grid 61       # finer 3D grid
   python3 si_three_photon_isosurfaces.py --field 3       # FK width at 3 MV/cm
   python3 si_three_photon_isosurfaces.py --hw 1.05       # photon energy [eV]
-  python3 si_three_photon_isosurfaces.py --orders 3      # just the 3-photon case
+  python3 si_three_photon_isosurfaces.py --orders 3 4 5  # add the 5-photon case
+  python3 si_three_photon_isosurfaces.py --fields 1 3 10 # fields for the line scan
+  python3 si_three_photon_isosurfaces.py --mu 0.2 --eta 0.05   # FK mass / broadening
+  python3 si_three_photon_isosurfaces.py --slice-quantity total 3 4  # more slicers
   python3 si_three_photon_isosurfaces.py --show          # also open in a browser
 
+Options (see --help): --hw, --orders, --grid, --klim, --field, --fields, --mu,
+--eta, --nband, --slice-quantity, -o/--outdir, --show.
+
 Outputs into ./si_3ph_plots/ :
-  * standalone 3D plotly HTML per order (rate isosurfaces, E_direct resonance
-    shells, rate cloud) and the Gamma-L/Gamma-X/Gamma-K line scans;
-  * si_multiphoton_summed_3d_projections.png (matplotlib/Agg): the SUMMED rate
-    W_total = W_3 + W_4 with the two orders on ONE common absolute scale (the
-    I^N prefactor), shown as a 3D scatter plus the three axis-AVERAGED
-    projections (mean over k_x, k_y, k_z) for 3-photon, 4-photon and the total.
+  * per order: 3D plotly HTML -- rate isosurfaces, E_direct resonance shells,
+    rate cloud; plus the Gamma-L/Gamma-X/Gamma-K line scans (FK field sweep);
+  * si_multiphoton_summed_3d_projections.{png,html}: the SUMMED rate
+    W_total = W_3 + W_4 with the orders on ONE common absolute scale (the I^N
+    prefactor) -- a 3D scatter/plot plus the three axis-AVERAGED projections
+    (mean over k_x, k_y, k_z) for 3-photon, 4-photon and the total;
+  * si_multiphoton_slicer_<q>.html: an MRI-style orthogonal slice viewer
+    (axial/coronal/sagittal, one slider per plane) for each --slice-quantity
+    (default: 'total' and 'edir'; also any order, e.g. 3 or 4).
 """
 import argparse
 import itertools
@@ -739,6 +748,99 @@ def fig_summed_3d_projections_mpl(data, ctx, outpath, dpi=150):
     return outpath
 
 
+def _quantity_field(data, quantity):
+    """Return (field[NNN], label, is_log) for a slicer quantity selector."""
+    if quantity == 'total':
+        return data['W_total'], 'Σ 3γ+4γ  log10 W', True
+    if quantity == 'edir':
+        return data['E_dir'], 'E_direct [eV]', False
+    N = int(quantity)
+    return data['Wmaps'][N], f'{N}-photon  log10 W_{N}', True
+
+
+def fig_mri_slicer_plotly(go, make_subplots, data, quantity='total'):
+    """MRI-style orthogonal slice viewer of the 3D volume: three panels
+    (axial k_x-k_y at fixed k_z, coronal k_x-k_z at fixed k_y, sagittal
+    k_y-k_z at fixed k_x), each with its OWN slider to scroll the slice
+    plane -- exactly like scrolling through an MRI stack. Rates are shown as
+    log10 on a shared colour scale; E_direct is shown linearly.
+
+    Implemented with per-panel restyle-z slider steps (three light heatmap
+    traces, one per panel), so the HTML stays small and fully self-contained."""
+    kr = data['kr']
+    ng = len(kr)
+    field, clabel, is_log = _quantity_field(data, quantity)
+
+    def prep(S):
+        if is_log:
+            return np.where(np.isfinite(S) & (S > 0), np.log10(S), np.nan)
+        return np.where(np.isfinite(S), S, np.nan)
+
+    if is_log:
+        pos = field[np.isfinite(field) & (field > 0)]
+        cmax = float(np.log10(pos.max())) if pos.size else 0.0
+        cmin, cmax = cmax - 4.0, cmax
+    else:
+        cmin = float(np.nanmin(field))
+        cmax = float(np.nanmax(field))
+
+    # slice stacks along each axis (list of 2D arrays, transposed for Heatmap)
+    axial = [prep(field[:, :, l]).T for l in range(ng)]      # (k_z index) -> (kx,ky)
+    coronal = [prep(field[:, j, :]).T for j in range(ng)]    # (k_y index) -> (kx,kz)
+    sagittal = [prep(field[i, :, :]).T for i in range(ng)]   # (k_x index) -> (ky,kz)
+    mid = ng // 2
+
+    fig = make_subplots(
+        rows=1, cols=3, horizontal_spacing=0.07,
+        subplot_titles=(f'axial  (k_z = {kr[mid]:+.2f})',
+                        f'coronal  (k_y = {kr[mid]:+.2f})',
+                        f'sagittal  (k_x = {kr[mid]:+.2f})'))
+    common = dict(coloraxis='coloraxis', zsmooth='best')
+    fig.add_trace(go.Heatmap(z=axial[mid], x=kr, y=kr, **common,
+                  hovertemplate='kx=%{x:.2f}, ky=%{y:.2f}<br>%{z:.2f}<extra></extra>'),
+                  row=1, col=1)
+    fig.add_trace(go.Heatmap(z=coronal[mid], x=kr, y=kr, **common,
+                  hovertemplate='kx=%{x:.2f}, kz=%{y:.2f}<br>%{z:.2f}<extra></extra>'),
+                  row=1, col=2)
+    fig.add_trace(go.Heatmap(z=sagittal[mid], x=kr, y=kr, **common,
+                  hovertemplate='ky=%{x:.2f}, kz=%{y:.2f}<br>%{z:.2f}<extra></extra>'),
+                  row=1, col=3)
+
+    def steps(stack, trace_idx, coord):
+        out = []
+        for k in range(ng):
+            out.append(dict(method='restyle',
+                            args=[{'z': [stack[k]]}, [trace_idx]],
+                            label=f'{kr[k]:+.2f}'))
+        return out
+
+    sl = []
+    for ci, (stack, coord, xlab) in enumerate(
+            [(axial, 'k_z', 'kx/ky'), (coronal, 'k_y', 'kx/kz'),
+             (sagittal, 'k_x', 'ky/kz')]):
+        sl.append(dict(active=mid, x=ci / 3.0, len=0.30, y=-0.06, pad=dict(t=30),
+                       currentvalue=dict(prefix=f'{coord} = ', font=dict(size=13)),
+                       steps=steps(stack, ci, coord)))
+
+    for c, (xl, yl) in enumerate([('k_x', 'k_y'), ('k_x', 'k_z'), ('k_y', 'k_z')], 1):
+        fig.update_xaxes(title_text=f'{xl} (2π/a)', row=1, col=c,
+                         constrain='domain')
+        fig.update_yaxes(title_text=f'{yl} (2π/a)', row=1, col=c,
+                         scaleanchor=f'x{c if c > 1 else ""}', scaleratio=1)
+
+    fig.update_layout(
+        title=dict(text=f'Si multiphoton rate — MRI-style slice viewer '
+                        f'({clabel})<br><sup>ħω={data["hw_ev"]:.2f} eV, '
+                        f'F={data["field_mvcm"]:g} MV/cm, ħθ={data["hth"]:.2f} eV | '
+                        'drag each slider to scroll that plane through the BZ</sup>',
+                   x=0.5),
+        coloraxis=dict(colorscale='turbo', cmin=cmin, cmax=cmax,
+                       colorbar=dict(title=clabel, len=0.75)),
+        sliders=sl, width=1500, height=620,
+        margin=dict(l=40, r=20, t=90, b=90))
+    return fig
+
+
 def _style3d(fig, title, subtitle):
     fig.update_layout(
         title=dict(text=f"{title}<br><sup>{subtitle}</sup>", x=0.5,
@@ -776,6 +878,9 @@ def main():
                     help='intermediate-state broadening in the LOPT denominators [eV]')
     ap.add_argument('--nband', type=int, default=24,
                     help='bands kept for the intermediate-state sum')
+    ap.add_argument('--slice-quantity', nargs='+', default=['total', 'edir'],
+                    help="MRI-slicer quantities: 'total', 'edir', or an order "
+                         "(e.g. 3 4). Default: total edir")
     ap.add_argument('-o', '--outdir', default='si_3ph_plots')
     ap.add_argument('--show', action='store_true', help='also open figures in a browser')
     args = ap.parse_args()
@@ -849,6 +954,17 @@ def main():
         fS.write_html(pS); written.append(pS)
         if args.show:
             fS.show()
+
+        # MRI-style orthogonal slice viewer(s)
+        for q in args.slice_quantity:
+            if q not in ('total', 'edir') and int(q) not in args.orders:
+                continue
+            fM = fig_mri_slicer_plotly(go, make_subplots, data, quantity=q)
+            tag = q if q in ('total', 'edir') else f'{q}photon'
+            pM = os.path.join(args.outdir, f'si_multiphoton_slicer_{tag}.html')
+            fM.write_html(pM); written.append(pM)
+            if args.show:
+                fM.show()
         wt = data['W_total']
         ratio = {N: np.nansum(data['Wmaps'][N]) / np.nansum(wt) for N in args.orders}
         print("# summed rate W_total = " + " + ".join(f"W_{N}" for N in args.orders)
