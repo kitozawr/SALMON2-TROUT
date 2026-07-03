@@ -763,9 +763,11 @@ contains
         mu = 0.5d0 * (lo + hi)
     end function dirac_mu_2d
 
-    ! Thomas-Fermi screening vector of the Dirac gas [R07]:
-    ! Q_TF = (e^2 kT)/(pi eps hbar^2 v^2) * log[(e^{mu_c/kT}+1)(e^{-mu_v/kT}+1)]
-    ! (a.u., e = hbar = 1; mu_c / mu_v = conduction / valence quasi-Fermi levels).
+    ! Thomas-Fermi screening vector of the Dirac gas [R07 Eq. (13)]:
+    ! Q_TF = (e^2 KT)/(pi eps_inf hbar^2 v^2) log[(e^{Ef+1/KT}+1)(e^{-Ef-1/KT}+1)]
+    ! with eps_inf = eps_r * eps_0. In Hartree a.u. (e = hbar = 1, eps_0 = 1/4pi)
+    ! this is Q_TF = 4 KT log[...] / (eps_r v^2). mu_c / mu_v are the conduction /
+    ! valence quasi-Fermi levels (Ef+1 / Ef-1 of [R07]).
     pure function rana_qtf(mu_c, mu_v, kT, v, eps_inf) result(qtf)
         implicit none
         real(8), intent(in) :: mu_c, mu_v, kT, v, eps_inf
@@ -773,35 +775,28 @@ contains
         ! log(e^x + 1) evaluated overflow-safely
         l1 = max( mu_c / kT, 0d0) + log(1d0 + exp(-abs( mu_c / kT)))
         l2 = max(-mu_v / kT, 0d0) + log(1d0 + exp(-abs(-mu_v / kT)))
-        qtf = kT / (pi * eps_inf * v * v) * (l1 + l2)
+        qtf = 4d0 * kT / (eps_inf * v * v) * (l1 + l2)
     end function rana_qtf
 
-    ! CCCV Auger recombination rate per area, [R07] collinear-collapsed form
-    ! (wiki/07 sec.6 transcription):
-    !   R ~ (1/(hbar^2 v)) int dk1/2pi int dk2/2pi int_{k2}^inf dQ/2pi
-    !       |M|^2 / sqrt((k1+Q)(Q-k2) k1 k2)
-    !       * [1-f_v(Q-k2)] [1-f_c(k1+Q)] f_c(k1) f_c(k2)
-    ! with the 2D screened Coulomb on the collinear line: M_d = 2pi/(eps (Q+Q_TF)),
-    ! exchange M_e = 2pi/(eps (|k1-k2+Q|+Q_TF)), spin-averaged antisymmetrized
-    ! |M|^2 = |M_d - M_e|^2 + |M_d|^2 + |M_e|^2 (same combination as the 3D
-    ! formalism, sec.3). reverse=.true. swaps the occupation factors
-    ! (f <-> 1-f) giving the GENERATION (impact-ionization) partner: at
-    ! equilibrium (single mu for both branches) generation = recombination
+    ! CCCV Auger recombination rate per area, [R07 Eq. (14)] (the paper's main
+    ! result; verified against the journal text supplied by the maintainer):
+    !   R = (1/(hbar^2 v)) int_0^inf dk1/2pi int_0^inf dk2/2pi int_{k2}^inf dQ/2pi
+    !       |M(k1,k2,Q)|^2 * sqrt((k1+Q)(Q-k2) k1 k2)
+    !       * [1-f_-1(Q-k2)] [1-f_+1(k1+Q)] f_+1(k1) f_+1(k2)
+    ! (the sqrt of the collinear collapse is in the NUMERATOR). The matrix
+    ! element [R07 Eqs. (10)-(12)], overlaps = 1 on the collinear line:
+    !   |M|^2 = |M_d|^2 + |M_e|^2 + |M_d - M_e|^2
+    !   M_d = e^2/(2 eps_inf (Q + Q_TF)),  M_e = e^2/(2 eps_inf (|Q+k1-k2| + Q_TF))
+    ! which in Hartree a.u. (e^2 = 1, eps_inf = eps_r/(4 pi)) is
+    !   M_d = 2 pi/(eps_r (Q + Q_TF)) etc.
+    ! reverse=.true. gives the GENERATION (impact-ionization CVCC) partner
+    ! [R07 Eq. (17)]: occupations [1-f_c(k1)][1-f_c(k2)] f_v(Q-k2) f_c(Q+k1);
+    ! at equilibrium (single mu for both branches) generation = recombination
     ! exactly (detailed balance -- unit-tested).
     ! f_v is the VALENCE-branch electron occupation: f_v(k) = f((-v*k - mu_v)/kT).
-    !
-    ! *** ABSOLUTE NORMALIZATION PENDING [R07] Eq. TEXT (provenance rule) ***
-    ! The wiki transcription of the collapsed integral has dimension E*L^2,
-    ! not the required E/L^2: the angular delta-collapse Jacobians (dimension
-    ! L^-4) were lost in transcription, so this function's ABSOLUTE scale is
-    ! NOT trustworthy (it comes out ~10 orders too fast against the cited
-    ! tau_r ~ 1.1 ps at n = 1e12 cm^-2). The arXiv/journal text is unreachable
-    ! from this environment (network policy); per the strict provenance rule
-    ! the missing factors are NOT guessed. What IS validated (test_rana_2d):
-    ! equilibrium detailed balance (exact), the CVVV(n,p)=CCCV(p,n) mirror,
-    ! the eps ordering, and the n/T monotonicity -- i.e. every RELATIVE
-    ! property the channel would use. DO NOT wire this into a live SBE channel
-    ! until the prefactor is fixed against [R07] Eqs. and the cited lifetimes.
+    ! Validated against the cited [R07] benchmarks in test_rana_2d: minority
+    ! lifetime ~1.1 ps at p = 1e12 cm^-2 / 300 K / eps_r = 10, tau_r > 1 ps
+    ! below 1e12 (all T), > 5 ps below 1e11.
     function rana_rcccv(mu_c, mu_v, kT, v, eps_inf, reverse) result(R)
         implicit none
         real(8), intent(in) :: mu_c, mu_v, kT, v, eps_inf
@@ -838,7 +833,8 @@ contains
                     md = 2d0 * pi / (eps_inf * (Q + qtf))
                     me = 2d0 * pi / (eps_inf * (abs(k1 - k2 + Q) + qtf))
                     m2 = (md - me)**2 + md*md + me*me
-                    w  = m2 / sqrt(max((k1 + Q) * (Q - k2) * k1 * k2, 1d-300))
+                    ! [R07 Eq. (14)]: the collinear-collapse sqrt is a NUMERATOR factor
+                    w  = m2 * sqrt(max((k1 + Q) * (Q - k2) * k1 * k2, 0d0))
                     R  = R + w * occ * dq
                 end do
             end do

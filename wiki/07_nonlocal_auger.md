@@ -29,25 +29,25 @@ fixed-point test passes with the linear-regime τ=1e-7; the CDRB weight raised
 violation).
 
 **UPDATE 2026-07-03 (branch `claude/graphene-rana-2d`): the graphene 2D Rana
-branch (§6) is implemented as SHAPE-VALIDATED primitives — ⚠️ ABSOLUTE
-NORMALIZATION PENDING the [R07] equation text.** `dirac_mu_2d` (quasi-Fermi of
-the Dirac gas, g=4), `rana_qtf` (the [R07] thermal Thomas–Fermi vector) and
-`rana_rcccv` (the collinear-collapsed CCCV integral with the antisymmetrized
-2D screened Coulomb; `reverse=.true.` = the generation/impact-ionization
-partner) live in `sbe_superres_ssbe.f90`; `test_rana_2d` validates every
-RELATIVE property: **equilibrium detailed balance exact**, the
-CVVV(n,p)=CCCV(p,n) mirror, smaller ε ⇒ larger rate, n/T monotonicity.
-**BUT:** the §6 transcription of the collapsed integral is dimensionally
-E·L² instead of E·L⁻² — the angular δ-collapse Jacobians were lost when this
-page was written, and the raw integral comes out ~10 orders faster than the
-cited τ_r≈1.1 ps benchmark. The arXiv/journal text is **unreachable from the
-dev environment (network-policy 403)**, and the strict provenance rule forbids
-guessing the missing factors. → The channel is **NOT wired into the SBE**
-(graphene `auger_ok` stays `.false.`); the test prints the uncalibrated τ for
-the record. **To finish:** obtain [R07] Eqs. (the maintainer has journal
-access), fix the prefactor, re-enable the cited lifetime asserts
-(τ_r≈1.1 ps @ n=10¹², 300 K, ε=10; >5 ps @ 10¹¹; >1 ps @ 77 K), then wire the
-CPTP channel. Remaining otherwise: the overlap factors I(G), per-material C
+branch (§6) is IMPLEMENTED AND VALIDATED against the cited [R07] lifetime
+benchmarks** (the maintainer supplied the journal texts — legal academic
+access). `dirac_mu_2d` (quasi-Fermi of the g=4 Dirac gas, [R07 Eq. 7]),
+`rana_qtf` ([R07 Eq. 13]; in Hartree a.u. Q_TF = 4kT·log[...]/(ε_r v²)) and
+`rana_rcccv` ([R07 Eq. 14] verbatim — **the collinear-collapse
+√((k1+Q)(Q−k2)k1k2) is a NUMERATOR factor** (the §6 transcription below had it
+inverted; fixed against the paper); M_d/M_e per Eqs. (10)-(12), overlaps = 1
+on the collinear line, in a.u. M_d = 2π/(ε_r(Q+Q_TF)); `reverse=.true.` = the
+CVCC generation partner, Eq. (17)). `test_rana_2d` asserts the CITED numbers:
+τ_r(10¹² cm⁻², 300 K, ε_r=10) = **1.48 ps** (Fig. 4 ~1–2 ps; minority
+lifetime 1.1 ps), τ_r(10¹¹) = 7.4 ps (cited > 5 ps), τ_r(10¹², 77 K) =
+1.34 ps (cited > 1 ps), plus equilibrium detailed balance (exact), the
+CVVV mirror, ε-ordering (Fig. 5) and the [R07] T-trends. The **K15 model
+ε(q)** used by the ring kernels (branch `claude/auger-eps-q-umklapp`) was
+also verified VERBATIM against the supplied PRB 92, 035207 text (α = 1.563,
+same functional form; the Debye-Hückel/Thomas-Fermi λ² formulas match the
+Part-G screening module). **Still to wire:** the CPTP SBE channel that
+applies R−G = (n−n₀)/τ_r to the graphene cone populations (graphene
+`auger_ok` stays `.false.` until then); Remaining otherwise: the overlap factors I(G), per-material C
 validation against [S14]/[L90] (§7). Originally recorded 2026-06-30 from the maintainer's
 prompt. This is the next major dissipation-physics task: rebuild Auger
 recombination from the current **k-local** approximation (initial states pinned

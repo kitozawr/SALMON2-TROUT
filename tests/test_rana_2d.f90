@@ -2,17 +2,19 @@
 !  test_rana_2d.f90  -  graphene 2D Auger / carrier multiplication [R07]
 !  (F. Rana, PRB 76, 155431 (2007) / arXiv:0705.1204; wiki/07 sec.6).
 !
-!  *** The ABSOLUTE normalization of rana_rcccv is PENDING the [R07] equation
-!  text (unreachable from the dev environment -- network policy; the wiki
-!  transcription lost the angular collapse Jacobians, see the function
-!  header). Per the strict provenance rule no factors are guessed, so this
-!  test validates every RELATIVE / structural property the channel relies on
-!  and prints the (uncalibrated) lifetime for the record:
-!    1) DETAILED BALANCE: at equilibrium (single mu for both branches) the
-!       generation (reverse) integral equals recombination exactly.
-!    2) CVVV(n,p) = CCCV(p,n) mirror (and CVVV /= CCCV when n /= p).
-!    3) smaller eps => larger rate (eps = 4 SiO2 vs 10 Al2O3 [R07 setup]).
-!    4) monotonicity: R grows with density and with temperature.
+!  Implements [R07 Eqs. (13),(14),(17)] verbatim (verified against the journal
+!  text). Validates BOTH the cited absolute lifetime benchmarks and the
+!  structural properties:
+!    1) tau_r(n=p=1e12 cm^-2, 300 K, eps_r=10) ~ 1-2 ps [R07 Fig.4; the
+!       minority-carrier lifetime at p=1e12 is 1.1 ps] -- window 0.5..3 ps.
+!    2) tau_r > 5 ps at 1e11 cm^-2 (300 K) and > 1 ps at 1e12 (77 K) [R07].
+!    3) DETAILED BALANCE: at equilibrium (single mu for both branches) the
+!       generation (reverse) integral equals recombination exactly
+!       [R07: G = R in thermal equilibrium].
+!    4) CVVV(n,p) = CCCV(p,n) mirror (and CVVV /= CCCV when n /= p).
+!    5) smaller eps => larger rate (eps = 4 SiO2 vs 10 Al2O3 [R07 Fig.5]).
+!    6) R grows with density; the GENERATION rate grows with temperature
+!       [R07: "the generation rate increases with temperature"].
 !  Standalone gfortran (uses sbe_superres_ssbe.f90).
 !
 program test_rana_2d
@@ -60,25 +62,37 @@ program test_rana_2d
     R4  = rana_rcccv(mu_c, mu_v, kT300, V_F_AU,  4d0, .false.)
     if (R4 <= R10) call bad('eps=4 (SiO2) rate not larger than eps=10 (Al2O3)')
 
-    ! --- (4) monotonicity in density and temperature -------------------------
+    ! --- (4) monotonicity: R with density; GENERATION with temperature -------
     mu_c = dirac_mu_2d(n11, kT300, V_F_AU)
     R_lo = rana_rcccv(mu_c, -mu_c, kT300, V_F_AU, 10d0, .false.)
     if (R_lo >= R10) call bad('rate not increasing with carrier density')
-    mu_c = dirac_mu_2d(n12, kT77, V_F_AU)
-    R_hot = rana_rcccv(mu_c, -mu_c, kT77, V_F_AU, 10d0, .false.)
-    if (R_hot >= R10) call bad('rate not increasing with temperature (77 K vs 300 K)')
+    R_hot = rana_rcccv(0d0, 0d0, kT300, V_F_AU, 10d0, .true.)
+    R_lo  = rana_rcccv(0d0, 0d0, kT77,  V_F_AU, 10d0, .true.)
+    if (R_hot <= R_lo) call bad('generation rate not increasing with temperature')
 
-    ! --- record: UNCALIBRATED lifetime at the cited [R07] benchmark point ----
+    ! --- (5) CITED absolute lifetime benchmarks [R07] ------------------------
     mu_c = dirac_mu_2d(n12, kT300, V_F_AU);  mu_v = -mu_c
     R_rec = rana_rcccv(mu_c, mu_v, kT300, V_F_AU, 10d0, .false.) &
           + rana_rcccv(-mu_v, -mu_c, kT300, V_F_AU, 10d0, .false.)
     tau_ps = n12 / max(R_rec, 1d-300) * AU_T_FS * 1d-3
-    write(*,'(a,es12.4,a)') '  UNCALIBRATED tau_r(1e12 cm^-2, 300 K, eps10) = ', tau_ps, &
-        ' ps  [R07 cites ~1.1 ps; absolute prefactor pending the R07 Eq. text]'
+    write(*,'(a,f8.3,a)') '  tau_r(1e12 cm^-2, 300 K, eps10) = ', tau_ps, &
+        ' ps  [R07 Fig.4 ~1-2 ps, minority lifetime 1.1 ps]'
+    if (tau_ps < 0.5d0 .or. tau_ps > 3.0d0) &
+        call bad('tau_r(1e12, 300 K) outside the R07 benchmark window 0.5..3 ps')
+    mu_c = dirac_mu_2d(n11, kT300, V_F_AU);  mu_v = -mu_c
+    R_rec = 2d0 * rana_rcccv(mu_c, mu_v, kT300, V_F_AU, 10d0, .false.)
+    tau_ps = n11 / max(R_rec, 1d-300) * AU_T_FS * 1d-3
+    write(*,'(a,f8.3,a)') '  tau_r(1e11 cm^-2, 300 K, eps10) = ', tau_ps, ' ps  [cited > 5 ps]'
+    if (tau_ps <= 5.0d0) call bad('tau_r(1e11, 300 K) not > 5 ps')
+    mu_c = dirac_mu_2d(n12, kT77, V_F_AU);  mu_v = -mu_c
+    R_rec = 2d0 * rana_rcccv(mu_c, mu_v, kT77, V_F_AU, 10d0, .false.)
+    tau_ps = n12 / max(R_rec, 1d-300) * AU_T_FS * 1d-3
+    write(*,'(a,f8.3,a)') '  tau_r(1e12 cm^-2,  77 K, eps10) = ', tau_ps, ' ps  [cited > 1 ps]'
+    if (tau_ps <= 1.0d0) call bad('tau_r(1e12, 77 K) not > 1 ps')
 
     if (nfail == 0) then
-        write(*,'(a)') 'PASS  (graphene 2D Rana SHAPE: equilibrium detailed balance, '// &
-                       'CVVV mirror, eps ordering, n/T monotonicity; ABSOLUTE norm pending R07 text)'
+        write(*,'(a)') 'PASS  (graphene 2D Rana [R07 Eqs.13/14/17]: cited lifetime benchmarks, '// &
+                       'equilibrium detailed balance, CVVV mirror, eps ordering, monotonicity)'
         call exit(0)
     else
         write(*,'(a,i0,a)') 'FAIL (', nfail, ' checks)'
