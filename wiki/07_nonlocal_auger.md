@@ -281,6 +281,19 @@ implement as its own branch.
 
 ## 7. Per-material parameters & validation targets (T=300 K unless noted)
 
+> **SOURCE-VERIFIED 2026-07-03** against the journal PDFs supplied by the
+> maintainer: the [S14] GaAs C-table below matches the paper verbatim
+> (incl. ref-18 direct eeh 5×10⁻³⁴ and the Lush/Strauss experimental
+> cross-checks) and the [L90] Si numbers match (Dziewior–Schmid
+> Cₙ=2.8×10⁻³¹, Cₚ=0.99×10⁻³¹; and L90's own wording: the neglect of the
+> umklapp G-sum and the static-ε₀ replacement are "the two worst
+> approximations", each costing ~an order of magnitude — the direct
+> motivation of the merged CDRB-ε(q)+umklapp kernel weight, PR #57).
+> The §6 graphene targets were re-derived from [R07] directly (PR #58).
+> NEXT STEP of this section: compute the EFFECTIVE C(n) of the ring
+> II/Auger kernel on the Si/GaAs grids and compare order-of-magnitude
+> against these verified tables (plots to the maintainer).
+
 Keep the gap a tunable parameter (rigid scissor of the conduction band) for
 alloys / DFT-gap correction.
 
