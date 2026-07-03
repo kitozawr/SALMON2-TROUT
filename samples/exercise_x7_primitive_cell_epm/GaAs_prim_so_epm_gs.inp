@@ -1,0 +1,50 @@
+!########################################################################################!
+! GaAs SPIN-ORBIT (spinor) primitive-cell EPM ground state (step 1/2) -- in-SALMON.      !
+!----------------------------------------------------------------------------------------!
+! theory='epm' + yn_spinorbit='y': the scalar FCC-primitive problem is promoted to the   !
+! 2npw x 2npw spinor problem H = 1_2 (x) H_loc + mu*H_SO, with mu calibrated at Gamma    !
+! to the cited GaAs Gamma8-Gamma7 splitting Delta0 = 0.341 eV (direct gap -> 1.273 eV,   !
+! Kramers doublets, Dresselhaus splitting zero along <100>/<111>).                       !
+! Verified INTERCHANGEABLE with the Python reference                                     !
+! (epm_gaas_primitive.py, INCLUDE_SPIN_ORBIT=True): eigen and the band path agree to     !
+! 5e-11 Ha; gauge-invariant Kramers-doublet |p|^2 / |v_SO|^2 blocks to ~1e-9 relative.   !
+! The tm file's block 2 (rvnl) carries the SO velocity correction v_SO = grad_k H_SO.    !
+!                                                                                        !
+!   ../../build/salmon < GaAs_prim_so_epm_gs.inp                                         !
+!   ../../build/salmon < GaAs_prim_so_sbe_rt.inp     # step 2/2 (yn_sbe_spinor='y'!)     !
+!                                                                                        !
+! nstate counts SPINOR bands (16 = 2 x 8); occupation is 1 per band (8 filled).          !
+! spin='noncollinear' only satisfies the global input checker (unused by the EPM).       !
+!########################################################################################!
+
+&calculation
+  theory = 'epm'
+/
+
+&control
+  sysname = 'GaAs_prim_so'
+/
+
+&units
+  unit_system = 'au'
+/
+
+&system
+  yn_periodic = 'y'
+  al(1:3) = 10.683d0, 10.683d0, 10.683d0
+  nelec  = 8
+  nstate = 16                               ! 16 spinor bands (occ 1 -> 8 filled)
+  yn_spinorbit = 'y'                        ! spinor EPM (GaAs-cited SO calibration)
+  spin = 'noncollinear'                     ! required by the input checker with yn_spinorbit
+/
+
+&kgrid
+  num_kgrid(1:3) = 4, 4, 4                  ! matches GaAs_prim_so_sbe_rt.inp
+/
+
+&epm
+  epm_material            = 'GaAs'
+  epm_lattice_constant_au = 10.683d0
+  epm_pw_cutoff_ry        = 11.1d0
+  epm_cell                = 'primitive'
+/

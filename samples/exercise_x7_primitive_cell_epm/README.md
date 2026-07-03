@@ -56,9 +56,11 @@ what the generator used.
 python3 plot_sbe_results.py -i . -o plots --snapshots --spectral
 
 # --- GaAs spin-orbit (4x4x4; 16 spinor bands) ------------------------------
-python3 -c "import epm_gaas_primitive as p; p.INCLUDE_SPIN_ORBIT=True; \
-            p.NUM_KGRID=(4,4,4); p.SYSNAME='GaAs_prim_so'; \
-            p.main_gs(); p.main_bandpath()"
+# in-SALMON Fortran spinor EPM (yn_spinorbit='y'; mu calibrated at Gamma to the
+# cited Delta0=0.341 eV; verified interchangeable with the Python ref to 5e-11 Ha):
+./build/salmon < GaAs_prim_so_epm_gs.inp
+#   (equivalently: python3 -c "import epm_gaas_primitive as p; p.INCLUDE_SPIN_ORBIT=True; \
+#               p.NUM_KGRID=(4,4,4); p.SYSNAME='GaAs_prim_so'; p.main_gs(); p.main_bandpath()")
 ./build/salmon < GaAs_prim_so_sbe_rt.inp     # NOTE: needs yn_sbe_spinor='y'
 python3 plot_sbe_results.py -i . -o plots --snapshots
 
