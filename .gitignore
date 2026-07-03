@@ -39,6 +39,7 @@ Thumbs.db
 *_eigen.data
 *_tm.data
 sbe_plots/
+si_3ph_plots/
 
 #Coverage
 coverage/
