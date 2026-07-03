@@ -36,6 +36,7 @@ module sbe_superres_ssbe
               golden_rule_prefactor, eph_thermal_split, &
               eps_thomas_fermi, tf_kappa2_degenerate, debye_kappa2, &
               lindhard_F, eps_lindhard_static, plasmon_freq2, lopc_branches, &
+              eps_cdrb, interk_vq, &
               energy_partner_weights, fermi_dirac, fit_fermi_dirac, &
               carrier_carrier_relax, eph_interk_dpop, ii_interk_dpop, &
               auger_interk_dpop, mp_grid_triple, mp_partner_triple, &
@@ -655,6 +656,64 @@ contains
         end if
     end function eps_lindhard_static
 
+    ! =====================================================================
+    ! CDRB model dielectric function for the inter-k Coulomb channels
+    ! [Cappellini, Del Sole, Reining, Bechstedt, PRB 47, 9892 (1993); used for
+    !  Auger by Kioupakis et al. (K15), PRB 92, 035207 (2015), Eq. (8)]:
+    !   eps(q) = 1 + [ (eps_inf-1)^-1 + alpha (q/q_TF)^2 + q^4/(4 wp^2) ]^-1
+    ! in a.u. (hbar = m = e = 1), alpha = 1.563. Limits: eps(0) = eps_inf,
+    ! eps(q->inf) -> 1 -- the large-q transparency that makes umklapp
+    ! transitions strong (static eps0 over-screens them by ~10x [L90]).
+    ! q_TF and wp are those of the VALENCE electron gas (n = nelec/volume).
+    ! =====================================================================
+    pure function eps_cdrb(q2, eps_inf, qtf2, wp2) result(eps)
+        implicit none
+        real(8), intent(in) :: q2, eps_inf, qtf2, wp2
+        real(8) :: eps, denom
+        real(8), parameter :: CDRB_ALPHA = 1.563d0
+        if (eps_inf <= 1d0 + 1d-12 .or. qtf2 <= 0d0 .or. wp2 <= 0d0) then
+            eps = 1d0
+            return
+        end if
+        denom = 1d0 / (eps_inf - 1d0) + CDRB_ALPHA * q2 / qtf2 + q2 * q2 / (4d0 * wp2)
+        eps = 1d0 + 1d0 / denom
+    end function eps_cdrb
+
+    ! =====================================================================
+    ! Screened inter-k Coulomb weight WITH the umklapp G-sum, in the CARTESIAN
+    ! metric of the actual (possibly non-orthogonal) cell:
+    !   vq = sum_G 1 / [ eps(|q+G|) (|q+G|^2 + lambda^2 + q2reg) ]
+    ! over the 27 neighbouring reciprocal images G = n1 b1 + n2 b2 + n3 b3,
+    ! n_i in {-1,0,1} (bmat rows = b1..b3 [a.u.]; df = fractional coordinate
+    ! difference of the two grid points, in (-1,1) per component so the 27
+    ! images bracket the minimum image). This implements the two [L90]
+    ! "must-not-drop" pieces at the overlap-free level (I(G) -> 1): the
+    ! umklapp G-sum and the q-dependent eps(q); the Bloch-overlap factors
+    ! I_{13}(G) I_{24}(G'-G) need the plane-wave coefficients the SBE does not
+    ! carry and remain a refinement. lambda2 = free-carrier screening (Si: 0
+    ! by Burt's dynamical argument [L90]); q2reg = grid-scale q->0 regulariser
+    ! of the discrete BZ sum (numerical, refines with the k-grid -- NOT a
+    ! physics constant, unlike the old fixed reduced-space kappa2 = 0.05).
+    ! =====================================================================
+    pure function interk_vq(df, bmat, eps_inf, qtf2, wp2, lambda2, q2reg) result(vq)
+        implicit none
+        real(8), intent(in) :: df(3), bmat(3,3), eps_inf, qtf2, wp2, lambda2, q2reg
+        real(8) :: vq, qc(3), q2
+        integer :: g1, g2, g3
+        vq = 0d0
+        do g3 = -1, 1
+            do g2 = -1, 1
+                do g1 = -1, 1
+                    qc(1:3) = (df(1) + g1) * bmat(1, 1:3) &
+                            + (df(2) + g2) * bmat(2, 1:3) &
+                            + (df(3) + g3) * bmat(3, 1:3)
+                    q2 = dot_product(qc, qc)
+                    vq = vq + 1d0 / (eps_cdrb(q2, eps_inf, qtf2, wp2) * (q2 + lambda2 + q2reg))
+                end do
+            end do
+        end do
+    end function interk_vq
+
     ! Bulk plasmon frequency squared [a.u.]: omega_p^2 = 4 pi n/(eps_inf m*).
     ! (the high-frequency plasmon screens with eps_inf, not eps_0). [Mahan]
     pure function plasmon_freq2(n_au, eps_inf, mstar) result(wp2)
@@ -918,14 +977,16 @@ contains
     ! klut(0:nk-1): flattened MP lookup, triple (m1,m2,m3) -> ik via
     ! lidx = m1 + n1*(m2 + n2*m3). The caller precomputes it once.
     subroutine ii_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
-                              pref, expo, iv, ic, kidx, kn, klut, kappa2, sigma, tau, dpop)
+                              pref, expo, iv, ic, kidx, kn, klut, &
+                              bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dpop)
         implicit none
         integer, intent(in)  :: nk, nba, iv, ic, kidx(3, nk), kn(3), klut(0:nk-1)
         real(8), intent(in)  :: eval(nba, nk), f(nba, nk), occ_max, a2half
-        real(8), intent(in)  :: ecbm, eth, pref, expo, kappa2, sigma, tau
+        real(8), intent(in)  :: ecbm, eth, pref, expo, sigma, tau
+        real(8), intent(in)  :: bmat(3,3), eps_inf, qtf2, wp2, lambda2, q2reg
         real(8), intent(out) :: dpop(nba, nk)
         integer :: i1, i1p, i2, ih, ipass, jj, m2p(3), d
-        real(8) :: ekin, dd, g0, etgt, vq, q2, dq, shp, pauli, gpart, gamtot, out_tot, amt
+        real(8) :: ekin, dd, g0, etgt, vq, df(3), shp, pauli, gpart, gamtot, out_tot, amt
         real(8), parameter :: occ_eps = 1d-12
 
         dpop = 0d0
@@ -948,13 +1009,12 @@ contains
                         out_tot = f(ih, i1) * (1d0 - exp(-gamtot * tau))
                     end if
                     do i1p = 1, nk
-                        q2 = 0d0
+                        ! transferred momentum q = k1 - k1' (+G): CDRB-screened
+                        ! Cartesian-metric weight with the 27-image umklapp sum
                         do d = 1, 3
-                            dq = dble(kidx(d, i1) - kidx(d, i1p)) / dble(max(kn(d), 1))
-                            dq = dq - anint(dq)
-                            q2 = q2 + dq * dq
+                            df(d) = dble(kidx(d, i1) - kidx(d, i1p)) / dble(max(kn(d), 1))
                         end do
-                        vq = 1d0 / (q2 + kappa2)       ! screened Coulomb |V(q)| shape
+                        vq = interk_vq(df, bmat, eps_inf, qtf2, wp2, lambda2, q2reg)
                         do i2 = 1, nk
                             call mp_partner_triple(kidx(:,i1), kidx(:,i2), kidx(:,i1p), kn, m2p)
                             jj = klut(m2p(1) + kn(1) * (m2p(2) + kn(2) * m2p(3))) ! O(1) k2'
@@ -1003,14 +1063,16 @@ contains
     ! identically -- the equilibrium-fixed-point unit test.
     ! =====================================================================
     subroutine auger_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
-                                 pref, expo, iv, ic, kidx, kn, klut, kappa2, sigma, tau, dpop)
+                                 pref, expo, iv, ic, kidx, kn, klut, &
+                                 bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dpop)
         implicit none
         integer, intent(in)  :: nk, nba, iv, ic, kidx(3, nk), kn(3), klut(0:nk-1)
         real(8), intent(in)  :: eval(nba, nk), f(nba, nk), occ_max, a2half
-        real(8), intent(in)  :: ecbm, eth, pref, expo, kappa2, sigma, tau
+        real(8), intent(in)  :: ecbm, eth, pref, expo, sigma, tau
+        real(8), intent(in)  :: bmat(3,3), eps_inf, qtf2, wp2, lambda2, q2reg
         real(8), intent(out) :: dpop(nba, nk)
         integer :: i1, i1p, i2, ih, ipass, jj, m2p(3), d
-        real(8) :: ekin, dd, g0, etgt, vq, q2, dq, shp, pauli, gpart, gamtot, in_tot, amt, room
+        real(8) :: ekin, dd, g0, etgt, vq, df(3), shp, pauli, gpart, gamtot, in_tot, amt, room
         real(8), parameter :: occ_eps = 1d-12
 
         dpop = 0d0
@@ -1033,13 +1095,12 @@ contains
                         in_tot = room * (1d0 - exp(-gamtot * tau))
                     end if
                     do i1p = 1, nk
-                        q2 = 0d0
+                        ! SAME CDRB-screened umklapp weight as the II kernel
+                        ! (shared |M|^2 -> detailed balance preserved exactly)
                         do d = 1, 3
-                            dq = dble(kidx(d, i1) - kidx(d, i1p)) / dble(max(kn(d), 1))
-                            dq = dq - anint(dq)
-                            q2 = q2 + dq * dq
+                            df(d) = dble(kidx(d, i1) - kidx(d, i1p)) / dble(max(kn(d), 1))
                         end do
-                        vq = 1d0 / (q2 + kappa2)    ! same screened-Coulomb shape
+                        vq = interk_vq(df, bmat, eps_inf, qtf2, wp2, lambda2, q2reg)
                         do i2 = 1, nk
                             call mp_partner_triple(kidx(:,i1), kidx(:,i2), kidx(:,i1p), kn, m2p)
                             jj = klut(m2p(1) + kn(1) * (m2p(2) + kn(2) * m2p(3)))

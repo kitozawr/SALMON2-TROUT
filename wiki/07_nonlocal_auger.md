@@ -8,9 +8,26 @@ gather, two kernels* inside `apply_ii_interk_ring`, ring-gated, requiring the
 II channel (shared constants — no separate C), with the k-local C·n³ Auger off
 when the ring is on. Unit test incl. the **Fermi-Dirac detailed-balance fixed
 point** (net II+Auger dpop < 1e-6). The **BGR↔Σ^HF guard** (§0.2b) is in
-(mutual exclusion, error stop). Remaining: the graphene 2D Rana branch (§6),
-the K15 ε(q)/umklapp overlap refinements (§3-4), per-material C validation
-against [S14]/[L90] (§7). Originally recorded 2026-06-30 from the maintainer's
+(mutual exclusion, error stop).
+
+**UPDATE 2026-07-03 (branch `claude/auger-eps-q-umklapp`): the K15 ε(q) +
+umklapp piece of §3 is IN** — both ring kernels now weight the quadruples with
+`interk_vq` = Σ over the 27 neighbouring reciprocal images G of
+1/[ε_CDRB(|q+G|)·(|q+G|²+λ²+q²_reg)], with q in the **Cartesian metric** of the
+actual (non-orthogonal) cell (bmat rows) and ε(q) the CDRB model dielectric
+[K15 Eq. (8); CDRB PRB 47, 9892 (1993)] built from the registry ε∞ and the
+valence-gas q_TF/ω_p (n = nelec/V). This replaces the old reduced-coordinate
+bare `1/(q²_red + κ²=0.05)` (κ² was an uncited fixed regulariser; the new
+q²_reg = (half the smallest grid spacing)² refines with the k-grid). λ²=0
+(Si: Burt's dynamical argument [L90]; density-dependent Debye/TF λ(n(t)) for
+GaAs = refinement). Both [L90] "must-not-drop" pieces are thus in at the
+**overlap-free level (I(G)→1)**: the Bloch-overlap factors I₁₃(G)I₂₄(G′−G)
+need the plane-wave coefficients the SBE does not carry — still a refinement.
+Same weight in both kernels ⇒ detailed balance preserved exactly (the FD
+fixed-point test passes with the linear-regime τ=1e-7; the CDRB weight raised
+Γ so the old τ=1e-6 left a visible 1.7e-6 nonlinear tail — not a balance
+violation). Remaining: the graphene 2D Rana branch (§6), the overlap factors
+I(G), per-material C validation against [S14]/[L90] (§7). Originally recorded 2026-06-30 from the maintainer's
 prompt. This is the next major dissipation-physics task: rebuild Auger
 recombination from the current **k-local** approximation (initial states pinned
 at the band extrema — the first-generation impact-ionization approximation) into
