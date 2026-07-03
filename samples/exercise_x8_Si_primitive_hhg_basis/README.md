@@ -101,6 +101,26 @@ What each shows:
   harmonic order; only **odd** orders survive (Si is centrosymmetric) — a clean
   check against your TDDFT harmonics.
 
+> **Where the HHG carriers are born — the band-resolved 3D BZ map ("br3d") shows
+> the same Γ–L pattern.** The same three Cartesian BZ slices (kx-ky / kx-kz /
+> ky-kz) are produced *purely from the band structure* by
+> [`si_three_photon_isosurfaces.py`](../../si_three_photon_isosurfaces.py) as the
+> **direct multiphoton injection rate** `W_N(k)` (3rd-/4th-order LOPT × the
+> Franz–Keldysh field-broadened resonance). For `ħω ≈ 1 eV` the 3-photon+FK
+> channel is strongest along the **low-direct-gap Γ–L valleys** (E_dir ≈ 3.34–3.5
+> eV to L), so its band-resolved 3D BZ map and the axis-averaged projections show
+> **diagonal ⟨111⟩ arms** — the *same* diagonal weight seen in the `*_snap_*`
+> band-resolved 3D BZ maps here (and flagged as the Γ–L / cube-diagonal folds in
+> `zener_tunneling_estimate.py`). Physically: HHG carriers are **seeded along
+> Γ–L by the vertical multiphoton transition**, then intra-band drift carries
+> them toward the Δ-valleys. The 4-photon channel (4ħω = 4.0 eV) adds the more
+> complex weight that reaches toward X (but not at X); on a common absolute scale
+> it grows from ~4 % of the total at 3 MV/cm to ~34 % at 10 MV/cm. Run:
+> ```bash
+> python3 ../../si_three_photon_isosurfaces.py            # 3γ+4γ, up to 10 MV/cm
+> # -> si_3ph_plots/si_multiphoton_summed_3d_projections.{png,html}
+> ```
+
 ---
 
 ## Notes

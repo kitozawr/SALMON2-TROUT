@@ -565,6 +565,87 @@ def fig_line_scans(make_subplots, go, ctx, orders, hw_ev, eta_ev, nband, mu,
     return fig
 
 
+def fig_summed_3d_projections_plotly(go, make_subplots, data):
+    """Interactive plotly version of the summed-rate figure: a 3D scatter of
+    W_total = W_3 + W_4 (rotatable) plus the 3x3 block of axis-AVERAGED
+    projections (rows 3-photon / 4-photon / total; columns mean over k_z, k_y,
+    k_x), all sharing ONE log colour axis. Returns a go.Figure (write to HTML)."""
+    kr = data['kr']
+    KX, KY, KZ = data['KX'], data['KY'], data['KZ']
+    orders = data['orders']
+    tot_sum = np.nansum(data['W_total'])
+    share = {N: 100.0 * np.nansum(data['Wmaps'][N]) / tot_sum for N in orders}
+    rows = [(f'{N}γ ({share[N]:.0f}% Σ)', data['Wmaps'][N]) for N in orders]
+    rows.append(('Σ 3γ+4γ', data['W_total']))
+    axspecs = [(2, '⟨·⟩_kz : (kx,ky)', 'kx', 'ky'),
+               (1, '⟨·⟩_ky : (kx,kz)', 'kx', 'kz'),
+               (0, '⟨·⟩_kx : (ky,kz)', 'ky', 'kz')]
+
+    # shared log colour scale
+    projs, allpos = {}, []
+    for lab, W in rows:
+        for axis, _, _, _ in axspecs:
+            P = np.nanmean(W, axis=axis)
+            projs[(lab, axis)] = P
+            allpos.append(P[np.isfinite(P) & (P > 0)])
+    allpos = np.concatenate(allpos) if allpos else np.array([1.0])
+    cmax = float(np.log10(allpos.max()))
+    cmin = cmax - 4.0
+
+    nrow = len(rows)
+    specs = [[{'type': 'scene', 'rowspan': nrow}] + [{'type': 'xy'}] * 3]
+    for _ in range(nrow - 1):
+        specs.append([None] + [{'type': 'xy'}] * 3)
+    titles = ['']
+    for lab, _ in rows:
+        for _, ttl, _, _ in axspecs:
+            titles.append(f'{lab}  {ttl}')
+    fig = make_subplots(rows=nrow, cols=4, specs=specs,
+                        column_widths=[1.5, 1, 1, 1],
+                        horizontal_spacing=0.05, vertical_spacing=0.06,
+                        subplot_titles=titles)
+
+    # 3D scatter of the total (log colour, shared axis)
+    Wt = data['W_total']
+    m = np.isfinite(Wt) & (Wt > 10 ** (cmax - 3.5))
+    fig.add_trace(go.Scatter3d(
+        x=KX[m], y=KY[m], z=KZ[m], mode='markers',
+        marker=dict(size=2.6, color=np.log10(Wt[m]), coloraxis='coloraxis',
+                    opacity=0.6),
+        name='W_total',
+        hovertemplate='k=(%{x:.2f},%{y:.2f},%{z:.2f})<br>log10 W=%{marker.color:.2f}<extra></extra>'),
+        row=1, col=1)
+    fig.add_trace(bz_edge_trace(go), row=1, col=1)
+
+    # 3x3 projection heatmaps
+    for r, (lab, W) in enumerate(rows, start=1):
+        for c, (axis, ttl, xl, yl) in enumerate(axspecs, start=2):
+            P = projs[(lab, axis)]
+            Z = np.where(P > 0, np.log10(P), np.nan).T
+            fig.add_trace(go.Heatmap(z=Z, x=kr, y=kr, coloraxis='coloraxis',
+                          hovertemplate=f'{xl}=%{{x:.2f}}, {yl}=%{{y:.2f}}<br>'
+                                        'log10 W=%{z:.2f}<extra></extra>'),
+                          row=r, col=c)
+            fig.update_xaxes(title_text=xl, row=r, col=c)
+            fig.update_yaxes(title_text=yl, row=r, col=c)
+
+    fig.update_layout(
+        title=dict(text='Si direct multiphoton ionisation: summed rate '
+                        f'W_total = Σ_N W_N (3γ+4γ, common absolute scale)<br>'
+                        f'<sup>ħω={data["hw_ev"]:.2f} eV, F={data["field_mvcm"]:g} '
+                        f'MV/cm, ħθ={data["hth"]:.2f} eV | 3D = total; grid = '
+                        'axis-averaged projections</sup>', x=0.5),
+        coloraxis=dict(colorscale='turbo', cmin=cmin, cmax=cmax,
+                       colorbar=dict(title='log10 W<br>[a.u.]', len=0.9)),
+        scene=dict(xaxis_title='k_x (2π/a)', yaxis_title='k_y (2π/a)',
+                   zaxis_title='k_z (2π/a)', aspectmode='cube',
+                   camera=dict(eye=dict(x=1.6, y=1.6, z=1.3)),
+                   bgcolor='rgb(12,12,22)'),
+        width=1500, height=380 * nrow,
+        margin=dict(l=10, r=10, t=90, b=10))
+    return fig
+
+
 def fig_summed_3d_projections_mpl(data, ctx, outpath, dpi=150):
     """matplotlib (Agg) figure written straight to PNG:
 
@@ -763,6 +844,11 @@ def main():
         pP = os.path.join(args.outdir, 'si_multiphoton_summed_3d_projections.png')
         fig_summed_3d_projections_mpl(data, ctx, pP)
         written.append(pP)
+        fS = fig_summed_3d_projections_plotly(go, make_subplots, data)
+        pS = os.path.join(args.outdir, 'si_multiphoton_summed_3d_projections.html')
+        fS.write_html(pS); written.append(pS)
+        if args.show:
+            fS.show()
         wt = data['W_total']
         ratio = {N: np.nansum(data['Wmaps'][N]) / np.nansum(wt) for N in args.orders}
         print("# summed rate W_total = " + " + ".join(f"W_{N}" for N in args.orders)
