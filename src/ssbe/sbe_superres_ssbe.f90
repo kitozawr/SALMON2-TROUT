@@ -37,6 +37,7 @@ module sbe_superres_ssbe
               eps_thomas_fermi, tf_kappa2_degenerate, debye_kappa2, &
               lindhard_F, eps_lindhard_static, plasmon_freq2, lopc_branches, &
               eps_cdrb, interk_vq, &
+              dirac_mu_2d, rana_qtf, rana_rcccv, &
               energy_partner_weights, fermi_dirac, fit_fermi_dirac, &
               carrier_carrier_relax, eph_interk_dpop, ii_interk_dpop, &
               auger_interk_dpop, mp_grid_triple, mp_partner_triple, &
@@ -713,6 +714,139 @@ contains
             end do
         end do
     end function interk_vq
+
+    ! =====================================================================
+    ! GRAPHENE 2D Auger / carrier multiplication -- the [R07] branch
+    ! (F. Rana, arXiv:0705.1204v2; wiki/07 sec.6). Gapless Dirac spectrum
+    ! E_s(k) = s*v*|k| (a.u., hbar=1), spin x valley degeneracy g=4. The CCCV
+    ! recombination rate collapses (collinear phase space, overlaps -> 1) to
+    ! the 3D integral of [R07]; CVVV(n,p) = CCCV(p,n); 1/tau_r = R/min(n,p).
+    ! 2D rates in a.u.^-2 * a.u.t^-1 -- there is NO single C [cm^6/s]:
+    ! validation is by the cited LIFETIME targets (test_rana_2d).
+    ! =====================================================================
+
+    ! Carrier density (per area, a.u.) of one Dirac branch at quasi-Fermi mu:
+    ! n(mu) = (g/2pi) int_0^inf k f(vk - mu) dk,  g = 4 (spin x K,K').
+    pure function dirac_n_2d(mu, kT, v) result(n)
+        implicit none
+        real(8), intent(in) :: mu, kT, v
+        real(8) :: n, k, dk, kmax, f
+        integer :: i
+        integer, parameter :: NGRID = 400
+        kmax = (max(mu, 0d0) + 20d0 * kT) / v
+        dk = kmax / NGRID
+        n = 0d0
+        do i = 1, NGRID
+            k = (i - 0.5d0) * dk
+            f = 1d0 / (exp(min((v * k - mu) / kT, 60d0)) + 1d0)
+            n = n + k * f
+        end do
+        n = n * dk * 4d0 / (2d0 * pi)
+    end function dirac_n_2d
+
+    ! Quasi-Fermi level of a 2D Dirac branch from its carrier density (bisection).
+    pure function dirac_mu_2d(n_au, kT, v) result(mu)
+        implicit none
+        real(8), intent(in) :: n_au, kT, v
+        real(8) :: mu, lo, hi, mid
+        integer :: it
+        lo = -40d0 * kT
+        hi =  40d0 * kT + v * sqrt(max(pi * n_au, 0d0)) * 2d0
+        do it = 1, 80
+            mid = 0.5d0 * (lo + hi)
+            if (dirac_n_2d(mid, kT, v) < n_au) then
+                lo = mid
+            else
+                hi = mid
+            end if
+        end do
+        mu = 0.5d0 * (lo + hi)
+    end function dirac_mu_2d
+
+    ! Thomas-Fermi screening vector of the Dirac gas [R07 Eq. (13)]:
+    ! Q_TF = (e^2 KT)/(pi eps_inf hbar^2 v^2) log[(e^{Ef+1/KT}+1)(e^{-Ef-1/KT}+1)]
+    ! with eps_inf = eps_r * eps_0. In Hartree a.u. (e = hbar = 1, eps_0 = 1/4pi)
+    ! this is Q_TF = 4 KT log[...] / (eps_r v^2). mu_c / mu_v are the conduction /
+    ! valence quasi-Fermi levels (Ef+1 / Ef-1 of [R07]).
+    pure function rana_qtf(mu_c, mu_v, kT, v, eps_inf) result(qtf)
+        implicit none
+        real(8), intent(in) :: mu_c, mu_v, kT, v, eps_inf
+        real(8) :: qtf, l1, l2
+        ! log(e^x + 1) evaluated overflow-safely
+        l1 = max( mu_c / kT, 0d0) + log(1d0 + exp(-abs( mu_c / kT)))
+        l2 = max(-mu_v / kT, 0d0) + log(1d0 + exp(-abs(-mu_v / kT)))
+        qtf = 4d0 * kT / (eps_inf * v * v) * (l1 + l2)
+    end function rana_qtf
+
+    ! CCCV Auger recombination rate per area, [R07 Eq. (14)] (the paper's main
+    ! result; verified against the journal text supplied by the maintainer):
+    !   R = (1/(hbar^2 v)) int_0^inf dk1/2pi int_0^inf dk2/2pi int_{k2}^inf dQ/2pi
+    !       |M(k1,k2,Q)|^2 * sqrt((k1+Q)(Q-k2) k1 k2)
+    !       * [1-f_-1(Q-k2)] [1-f_+1(k1+Q)] f_+1(k1) f_+1(k2)
+    ! (the sqrt of the collinear collapse is in the NUMERATOR). The matrix
+    ! element [R07 Eqs. (10)-(12)], overlaps = 1 on the collinear line:
+    !   |M|^2 = |M_d|^2 + |M_e|^2 + |M_d - M_e|^2
+    !   M_d = e^2/(2 eps_inf (Q + Q_TF)),  M_e = e^2/(2 eps_inf (|Q+k1-k2| + Q_TF))
+    ! which in Hartree a.u. (e^2 = 1, eps_inf = eps_r/(4 pi)) is
+    !   M_d = 2 pi/(eps_r (Q + Q_TF)) etc.
+    ! reverse=.true. gives the GENERATION (impact-ionization CVCC) partner
+    ! [R07 Eq. (17)]: occupations [1-f_c(k1)][1-f_c(k2)] f_v(Q-k2) f_c(Q+k1);
+    ! at equilibrium (single mu for both branches) generation = recombination
+    ! exactly (detailed balance -- unit-tested).
+    ! f_v is the VALENCE-branch electron occupation: f_v(k) = f((-v*k - mu_v)/kT).
+    ! Validated against the cited [R07] benchmarks in test_rana_2d: minority
+    ! lifetime ~1.1 ps at p = 1e12 cm^-2 / 300 K / eps_r = 10, tau_r > 1 ps
+    ! below 1e12 (all T), > 5 ps below 1e11.
+    function rana_rcccv(mu_c, mu_v, kT, v, eps_inf, reverse) result(R)
+        implicit none
+        real(8), intent(in) :: mu_c, mu_v, kT, v, eps_inf
+        logical, intent(in) :: reverse
+        real(8) :: R
+        integer, parameter :: N1 = 48, NQ = 64
+        real(8) :: kmax, dk, dq, k1, k2, Q, qtf
+        real(8) :: fc1, fc2, fcp, fvp, occ, md, me, m2, w
+        integer :: i1, i2, iq
+
+        qtf  = rana_qtf(mu_c, mu_v, kT, v, eps_inf)
+        kmax = (max(mu_c, -mu_v, 0d0) + 18d0 * kT) / v
+        dk   = kmax / N1
+        R    = 0d0
+        do i1 = 1, N1
+            k1 = (i1 - 0.5d0) * dk
+            fc1 = fdocc( (v * k1 - mu_c) / kT )
+            do i2 = 1, N1
+                k2 = (i2 - 0.5d0) * dk
+                fc2 = fdocc( (v * k2 - mu_c) / kT )
+                dq = (2d0 * kmax) / NQ
+                do iq = 1, NQ
+                    Q = k2 + (iq - 0.5d0) * dq
+                    ! occupations of the final states: CB electron at k1+Q,
+                    ! VB hole left at Q-k2 (valence electron REMOVED there)
+                    fcp = fdocc( (v * (k1 + Q) - mu_c) / kT )
+                    fvp = fdocc( (-v * (Q - k2) - mu_v) / kT )
+                    if (reverse) then
+                        occ = fvp * fcp * (1d0 - fc1) * (1d0 - fc2)
+                    else
+                        occ = (1d0 - fvp) * (1d0 - fcp) * fc1 * fc2
+                    end if
+                    if (occ < 1d-30) cycle
+                    md = 2d0 * pi / (eps_inf * (Q + qtf))
+                    me = 2d0 * pi / (eps_inf * (abs(k1 - k2 + Q) + qtf))
+                    m2 = (md - me)**2 + md*md + me*me
+                    ! [R07 Eq. (14)]: the collinear-collapse sqrt is a NUMERATOR factor
+                    w  = m2 * sqrt(max((k1 + Q) * (Q - k2) * k1 * k2, 0d0))
+                    R  = R + w * occ * dq
+                end do
+            end do
+        end do
+        R = R * dk * dk / (2d0 * pi)**3 / (v)
+    contains
+        pure function fdocc(x) result(f)
+            real(8), intent(in) :: x
+            real(8) :: f
+            f = 1d0 / (exp(min(max(x, -60d0), 60d0)) + 1d0)
+        end function fdocc
+    end function rana_rcccv
 
     ! Bulk plasmon frequency squared [a.u.]: omega_p^2 = 4 pi n/(eps_inf m*).
     ! (the high-frequency plasmon screens with eps_inf, not eps_0). [Mahan]
