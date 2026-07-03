@@ -16,7 +16,10 @@ program test_ii_interk_cptp
     integer, parameter :: nk = 4, nba = 2, iv = 1, ic = 2
     integer :: kn(3), kidx(3, nk), klut(0:nk-1), nfail, a, k
     real(8) :: eval(nba, nk), f(nba, nk), dpop(nba, nk)
-    real(8) :: occ_max, a2half, ecbm, eth, pref, expo, kappa2, sigma, tau
+    real(8) :: occ_max, a2half, ecbm, eth, pref, expo, sigma, tau
+    ! CDRB-screened Cartesian umklapp weight parameters (cubic test cell,
+    ! Si-like eps_inf; q2reg regularises the q=0 term of the discrete sum)
+    real(8) :: bmat(3,3), eps_inf, qtf2, wp2, lambda2, q2reg
     real(8) :: dcb, dvb, total
     real(8), parameter :: TOL = 1d-11
 
@@ -30,7 +33,9 @@ program test_ii_interk_cptp
     end do
 
     occ_max = 2d0; a2half = 0d0; pref = 1d0; expo = 2d0
-    kappa2 = 0.1d0; sigma = 0.3d0; tau = 0.1d0
+    sigma = 0.3d0; tau = 0.1d0
+    bmat = 0d0; bmat(1,1) = 1d0; bmat(2,2) = 1d0; bmat(3,3) = 1d0
+    eps_inf = 12d0; qtf2 = 1d0; wp2 = 1d0; lambda2 = 0d0; q2reg = 0.1d0
     eval(iv, :) = 0d0                                   ! flat valence
     eval(ic, :) = (/ 1.0d0, 0.5d0, 0.5d0, 0.5d0 /)      ! k1 hot, others at the edge
     ecbm = 0.5d0; eth = 0.2d0
@@ -38,7 +43,8 @@ program test_ii_interk_cptp
     f(ic, :) = (/ 1.0d0, 0d0, 0d0, 0d0 /)               ! one hot conduction carrier @ k1
 
     call ii_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
-                        pref, expo, iv, ic, kidx, kn, klut, kappa2, sigma, tau, dpop)
+                        pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dpop)
 
     ! (1) trace conserved
     total = sum(dpop)
@@ -64,7 +70,8 @@ program test_ii_interk_cptp
     block
         real(8) :: dz(nba, nk)
         call ii_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, 10d0, &
-                            pref, expo, iv, ic, kidx, kn, klut, kappa2, sigma, tau, dz)
+                            pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dz)
         call chk("below threshold -> no-op (max|dpop|)", maxval(abs(dz)), 0d0, 1d-12)
     end block
 

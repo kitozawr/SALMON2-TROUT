@@ -23,7 +23,10 @@ program test_auger_interk_cptp
     integer, parameter :: nk = 4, nba = 2, iv = 1, ic = 2
     integer :: kn(3), kidx(3, nk), klut(0:nk-1), nfail, a, k
     real(8) :: eval(nba, nk), f(nba, nk), dpop(nba, nk)
-    real(8) :: occ_max, a2half, ecbm, eth, pref, expo, kappa2, sigma, tau
+    real(8) :: occ_max, a2half, ecbm, eth, pref, expo, sigma, tau
+    ! CDRB-screened Cartesian umklapp weight parameters (cubic test cell,
+    ! Si-like eps_inf; q2reg regularises the q=0 term of the discrete sum)
+    real(8) :: bmat(3,3), eps_inf, qtf2, wp2, lambda2, q2reg
     real(8) :: dcb, dvb, total
     real(8), parameter :: TOL = 1d-11
 
@@ -36,7 +39,9 @@ program test_auger_interk_cptp
     end do
 
     occ_max = 2d0; a2half = 0d0; pref = 1d0; expo = 2d0
-    kappa2 = 0.1d0; sigma = 0.3d0; tau = 0.1d0
+    sigma = 0.3d0; tau = 0.1d0
+    bmat = 0d0; bmat(1,1) = 1d0; bmat(2,2) = 1d0; bmat(3,3) = 1d0
+    eps_inf = 12d0; qtf2 = 1d0; wp2 = 1d0; lambda2 = 0d0; q2reg = 0.1d0
     eval(iv, :) = 0d0                                   ! flat valence
     eval(ic, :) = (/ 1.0d0, 0.5d0, 0.5d0, 0.5d0 /)      ! k1 hot, others at the edge
     ecbm = 0.5d0; eth = 0.2d0
@@ -45,7 +50,8 @@ program test_auger_interk_cptp
     f(iv, :) = (/ 2d0, 1.0d0, 2d0, 2d0 /)               ! a hole at k2
     f(ic, :) = (/ 0d0, 1.0d0, 1.0d0, 1.0d0 /)           ! CB pair at the edge; hot empty
     call auger_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
-                           pref, expo, iv, ic, kidx, kn, klut, kappa2, sigma, tau, dpop)
+                           pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dpop)
 
     ! (1) trace conserved
     total = sum(dpop)
@@ -72,20 +78,24 @@ program test_auger_interk_cptp
         real(8) :: f0(nba, nk)
         f0(iv, :) = 2d0;  f0(ic, :) = 0d0
         call auger_interk_dpop(nk, nba, eval, f0, occ_max, a2half, ecbm, eth, &
-                               pref, expo, iv, ic, kidx, kn, klut, kappa2, sigma, tau, dz)
+                               pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dz)
         call chk("empty CB -> no-op (max|dpop|)", maxval(abs(dz)), 0d0, 1d-12)
     end block
     ! (4b) below threshold (huge eth) -> exact no-op
     block
         real(8) :: dz(nba, nk)
         call auger_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, 10d0, &
-                               pref, expo, iv, ic, kidx, kn, klut, kappa2, sigma, tau, dz)
+                               pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dz)
         call chk("below threshold -> no-op (max|dpop|)", maxval(abs(dz)), 0d0, 1d-12)
     end block
 
     ! (5) DETAILED BALANCE: Fermi-Dirac occupations at (kT=0.25, mu=0.25) on the
     ! energy-conserving quadruple set (1.0 + 0.0 = 0.5 + 0.5); a NARROW sigma
-    ! suppresses the off-shell (broadening) terms, and a tiny tau puts both
+    ! suppresses the off-shell (broadening) terms, and a tiny tau (1e-7: the
+    ! CDRB umklapp weight raised Gamma, so the linear regime needs a smaller
+    ! step than the old bare-kappa2 kernel) puts both
     ! kernels in the linear regime where the caps f*(Gamma tau) / room*(Gamma tau)
     ! realize the exact f1 f2 (1-f3)(1-f4) = (1-f1)(1-f2) f3 f4 FD identity.
     block
@@ -99,9 +109,11 @@ program test_auger_interk_cptp
             end do
         end do
         call ii_interk_dpop(nk, nba, eval, fd, occ_max, a2half, ecbm, eth, &
-                            pref, expo, iv, ic, kidx, kn, klut, kappa2, 0.02d0, 1d-6, dpi)
+                            pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, lambda2, q2reg, 0.02d0, 1d-7, dpi)
         call auger_interk_dpop(nk, nba, eval, fd, occ_max, a2half, ecbm, eth, &
-                               pref, expo, iv, ic, kidx, kn, klut, kappa2, 0.02d0, 1d-6, dpa)
+                               pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, lambda2, q2reg, 0.02d0, 1d-7, dpa)
         scale = max(maxval(abs(dpi)), 1d-300)
         if (scale < 1d-30) call bad("detailed balance: II kernel inert (test not exercising)")
         call chk("detailed balance: max|dpop_II + dpop_Auger| / max|dpop_II|", &

@@ -2094,17 +2094,21 @@ end subroutine apply_eph_interk_ring
 ! coherence factor) to each local rho(k). Exactly trace-conserving / carrier-
 ! multiplying.
 subroutine apply_ii_interk_ring(sbe, gs, Ac, tau)
-    use sbe_superres_ssbe, only: ii_interk_dpop, auger_interk_dpop, mp_grid_triple
+    use sbe_superres_ssbe, only: ii_interk_dpop, auger_interk_dpop, mp_grid_triple, &
+                                 get_material_params, s_material_params
     use eigen_lapack, only: eigen_zheev
     use communication, only: comm_summation
-    use salmon_global, only: num_kgrid
+    use salmon_global, only: num_kgrid, epm_material
+    use math_constants, only: pi
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info),      intent(in)    :: gs
     real(8),                  intent(in)    :: Ac(3), tau
 
+    type(s_material_params) :: mp
     integer :: nba, nk, ik, i, j, in, im, idir, a, b, s, m(3), iv, ic, lidx
-    real(8) :: a2half, pcoset, resid, maxresid, kappa2, sig, fold, fnew, damp_a
+    real(8) :: a2half, pcoset, resid, maxresid, sig, fold, fnew, damp_a
+    real(8) :: eps_inf, qtf2, wp2, lambda2, q2reg, n_val, kf, blen2
     real(8),    allocatable :: eval_loc(:,:), f_loc(:,:), eval_all(:,:), f_all(:,:), dpop(:,:)
     real(8),    allocatable :: damp(:)
     complex(8), allocatable :: U_loc(:,:,:), rad_loc(:,:,:)
@@ -2146,8 +2150,28 @@ subroutine apply_ii_interk_ring(sbe, gs, Ac, tau)
     if (.not. sbe%kmap_ok) return
 
     a2half = 0.5d0 * dot_product(Ac, Ac)
-    kappa2 = 0.05d0                          ! reduced-space Coulomb regulariser (shape)
     sig    = max(sbe%eph_sigma_au, 2d-3)     ! energy-conservation broadening
+
+    ! CDRB eps(q) screening parameters of the VALENCE electron gas [K15 Eq. (8)]:
+    ! eps_inf from the cited material registry; q_TF and omega_p from the
+    ! valence density n = nelec/V_cell (a.u.). Free-carrier lambda^2 = 0: for Si
+    ! Burt's dynamical argument [L90] (Auger frequencies ~1 eV >> plasma), and
+    ! the density-dependent Debye/TF lambda(n(t)) remains a refinement.
+    ! q2reg is the grid-scale q->0 regulariser of the discrete BZ sum (replaces
+    ! the old FIXED reduced-space kappa2 = 0.05; refines with the k-grid).
+    mp = get_material_params(epm_material)
+    eps_inf = merge(mp%eps_inf, 1d0, mp%found)
+    n_val   = dble(gs%ne) / max(gs%volume, 1d-30)
+    kf      = (3d0 * pi * pi * n_val) ** (1d0 / 3d0)
+    qtf2    = 4d0 * kf / pi
+    wp2     = 4d0 * pi * n_val
+    lambda2 = 0d0
+    q2reg   = huge(1d0)
+    do idir = 1, 3
+        blen2 = dot_product(gs%b_matrix(idir, 1:3), gs%b_matrix(idir, 1:3))
+        q2reg = min(q2reg, blen2 / dble(max(sbe%kmap_n(idir), 1))**2)
+    end do
+    q2reg = 0.25d0 * q2reg                   ! (half the smallest grid spacing)^2
     allocate(eval_loc(nba,nk), f_loc(nba,nk), eval_all(nba,nk), f_all(nba,nk), dpop(nba,nk))
     allocate(U_loc(nba,nba, sbe%ik_min:sbe%ik_max), rad_loc(nba,nba, sbe%ik_min:sbe%ik_max))
     allocate(damp(nba))
@@ -2215,7 +2239,8 @@ subroutine apply_ii_interk_ring(sbe, gs, Ac, tau)
     if (sbe%flag_impact) then
         call ii_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
                             sbe%ii_ecbm_au, sbe%ii_eth_au, sbe%ii_pref_au, sbe%ii_exponent, &
-                            iv, ic, sbe%kmap_idx, sbe%kmap_n, sbe%kmap_lut, kappa2, sig, tau, dpop)
+                            iv, ic, sbe%kmap_idx, sbe%kmap_n, sbe%kmap_lut, &
+                            gs%b_matrix, eps_inf, qtf2, wp2, lambda2, q2reg, sig, tau, dpop)
     end if
     if (sbe%flag_auger) then
         block
@@ -2223,7 +2248,8 @@ subroutine apply_ii_interk_ring(sbe, gs, Ac, tau)
             allocate(dpop_a(nba, nk))
             call auger_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
                                    sbe%ii_ecbm_au, sbe%ii_eth_au, sbe%ii_pref_au, sbe%ii_exponent, &
-                                   iv, ic, sbe%kmap_idx, sbe%kmap_n, sbe%kmap_lut, kappa2, sig, tau, dpop_a)
+                                   iv, ic, sbe%kmap_idx, sbe%kmap_n, sbe%kmap_lut, &
+                                   gs%b_matrix, eps_inf, qtf2, wp2, lambda2, q2reg, sig, tau, dpop_a)
             dpop = dpop + dpop_a
             deallocate(dpop_a)
         end block
