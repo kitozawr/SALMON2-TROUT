@@ -33,8 +33,9 @@ cd samples/exercise_x8_Si_primitive_hhg_basis
 ../../build/salmon < Si_prim_epm_gs.inp > gs.log
 
 # (2) clean primitive band path for the A(k,E) skeleton
-#     (the Fortran EPM does not yet emit _bandpath.data -- use the Python ref)
-python3 ../../epm_si_primitive.py bandpath          # writes Si_prim_bandpath.data
+#     (step (1) already wrote Si_prim_bandpath.data -- the Fortran EPM emits it
+#      since PR #54; the Python ref gives the same file to 5e-11 Ha:
+#      python3 ../../epm_si_primitive.py bandpath)
 
 # (3) real-time SBE (edit file_input1 in the .inp to pick the field amplitude)
 ../../build/salmon < Si_prim_sbe_rt.inp > rt.log

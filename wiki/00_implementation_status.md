@@ -329,8 +329,10 @@ Branch `develop-2.0.0` (merged from PR #44). Order of priority per the maintaine
    renders both the unfolded and folded k–t maps.
 
 8. Optional refinements (unchanged): inter-k momentum-resolved F/C4 on the ring;
-   dynamic LOPC; absolute golden-rule e-ph prefactor; Chefonov Si bleaching run.
+   dynamic LOPC; absolute golden-rule e-ph prefactor.
 
-Also pending (validation, not code): a longer Si super-mode run to check the
-e-ph cooling actually reduces the Drude conductivity (bleaching) -- needs a Si
-dataset (epm_material='Si', scalar) and the carrier-density/current diagnostics.
+**Si bleaching run: NOT a TODO (maintainer 2026-07-03: "это я сделаю сам").**
+The long Si super-mode run (e-ph cooling vs Drude conductivity) is the
+maintainer's own experiment. Our part is the ready-to-run template:
+`samples/exercise_x10_Si_full_dissipation/` — Si primitive with ALL dissipation
+channels enabled (otherwise a copy of the x8 HHG exercise).
