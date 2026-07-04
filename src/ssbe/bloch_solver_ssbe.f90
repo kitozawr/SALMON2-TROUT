@@ -80,6 +80,17 @@ module bloch_solver_ssbe
         real(8) :: auger_eg_au     = 0d0   ! band gap E_g [Ha] (hot-carrier target offset)
         real(8) :: n_exc_cm3       = 0d0   ! running excited-carrier density [cm^-3]
 
+        ! 2D Rana Auger / carrier multiplication (graphene [R07]; wiki/07 sec.6):
+        ! net CPTP pair relaxation R - G of the Dirac-cone populations on the
+        ! instantaneous quasi-Fermi levels (rana_auger_dpop). Ring-gated (needs
+        ! the global population gather, like graphene e-ph). Replaces BOTH the
+        ! k-local C n^3 Auger and the gap-threshold ring Auger for graphene.
+        logical :: flag_rana2d  = .false.
+        real(8) :: rana_vf_au   = 0d0   ! Dirac velocity [a.u.] (1e8 cm/s [R07])
+        real(8) :: rana_eps_r   = 0d0   ! background eps_r (R07 Fig.4; substrate)
+        real(8) :: rana_kt_au   = 0d0   ! carrier/bath temperature [Ha]
+        real(8) :: rana_area_au = 0d0   ! 2D cell area [a.u.^2]
+
         ! Nonlocal impact ionization (Part C4): the hot electron ionizes a
         ! valence partner drawn from the WHOLE BZ (momentum exchange), so the
         ! partner-population / Pauli factors use the global BZ-averaged active-
@@ -683,7 +694,53 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     ! nonlocal-Auger task -- see wiki/07_nonlocal_auger.md.
     ! =========================================================================
     sbe%flag_auger = (yn_sbe_auger == 'y')
-    if (sbe%flag_auger .and. sbe%flag_ring) then
+    sbe%flag_rana2d = sbe%flag_auger .and. mp%found .and. mp%auger_2d_rana
+    if (sbe%flag_rana2d) then
+        ! ---- 2D RANA Auger/CM (graphene [R07], wiki/07 sec.6): the cited
+        ! gapless collinear CCCV/CVVV recombination + CVCC generation, applied
+        ! as the net CPTP relaxation R - G of the Dirac-cone pair density on
+        ! the instantaneous quasi-Fermi levels. NO C [cm^6/s] exists or is
+        ! used; the rate comes from the R07 integrals (lifetime benchmarks
+        ! unit-tested in test_rana_2d). Ring-gated like graphene e-ph: the
+        ! quasi-Fermi inversion needs the GLOBAL gathered populations.
+        if (.not. sbe%flag_ring) then
+            write(*, '(a)') '# ERROR: the graphene 2D Rana Auger/CM channel needs the global'
+            write(*, '(a)') '#        population gather: enable yn_sbe_superres=''y'' together'
+            write(*, '(a)') '#        with yn_sbe_auger=''y'' (same ring gate as graphene e-ph).'
+            error stop '2D Rana Auger requires the ring (yn_sbe_superres)'
+        end if
+        sbe%rana_vf_au = mp%rana_vf_au
+        sbe%rana_eps_r = mp%rana_eps_r
+        if (sbe_coulomb_epsilon > 0d0) sbe%rana_eps_r = sbe_coulomb_epsilon
+        sbe%rana_kt_au = kB_au * sbe_eph_temperature_k
+        ! 2D cell area A = V*|b3|/(2 pi): exact when b3 is the out-of-plane
+        ! (vacuum) axis, i.e. b3 || z -- true for the graphene datasets.
+        block
+            real(8) :: b3len
+            b3len = sqrt(dot_product(gs%b_matrix(3, 1:3), gs%b_matrix(3, 1:3)))
+            if (b3len < 1d-12) then
+                write(*, '(a)') '# ERROR: 2D Rana Auger needs the reciprocal vectors in the'
+                write(*, '(a)') '#        GS k.data header (# b1/b2/b3) to compute the cell area.'
+                error stop '2D Rana Auger: b_matrix missing from the GS dataset'
+            end if
+            if (abs(gs%b_matrix(3, 1)) + abs(gs%b_matrix(3, 2)) > 1d-8 * b3len) then
+                write(*, '(a)') '# ERROR: 2D Rana Auger needs an out-of-plane third axis'
+                write(*, '(a)') '#        (b3 || z, in-plane a1/a2 + vacuum a3).'
+                error stop '2D Rana Auger: cell is not a 2D slab geometry'
+            end if
+            sbe%rana_area_au = gs%volume * b3len / (2d0 * pi)
+        end block
+        if (lprint) then
+            write(*, '(a)') '# Auger/CM: graphene 2D RANA channel [R07] enabled (ring-gated):'
+            write(*, '(a)') '#   net CPTP pair relaxation R - G on instantaneous quasi-Fermi'
+            write(*, '(a)') '#   levels; R = G at equilibrium (detailed balance, unit-tested).'
+            write(*, '(a,f8.4,a,f6.1,a,f8.2,a)') '#   v_F = ', sbe%rana_vf_au, &
+                ' a.u., eps_r = ', sbe%rana_eps_r, ', T = ', &
+                sbe%rana_kt_au / kB_au, ' K (e-ph bath)'
+            write(*, '(a,f10.3,a)') '#   2D cell area = ', sbe%rana_area_au, ' a.u.^2'
+            write(*, '(a)') '#   k-local C n^3 and gap-threshold ring Auger: OFF (2D branch).'
+        end if
+    else if (sbe%flag_auger .and. sbe%flag_ring) then
         ! ---- NONLOCAL (ring) Auger: the exact time-reverse of the nonlocal
         ! impact ionization -- same |M|^2 kernel (momentum map, screened |V(q)|^2,
         ! broadened energy delta, cited Stobbe/Keldysh magnitude), swapped Fermi
@@ -1004,7 +1061,9 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     ! Auger recombination (Sec 13): the per-carrier rate gamma = C n^2 needs the
     ! running excited-carrier density n(t); compute it once per step (same global
     ! reduction as BGR) and store it for apply_auger_recombination.
-    if (sbe%flag_auger) call update_excited_density(sbe, gs)
+    ! (the 2D Rana branch computes its own sheet densities from the gather;
+    !  the 3D volume density n_exc_cm3 feeds only the k-local C n^3 rate)
+    if (sbe%flag_auger .and. .not. sbe%flag_rana2d) call update_excited_density(sbe, gs)
 
     ! Nonlocal impact ionization (Part C4): gather the BZ-averaged active-band
     ! occupations once per step (the valence partner is sourced from anywhere).
@@ -1183,9 +1242,15 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     ! (Auger recombination) through the ring -- one gather, two kernels (once
     ! per step, after the unitary evolution; the k-local II and the k-local
     ! C n^3 Auger are gated off in houston_dissipate when the ring is on).
-    ! MPI-collective -> outside the OpenMP region.
-    if ((sbe%flag_impact .or. sbe%flag_auger) .and. sbe%flag_ring) &
-        call apply_ii_interk_ring(sbe, gs, Ac_end, dt)
+    ! MPI-collective -> outside the OpenMP region. The graphene 2D Rana branch
+    ! replaces the gap-threshold kernels entirely (gapless cone).
+    if ((sbe%flag_impact .or. (sbe%flag_auger .and. .not. sbe%flag_rana2d)) &
+        .and. sbe%flag_ring) call apply_ii_interk_ring(sbe, gs, Ac_end, dt)
+
+    ! Graphene 2D Rana Auger/CM through the ring: net CPTP pair relaxation
+    ! R - G of the Dirac-cone populations [R07]. Once per step, MPI-collective.
+    if (sbe%flag_rana2d .and. sbe%flag_ring) &
+        call apply_rana_auger_ring(sbe, gs, Ac_end, dt)
 
 end subroutine dt_evolve_bloch_cf4
 
@@ -2095,11 +2160,13 @@ end subroutine apply_eph_interk_ring
 ! multiplying.
 subroutine apply_ii_interk_ring(sbe, gs, Ac, tau)
     use sbe_superres_ssbe, only: ii_interk_dpop, auger_interk_dpop, mp_grid_triple, &
-                                 get_material_params, s_material_params
+                                 get_material_params, s_material_params, &
+                                 debye_kappa2, tf_kappa2_degenerate
     use eigen_lapack, only: eigen_zheev
     use communication, only: comm_summation
-    use salmon_global, only: num_kgrid, epm_material
+    use salmon_global, only: num_kgrid, epm_material, sbe_eph_temperature_k
     use math_constants, only: pi
+    use phys_constants, only: kB_au
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info),      intent(in)    :: gs
@@ -2154,9 +2221,12 @@ subroutine apply_ii_interk_ring(sbe, gs, Ac, tau)
 
     ! CDRB eps(q) screening parameters of the VALENCE electron gas [K15 Eq. (8)]:
     ! eps_inf from the cited material registry; q_TF and omega_p from the
-    ! valence density n = nelec/V_cell (a.u.). Free-carrier lambda^2 = 0: for Si
-    ! Burt's dynamical argument [L90] (Auger frequencies ~1 eV >> plasma), and
-    ! the density-dependent Debye/TF lambda(n(t)) remains a refinement.
+    ! valence density n = nelec/V_cell (a.u.). Free-carrier lambda^2: 0 for Si
+    ! (CORRECT by Burt's dynamical argument [L90]: the ~1 eV Auger transition
+    ! frequency >> the carrier plasma frequency, so the static free-carrier
+    ! screen does not act); for GaAs (registry dyn_lambda_ok) the density-
+    ! dependent Debye/TF lambda^2(n(t)) is evaluated on the GATHERED excited
+    ! population after the comm_summation below (Part-G primitives).
     ! q2reg is the grid-scale q->0 regulariser of the discrete BZ sum (replaces
     ! the old FIXED reduced-space kappa2 = 0.05; refines with the k-grid).
     mp = get_material_params(epm_material)
@@ -2230,30 +2300,65 @@ subroutine apply_ii_interk_ring(sbe, gs, Ac, tau)
     call comm_summation(eval_loc, eval_all, nba*nk, sbe%icomm)
     call comm_summation(f_loc,    f_all,    nba*nk, sbe%icomm)
 
+    ! Dynamic free-carrier screening lambda^2(n(t)) (GaAs; registry-gated).
+    ! Excited-electron density from the GATHERED populations; the Part-G
+    ! degeneracy-aware crossover min(Debye, degenerate-TF): each formula
+    ! OVERestimates kappa^2 outside its own regime (Debye ~ n/kT diverges in
+    ! the degenerate limit, TF ~ n^(1/3) overestimates in the dilute limit),
+    ! so the smaller one is the valid branch at every n. Si keeps lambda2 = 0
+    ! (Burt [L90]; dyn_lambda_ok = .false. in the registry).
+    if (mp%found .and. mp%dyn_lambda_ok) then
+        block
+            real(8) :: n_exc_au, kt_au
+            logical, save :: lam_printed = .false.
+            n_exc_au = sum(f_all(ic:nba, :)) / (dble(nk) * max(gs%volume, 1d-30))
+            if (n_exc_au > 0d0) then
+                kt_au = kB_au * max(sbe_eph_temperature_k, 1d0)
+                lambda2 = min(debye_kappa2(n_exc_au, mp%eps0, kt_au), &
+                              tf_kappa2_degenerate(n_exc_au, mp%eps0))
+                ! one-time diagnostic at the first significant screen
+                if (.not. lam_printed .and. lambda2 > 1d-4 .and. sbe%irank == 0) then
+                    write(*, '(a,es12.4,a,es12.4,a)') &
+                        '# ring II/Auger: dynamic free-carrier screen active, '// &
+                        'lambda^2 = ', lambda2, ' a.u. at n_exc = ', &
+                        n_exc_au * sbe%au_dens_cm3, ' cm^-3 (Debye/TF crossover)'
+                    lam_printed = .true.
+                end if
+            end if
+        end block
+    end if
+
     ! One gather, two detailed-balance-partner kernels: impact ionization
     ! (generation) and its exact time-reverse, Auger recombination -- same
     ! quadruples, |V(q)|^2 and energy broadening, swapped occupation factors.
     ! The Auger rate scale IS the cited II magnitude (shared |M|^2): no
     ! separate coefficient. Both ride the same Houston spectrum + ring gather.
-    dpop = 0d0
-    if (sbe%flag_impact) then
-        call ii_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
-                            sbe%ii_ecbm_au, sbe%ii_eth_au, sbe%ii_pref_au, sbe%ii_exponent, &
-                            iv, ic, sbe%kmap_idx, sbe%kmap_n, sbe%kmap_lut, &
-                            gs%b_matrix, eps_inf, qtf2, wp2, lambda2, q2reg, sig, tau, dpop)
-    end if
-    if (sbe%flag_auger) then
-        block
-            real(8), allocatable :: dpop_a(:,:)
-            allocate(dpop_a(nba, nk))
+    ! COST: the kernels are O(nk^3) but exactly additive over the outer source
+    ! k -- each rank runs only its own ik_min..ik_max subrange and the dpop is
+    ! comm_summation'ed (O(nk^3/P); serial runs are bit-identical, the rank
+    ! split only reorders float additions across ranks).
+    block
+        real(8), allocatable :: dpop_loc(:,:), dpop_a(:,:)
+        allocate(dpop_loc(nba, nk), dpop_a(nba, nk))
+        dpop_loc = 0d0
+        if (sbe%flag_impact) then
+            call ii_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
+                                sbe%ii_ecbm_au, sbe%ii_eth_au, sbe%ii_pref_au, sbe%ii_exponent, &
+                                iv, ic, sbe%kmap_idx, sbe%kmap_n, sbe%kmap_lut, &
+                                gs%b_matrix, eps_inf, qtf2, wp2, lambda2, q2reg, sig, tau, dpop_loc, &
+                                i1_lo=sbe%ik_min, i1_hi=sbe%ik_max)
+        end if
+        if (sbe%flag_auger) then
             call auger_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
                                    sbe%ii_ecbm_au, sbe%ii_eth_au, sbe%ii_pref_au, sbe%ii_exponent, &
                                    iv, ic, sbe%kmap_idx, sbe%kmap_n, sbe%kmap_lut, &
-                                   gs%b_matrix, eps_inf, qtf2, wp2, lambda2, q2reg, sig, tau, dpop_a)
-            dpop = dpop + dpop_a
-            deallocate(dpop_a)
-        end block
-    end if
+                                   gs%b_matrix, eps_inf, qtf2, wp2, lambda2, q2reg, sig, tau, dpop_a, &
+                                   i1_lo=sbe%ik_min, i1_hi=sbe%ik_max)
+            dpop_loc = dpop_loc + dpop_a
+        end if
+        call comm_summation(dpop_loc, dpop, nba*nk, sbe%icomm)
+        deallocate(dpop_loc, dpop_a)
+    end block
 
     ! Pass 2: apply to each LOCAL rho(k). Amplitude-damping coherence factor:
     ! a level that loses population damps its coherences by sqrt(f_new/f_old).
@@ -2288,6 +2393,127 @@ subroutine apply_ii_interk_ring(sbe, gs, Ac, tau)
 
     deallocate(eval_loc, f_loc, eval_all, f_all, dpop, U_loc, rad_loc, damp)
 end subroutine apply_ii_interk_ring
+
+
+!=============================================================================
+! Graphene 2D Rana Auger / carrier multiplication through the ring [R07;
+! wiki/07 sec.6] -- the wiring of the validated rana_* primitives into the
+! dynamics (wiki/00 TODO-1). Once per step, MPI-collective:
+!   pass 1: local instantaneous Houston spectrum + adiabatic populations
+!           (same construction as apply_ii_interk_ring);
+!   gather: populations over ALL k (comm_summation over sbe%icomm);
+!   kernel: rana_auger_dpop -- net CPTP pair relaxation R - G on the
+!           instantaneous quasi-Fermi levels (exact trace conservation, smooth
+!           saturation caps, R = G fixed point at equilibrium);
+!   pass 2: apply dpop to the local rho(k) diagonals + amplitude-damping of
+!           the coherences by sqrt(f_new/f_old) (same CPTP factor as the
+!           other ring channels), rotate back.
+!=============================================================================
+subroutine apply_rana_auger_ring(sbe, gs, Ac, tau)
+    use sbe_superres_ssbe, only: rana_auger_dpop
+    use eigen_lapack, only: eigen_zheev
+    use communication, only: comm_summation
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info),      intent(in)    :: gs
+    real(8),                  intent(in)    :: Ac(3), tau
+
+    integer :: nba, nk, ik, i, j, in, im, idir, a, b, iv, ic
+    real(8) :: fold, fnew, rnet
+    real(8),    allocatable :: f_loc(:,:), f_all(:,:), dpop(:,:), damp(:)
+    complex(8), allocatable :: U_loc(:,:,:), rad_loc(:,:,:)
+    real(8)    :: eigen_active(sbe%n_active_bands), evals(sbe%n_active_bands)
+    complex(8) :: p_active(sbe%n_active_bands, sbe%n_active_bands, 3)
+    complex(8) :: HVG(sbe%n_active_bands, sbe%n_active_bands)
+    complex(8) :: W(sbe%n_active_bands, sbe%n_active_bands)
+    complex(8) :: t1(sbe%n_active_bands, sbe%n_active_bands)
+    complex(8) :: rad(sbe%n_active_bands, sbe%n_active_bands)
+
+    nba = sbe%n_active_bands
+    if (nba <= 0) return
+    nk = sbe%nk
+    iv = sbe%nv_act
+    ic = sbe%nv_act + 1
+    if (iv < 1 .or. ic > nba) return
+
+    allocate(f_loc(nba,nk), f_all(nba,nk), dpop(nba,nk), damp(nba))
+    allocate(U_loc(nba,nba, sbe%ik_min:sbe%ik_max), rad_loc(nba,nba, sbe%ik_min:sbe%ik_max))
+    f_loc = 0d0
+
+    ! Pass 1: local instantaneous Houston spectrum + adiabatic populations.
+    do ik = sbe%ik_min, sbe%ik_max
+        do idir = 1, 3
+            do j = 1, nba
+                im = sbe%active_idx(j)
+                do i = 1, nba
+                    in = sbe%active_idx(i)
+                    p_active(i, j, idir) = gs%p_tm_matrix(in, im, idir, ik)
+                    if (sbe%flag_vnl_correction) &
+                        p_active(i, j, idir) = p_active(i, j, idir) + gs%rvnl_tm_matrix(in, im, idir, ik)
+                end do
+            end do
+        end do
+        do i = 1, nba
+            eigen_active(i) = gs%eigen(sbe%active_idx(i), ik)
+        end do
+        call build_HVG(nba, eigen_active, p_active, Ac, HVG)
+        if (sbe%flag_coulomb) HVG = HVG + sbe%sigma_hf(:, :, ik)
+        call eigen_zheev(HVG, evals, W)
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                rad(i, j) = sbe%rho(in, im, ik)
+            end do
+        end do
+        call ZGEMM('C','N', nba,nba,nba, dcmplx(1d0,0d0), W,nba, rad,nba, dcmplx(0d0,0d0), t1,nba)
+        call ZGEMM('N','N', nba,nba,nba, dcmplx(1d0,0d0), t1,nba, W,nba, dcmplx(0d0,0d0), rad,nba)
+        U_loc(:,:,ik) = W
+        rad_loc(:,:,ik) = rad
+        do a = 1, nba
+            f_loc(a,ik) = real(rad(a,a))
+        end do
+    end do
+
+    call comm_summation(f_loc, f_all, nba*nk, sbe%icomm)
+
+    call rana_auger_dpop(nk, nba, f_all, sbe%occ_max, iv, ic, sbe%rana_area_au, &
+                         sbe%rana_kt_au, sbe%rana_vf_au, sbe%rana_eps_r, tau, &
+                         dpop, rnet)
+
+    ! Pass 2: apply to each LOCAL rho(k); amplitude-damp coherences of levels
+    ! that lose population (sqrt(f_new/f_old) -- the CPTP factor).
+    do ik = sbe%ik_min, sbe%ik_max
+        rad = rad_loc(:,:,ik)
+        W   = U_loc(:,:,ik)
+        do a = 1, nba
+            fold = real(rad(a,a))
+            fnew = max(fold + dpop(a,ik), 0d0)
+            if (dpop(a,ik) < 0d0 .and. fold > 1d-12) then
+                damp(a) = sqrt(fnew / fold)
+            else
+                damp(a) = 1d0
+            end if
+            rad(a,a) = dcmplx(fnew, 0d0)
+        end do
+        do b = 1, nba
+            do a = 1, nba
+                if (a /= b) rad(a,b) = rad(a,b) * damp(a) * damp(b)
+            end do
+        end do
+        call ZGEMM('N','N', nba,nba,nba, dcmplx(1d0,0d0), W,nba, rad,nba, dcmplx(0d0,0d0), t1,nba)
+        call ZGEMM('N','C', nba,nba,nba, dcmplx(1d0,0d0), t1,nba, W,nba, dcmplx(0d0,0d0), rad,nba)
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                sbe%rho(in, im, ik) = rad(i, j)
+            end do
+        end do
+    end do
+
+    deallocate(f_loc, f_all, dpop, damp, U_loc, rad_loc)
+end subroutine apply_rana_auger_ring
 
 
 !=============================================================================

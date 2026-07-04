@@ -75,6 +75,41 @@ program test_ii_interk_cptp
         call chk("below threshold -> no-op (max|dpop|)", maxval(abs(dz)), 0d0, 1d-12)
     end block
 
+    ! (5) dynamic free-carrier screening lambda^2 > 0 (GaAs dyn_lambda path)
+    ! must REDUCE the ionization rate monotonically (|V(q)|^2 ~ 1/(q^2+lambda^2))
+    ! while staying exactly trace-conserving; lambda^2 -> inf kills the channel.
+    block
+        real(8) :: dlam(nba, nk), dinf(nba, nk)
+        call ii_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
+                            pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, 5d0, q2reg, sigma, tau, dlam)
+        call chk("lambda2>0: trace conserved", sum(dlam), 0d0, TOL)
+        if (sum(dlam(ic, :)) >= sum(dpop(ic, :))) &
+            call bad("lambda2>0 did not reduce the ionization rate")
+        if (sum(dlam(ic, :)) <= 0d0) &
+            call bad("moderate lambda2 should not kill the channel entirely")
+        call ii_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
+                            pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, 1d30, q2reg, sigma, tau, dinf)
+        call chk("lambda2->inf: channel off", maxval(abs(dinf)), 0d0, 1d-12)
+    end block
+
+    ! (6) i1_lo/i1_hi subrange additivity (the MPI rank split): the sum of the
+    ! two half-range dpops must equal the full-range dpop to round-off.
+    block
+        real(8) :: dlo(nba, nk), dhi(nba, nk)
+        call ii_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
+                            pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dlo, &
+                        i1_lo=1, i1_hi=2)
+        call ii_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
+                            pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dhi, &
+                        i1_lo=3, i1_hi=4)
+        call chk("rank-split additivity (max|full - lo - hi|)", &
+                 maxval(abs(dpop - dlo - dhi)), 0d0, 1d-13)
+    end block
+
     if (nfail == 0) then
         write(*,'(a)') 'PASS  (inter-k impact ionization: trace-conserving, '// &
                        'carrier-multiplying, momentum+energy matched, bounded, sub-threshold no-op)'

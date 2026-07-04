@@ -805,6 +805,69 @@ def _save_bz3d(kfrac, pop, b_matrix, t_val, t_unit, output_dir, dpi,
     print(f"  saved {out.name}")
 
 
+def _save_bz3d_voxel(cpop3d, cx, cy, cz, b_matrix, t_val, t_unit, output_dir,
+                     dpi, tag='nex_k', basis_label='real-carrier', vmax=None,
+                     valleys=None, pop_floor=0.05, smooth_sigma=1.0):
+    """Variant (b) of the 3D BZ population plot: a SMOOTHED SEMI-TRANSPARENT
+    VOXEL CLOUD rendered from the un-sheared Cartesian grid `cpop3d` (the same
+    array behind the *_cart_snap_* maps), instead of the MP-point scatter of
+    _save_bz3d. Gaussian-smoothed (scipy), voxel opacity ∝ population (weak
+    voxels below pop_floor*max are fully transparent), BZ wireframe overlaid.
+    The volumetric analogue of the paper-style scatter -- shows the SHAPE of
+    the populated valleys rather than the sampled points."""
+    pop = np.nan_to_num(np.asarray(cpop3d, dtype=float))
+    try:
+        from scipy.ndimage import gaussian_filter
+        if smooth_sigma > 0:
+            pop = gaussian_filter(pop, sigma=smooth_sigma)
+    except Exception:
+        pass                                            # unsmoothed fallback
+    vmax = float(vmax if vmax is not None else max(pop.max(), 1e-30))
+    m = np.clip(pop / vmax, 0.0, 1.0)
+    filled = m > pop_floor
+    if not np.any(filled):
+        return                                           # nothing to draw yet
+
+    # per-voxel RGBA: colormap colour, alpha ∝ population above the floor
+    from matplotlib import cm as _cm
+    rgba = _cm.get_cmap(CMAP_POP)(m)
+    rgba[..., 3] = np.where(filled, 0.08 + 0.72 * (m - pop_floor) / (1 - pop_floor), 0.0)
+
+    # voxel corner grids (cx/cy/cz are bin centres, uniform spacing)
+    def _edges(c):
+        d = c[1] - c[0] if len(c) > 1 else 1.0
+        return np.concatenate([c - 0.5 * d, [c[-1] + 0.5 * d]])
+    X, Y, Z = np.meshgrid(_edges(cx), _edges(cy), _edges(cz), indexing='ij')
+
+    fig = plt.figure(figsize=(8.5, 8))
+    ax = fig.add_subplot(projection='3d')
+    edges = _bz_wireframe_3d(b_matrix)
+    if edges is not None:
+        for p0, p1 in edges:
+            ax.plot([p0[0], p1[0]], [p0[1], p1[1]], [p0[2], p1[2]],
+                    color='cornflowerblue', lw=0.9, alpha=0.9)
+    ax.voxels(X, Y, Z, filled, facecolors=rgba, shade=False)
+    if valleys is not None:
+        for p in valleys:
+            ax.plot([p[0]], [p[1]], [p[2]], marker=p[3], color=p[4],
+                    ms=p[5], mew=2, ls='none')
+    sm = plt.cm.ScalarMappable(cmap=CMAP_POP,
+                               norm=plt.Normalize(vmin=0.0, vmax=vmax))
+    fig.colorbar(sm, ax=ax, shrink=0.6, pad=0.08, label='population')
+    lim = max(np.linalg.norm(b_matrix[i]) for i in range(3)) * 0.62
+    ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.set_zlim(-lim, lim)
+    ax.set_box_aspect((1, 1, 1))
+    ax.set_xlabel('kx [a.u.]'); ax.set_ylabel('ky [a.u.]'); ax.set_zlabel('kz [a.u.]')
+    ax.set_title(f'{basis_label} LCB population voxel cloud,  t = {t_val:.3f} {t_unit}\n'
+                 f'(opacity ∝ population, Gaussian σ={smooth_sigma:g} bins; '
+                 f'< {pop_floor:.0%} of max transparent)')
+    safe_t = f'{t_val:.6f}'.replace('-', 'm').replace('+', 'p')
+    out = output_dir / f'{tag}_bz3dvox_t{safe_t}{t_unit}.png'
+    fig.savefig(out, dpi=dpi, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  saved {out.name}")
+
+
 def _overlay_valleys(ax, ia, ib, valleys, b_matrix=None):
     """Project the 3D valley markers onto panel axes (ia,ib) and plot them, and
     (if b_matrix given) draw the true BZ boundary silhouette + size the axes to it."""
@@ -950,7 +1013,7 @@ def plot_intra_current(filepath, rt_filepath, output_dir, dpi=150):
 
 def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
                unfold=False, subtract_baseline=False, real=False, b_matrix=None,
-               mark_valleys=False, bz3d=False):
+               mark_valleys=False, bz3d=False, bz3d_voxel=False):
     print(f"Processing {filepath.name}  "
           f"(cmap={'log' if log_scale else 'linear'}, "
           f"snapshots={'on' if snapshots else 'off'}"
@@ -1033,6 +1096,10 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
                 _save_bz3d(kpoints, pop, b_matrix, t_val, t_unit, output_dir, dpi,
                            tag=tag, basis_label=basis_label,
                            valleys=_cubic_valleys(b_matrix)[0] if mark_valleys else None)
+            if bz3d_voxel:
+                _save_bz3d_voxel(cpop3d, cx, cy, cz, b_matrix, t_val, t_unit,
+                                 output_dir, dpi, tag=tag, basis_label=basis_label,
+                                 valleys=_cubic_valleys(b_matrix)[0] if mark_valleys else None)
         times.append(t_val)
         marg_kx.append(np.nanmean(pop3d, axis=(1, 2)))
         marg_ky.append(np.nanmean(pop3d, axis=(0, 2)))
@@ -2146,6 +2213,13 @@ def main():
                              'the MP k-points coloured & sized by population '
                              '(weak points fade/hidden). Needs the reciprocal '
                              'vectors in the k.data header (primitive datasets).')
+    parser.add_argument('--bz3d-voxel', action='store_true',
+                        help='Variant (b) of --bz3d: a smoothed semi-transparent '
+                             'VOXEL CLOUD rendered from the un-sheared Cartesian '
+                             'population grid (the *_cart_snap_* array) instead '
+                             'of the MP-point scatter -- shows the SHAPE of the '
+                             'populated valleys. Needs the reciprocal vectors in '
+                             'the k.data header (primitive datasets).')
     parser.add_argument('--spectral-excitation', action='store_true',
                         help='Colour the primitive spectral A(k,E) frames by '
                              'EXCITATION (holes in VB, electrons in CB; both 0 at '
@@ -2226,7 +2300,8 @@ def main():
             plot_nex_k(f, output_dir, dpi=args.dpi,
                        log_scale=args.log_cmap, snapshots=args.snapshots, real=True,
                        b_matrix=_bmatrix_for(f, '_sbe_nex_k_real.data'),
-                       mark_valleys=args.valleys, bz3d=args.bz3d)
+                       mark_valleys=args.valleys, bz3d=args.bz3d,
+                       bz3d_voxel=args.bz3d_voxel)
         for f in real_uk:
             found_any = True
             plot_nex_k(f, output_dir, dpi=args.dpi,
@@ -2241,7 +2316,8 @@ def main():
                 plot_nex_k(f, output_dir, dpi=args.dpi,
                            log_scale=args.log_cmap, snapshots=args.snapshots,
                            b_matrix=_bmatrix_for(f, '_sbe_nex_k.data'),
-                           mark_valleys=args.valleys, bz3d=args.bz3d)
+                           mark_valleys=args.valleys, bz3d=args.bz3d,
+                       bz3d_voxel=args.bz3d_voxel)
                 if args.subtract_baseline:
                     plot_nex_k(f, output_dir, dpi=args.dpi,
                                log_scale=args.log_cmap, snapshots=args.snapshots,
