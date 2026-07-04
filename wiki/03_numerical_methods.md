@@ -66,3 +66,17 @@ j(t) = −Σ_k Tr[(π + A(t)) ρ^k] (a.u.), with the SAME π (incl. v_SO for spi
 
 ## 12. Frozen-core / active-subspace optimization ✅
 Deep core and high-energy free bands are frozen (exact linear operator only); nonlinear interaction computed in the active subspace (e.g. 20×20 instead of 80×80). ~30× speedup, no physical loss. Also compresses ring-pipeline transit blocks (§9).
+
+## 10. Frozen core / active subspace + the exact current (moved from the README, 2026-07-04)
+
+**Active subspace.** For many deep bands (e.g. 80 bands with 60 below −20 eV) the
+nonlinear commutator [V, ρ] is wasteful: bands outside
+`frozen_core_threshold_ev`/`frozen_free_threshold_ev` are frozen and evolve only
+under the exact linear phase, while the light-matter nonlinearity runs in the
+active window (e.g. 20×20 instead of 80×80 ZGEMMs) — ~30× speedup of the
+nonlinear step with no physics loss in the window. The Coulomb Σ^HF cost/traffic
+scale as n_act², so ALWAYS pair `yn_sbe_coulomb` with a frozen-core window.
+
+**Exact current.** J = Tr[(π + A)ρ] (a.u.) — no perturbative splitting; the
+velocity-gauge inter/intra-band compensation is exact. Hermiticity stabilization
+(ρ = ½(ρ+ρ†)) is enforced each step for real currents and FFT stability.

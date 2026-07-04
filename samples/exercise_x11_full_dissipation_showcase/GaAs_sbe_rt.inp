@@ -1,0 +1,91 @@
+!########################################################################################!
+! x11 SHOWCASE - GaAs: EVERY available channel at once.                                  !
+!----------------------------------------------------------------------------------------!
+! Step 2 of 2 (step 1: ../GaAs_epm_gs.inp -> GaAs_prim_k/_eigen/_tm.data).                 !
+!                                                                                          !
+! THE PHYSICS STORY (contrast with Si!):                                                   !
+!   GaAs is DIRECT-gap: injection AND the CBM are both at Gamma, so the newborn            !
+!   cloud is already in the right valley - no Delta rolling. What the frames show          !
+!   instead:                                                                               !
+!   1. a needle-sharp Gamma injection spot (Kane vertical tunnelling, the                  !
+!      zener_tunneling_estimate.py physics - the transverse birth FWHM is tiny);           !
+!   2. hot carriers spilling into the L satellites (0.29 eV above Gamma) through           !
+!      the polar-LO + 5 cited intervalley e-ph modes (the Gamma-L transfer of              !
+!      real GaAs Gunn physics) - visible as the eight <111> half-spots lighting up;        !
+!   3. nonlocal II + ring Auger + carrier-carrier + Sigma^HF as in Si; PLUS the            !
+!      GaAs-only DYNAMIC free-carrier screen lambda^2(n(t)) (Debye/TF crossover on         !
+!      the gathered density) weakening the II/Auger Coulomb kernel as the plasma           !
+!      builds up - watch the one-time "dynamic free-carrier screen active" line            !
+!      in the log (Si keeps lambda=0 by Burt's argument; GaAs does not).                   !
+!                                                                                          !
+! Same maximal-validity choices as the Si run: Sigma^HF instead of BGR (guard),            !
+! collisional decoherence instead of Kuhn-Zurek, nonlocal ring II instead of the           !
+! k-local imitation. Heavy mode: ring O(nk^3), MPI-distributed over k1.                    !
+!                                                                                          !
+! WATCH IT:                                                                                !
+!   python3 ../../plot_sbe_results.py -i . -o plots --snapshots --valleys --bz3d \         !
+!           --bz3d-voxel --spectral                                                        !
+!########################################################################################!
+
+&calculation
+  theory = 'sbe'
+/
+
+&control
+  sysname = 'GaAs_prim'
+/
+
+&units
+  unit_system = 'au'
+/
+
+&system
+  yn_periodic  = 'y'
+  al_vec1(1:3) = 0.0d0,    5.3415d0, 5.3415d0   ! FCC primitive, a = 10.683 Bohr
+  al_vec2(1:3) = 5.3415d0, 0.0d0,    5.3415d0
+  al_vec3(1:3) = 5.3415d0, 5.3415d0, 0.0d0
+  nelec  = 8
+  nstate = 8
+/
+
+&kgrid
+  num_kgrid(1:3) = 8, 8, 8                   ! must match the GS; 9^3 -> explicit Gamma
+/
+
+&tgrid
+  dt = 0.4d0
+  nt = 6000
+/
+
+&emfield
+  ! Analytic Acos2, omega = 0.125 eV << E_g(Gamma) = 1.39 eV: pure vertical
+  ! multiphoton/Zener injection at the direct minimum. 3e11 W/cm^2 is enough for
+  ! GaAs's small gap (1e12 over-drives the 8-band VG basis - check "basis edge").
+  ae_shape1      = 'Acos2'
+  epdir_re1(1:3) = 0.0d0, 0.0d0, 1.0d0
+  I_wcm2_1       = 3.0d+11
+  tw1            = 800.0d0
+  omega1         = 0.0046d0
+/
+
+&analysis
+  out_projection_k_step = 500
+/
+
+&epm
+  epm_material            = 'GaAs'           ! registry: polar LO + 5 intervalley modes,
+  epm_lattice_constant_au = 10.683d0         ! Stobbe II fit, eps0/eps_inf, dyn lambda(n)
+/
+
+&sbe
+  ! ---- EVERYTHING available for GaAs, all at once ------------------------------
+  yn_sbe_superres          = 'y'    ! ring backbone (inter-k e-ph, II, Auger)
+  yn_sbe_eph               = 'y'    ! polar LO + 5 intervalley modes -> Gamma-L spill
+  yn_sbe_impact_ionization = 'y'    ! nonlocal II; ALSO activates lambda^2(n(t)) for GaAs
+  yn_sbe_auger             = 'y'    ! ring Auger (detailed balance, no separate C)
+  yn_sbe_eeh               = 'y'    ! carrier-carrier FD thermalization
+  yn_sbe_coulomb           = 'y'    ! Sigma^HF gap renormalization (replaces BGR)
+  yn_sbe_bgr_threshold     = 'n'    ! MUST stay off with Coulomb on (double-count guard)
+  sbe_eph_temperature_k    = 300.0d0
+  ! NO sbe_decoh_* (Kuhn-Zurek): collisions provide the decoherence.
+/

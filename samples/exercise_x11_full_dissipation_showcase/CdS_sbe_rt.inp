@@ -1,0 +1,95 @@
+!########################################################################################!
+! x11 SHOWCASE - CdS (wurtzite): every channel with a CITED constant, all at once.       !
+!----------------------------------------------------------------------------------------!
+! Step 2 of 2 (step 1: ../CdS_epm_gs.inp -> CdS_prim_k/_eigen/_tm.data).                   !
+!                                                                                          !
+! THE PHYSICS STORY (the polar-semiconductor contrast):                                    !
+!   CdS is direct-gap at Gamma (2.55 eV) and POLAR: the dominant cooling channel           !
+!   is the single Frohlich LO mode (38 meV, alpha = 0.5 - both cited). The frames          !
+!   show a Gamma injection cloud staying AT Gamma while the Frohlich ladder cools          !
+!   its energy distribution - intra-valley polar cooling, no intervalley rolling           !
+!   (that is exactly why CdS dissipators were valid on the primitive cell before           !
+!   the inter-k ring existed). Nonlocal II + ring Auger + Sigma^HF run on top.             !
+!                                                                                          !
+! FIELD DIRECTION - the wurtzite selection rule (do not "fix" this back):                  !
+!   E || c is DIPOLE-FORBIDDEN at Gamma for the top valence Gamma9 (only Gamma7            !
+!   couples to E||c) -> a c-polarised pulse excites almost nothing at Gamma.               !
+!   The showcase therefore drives E PERPENDICULAR to c (epdir 1,0,0).                      !
+!                                                                                          !
+! PROVENANCE NOTES (why this &sbe block differs from Si/GaAs):                             !
+!   * yn_sbe_eeh is ABSENT: there is NO cited CdS carrier-carrier rate (only               !
+!     timescales) - the strict-provenance gate would abort. This is a feature.             !
+!   * sbe_ii_prefactor MUST be set explicitly: the CdS Keldysh II threshold                !
+!     E_th = 1.5 E_g = 3.6 eV is cited, but the PREFACTOR is a FIT PARAMETER with          !
+!     no citation - the registry ships a sentinel and the run aborts without an            !
+!     explicit value. The 2.0d12 below is the GaAs/Si-scale DEMO value: scale it           !
+!     to your own material data before drawing quantitative II conclusions.                !
+!   * ring Auger needs no C at all - its scale IS the II kernel's (detailed                !
+!     balance), so it inherits the same fit-parameter caveat here.                         !
+!                                                                                          !
+! WATCH IT:                                                                                !
+!   python3 ../../plot_sbe_results.py -i . -o plots --snapshots --valleys --bz3d \         !
+!           --bz3d-voxel --spectral                                                        !
+!########################################################################################!
+
+&calculation
+  theory = 'sbe'
+/
+
+&control
+  sysname = 'CdS_prim'
+/
+
+&units
+  unit_system = 'au'
+/
+
+&system
+  yn_periodic  = 'y'
+  al_vec1(1:3) =  7.81591d0,  0.0d0,     0.0d0      ! hexagonal 4-atom primitive
+  al_vec2(1:3) = -3.90795d0,  6.76877d0, 0.0d0      ! (a1,a2 at 120 deg)
+  al_vec3(1:3) =  0.0d0,      0.0d0,    12.68522d0  ! c axis
+  nelec  = 16
+  nstate = 16
+/
+
+&kgrid
+  num_kgrid(1:3) = 7, 7, 5            ! odd in-plane -> Gamma explicit; must match GS
+/
+
+&tgrid
+  dt = 0.4d0
+  nt = 6000
+/
+
+&emfield
+  ! Analytic Acos2, E PERP c (the Gamma9 selection rule - see the header).
+  ae_shape1      = 'Acos2'
+  epdir_re1(1:3) = 1.0d0, 0.0d0, 0.0d0
+  I_wcm2_1       = 1.0d+12
+  tw1            = 800.0d0
+  omega1         = 0.0046d0
+/
+
+&analysis
+  out_projection_k_step = 500
+/
+
+&epm
+  epm_material            = 'CdS'             ! registry: Frohlich LO 38 meV, eps0=8.9,
+  epm_lattice_constant_au = 7.81591d0         ! Keldysh E_th = 3.6 eV (prefactor = fit)
+/
+
+&sbe
+  ! ---- EVERYTHING with a cited constant for CdS --------------------------------
+  yn_sbe_superres          = 'y'    ! ring backbone
+  yn_sbe_eph               = 'y'    ! Frohlich polar LO (intra-valley cooling)
+  yn_sbe_impact_ionization = 'y'    ! nonlocal II (E_th cited; prefactor = FIT, below)
+  sbe_ii_prefactor         = 2.0d12 ! *** FIT PARAMETER (uncited for CdS) - demo value ***
+  yn_sbe_auger             = 'y'    ! ring Auger (inherits the II scale, no separate C)
+  yn_sbe_coulomb           = 'y'    ! Sigma^HF (eps0 = 8.9 cited) - replaces BGR
+  yn_sbe_bgr_threshold     = 'n'    ! double-count guard (as in Si/GaAs)
+  sbe_eph_temperature_k    = 300.0d0
+  ! yn_sbe_eeh ABSENT: no cited CdS carrier-carrier rate (provenance gate).
+  ! NO sbe_decoh_* (Kuhn-Zurek): collisions provide the decoherence.
+/

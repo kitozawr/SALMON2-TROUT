@@ -394,3 +394,336 @@ For production (and the ring-pipeline super-mode): `-D USE_MPI=ON` with an MPI F
 
 ## Tests ✅
 Self-contained Python tests in [`../tests/`](../tests/) (reuse the standalone EPM machinery; no SALMON build needed for most). Run all: `python3 tests/run_all.py`.
+
+
+---
+
+# APPENDIX — consolidated parameter reference & pipelines (moved verbatim from the README, 2026-07-04 restructure)
+
+**This appendix is the canonical, most-current parameter reference** — where the
+older per-part tables above and this appendix disagree, the appendix wins (it
+tracked every merged channel through PR #65). The README now keeps only a short
+configuration philosophy + a pointer here.
+
+## Configuration Parameters
+
+The `&sbe` namelist now accepts the following parameters:
+
+| Parameter | Units | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `sbe_decoh_temperature_k` | K | `-1.0d0` | Bath temperature $T$ for the Kuhn-Zurek/Caldeira-Leggett dephasing rate $\lambda=k_B T/\tau_m$. Both this and `sbe_decoh_tau_m_fs` must be `> 0` to enable decoherence. |
+| `sbe_decoh_tau_m_fs` | fs | `-1.0d0` | Wave-packet momentum-relaxation time $\tau_m$ entering $\lambda=k_B T/\tau_m$. |
+| `frozen_core_threshold_ev` | eV | `0.0d0` | Freeze bands below $E_F + \text{threshold}$. (Use negative values, e.g., `-15.0`). |
+| `frozen_free_threshold_ev` | eV | `0.0d0` | Freeze bands above $E_F + \text{threshold}$. (Use positive values, e.g., `+20.0`). |
+| `yn_sbe_spinor` | — | `'n'` | `'y'`: ground-state input files come from a **spinor (spin-orbit split)** system — occupation 1 per spinor band, `nelec` valence bands instead of `nelec/2`. Combine with `yn_vnl_correction='y'` when the dataset carries the $\hat v_{SO}=\nabla_k\hat H_{SO}$ correction in `rvnl_tm`. |
+| `yn_sbe_impact_ionization` | — | `'n'` | `'y'`: enable the **k-local impact-ionization** Lindblad channel. Fully optional; threshold-gated, so it costs ~nothing while no populated branch exceeds $E_{\rm th}$. The fit (form, exponent, prefactor, threshold) auto-selects from the material registry — see below. |
+| `sbe_ii_prefactor` | s⁻¹eV⁻ᵃ | `-1.0d0` | Fit prefactor $P$ in $\gamma=P(\varepsilon^{\rm kin}-E_{\rm th})^a$. `≤ 0` ⇒ material default. |
+| `sbe_ii_threshold_ev` | eV | `-1.0d0` | Ionization threshold $E_{\rm th}$ above the field-free CBM. `< 0` ⇒ material default (GaAs `2.1`, Si `1.1`). |
+| `sbe_ii_ramp_ev` | eV | `0.2d0` | Linear $\Theta$-smoothing width (the fit's energy resolution); `<= 0` gives a hard step. |
+| `yn_sbe_coulomb` | — | `'n'` | `'y'`: enable the **Coulomb (time-dependent Hartree–Fock / exchange) renormalization** (§8, Golde–Kira–Meier–Koch). Non-k-local mean field, $O(N_k^2)$ per step — off by default, best on modest grids. |
+| `sbe_coulomb_epsilon` | — | `-1.0d0` | Background dielectric constant $\varepsilon$ screening the exchange kernel. `≤ 0` ⇒ material default (GaAs `12.9`, Si `11.7`). |
+| `sbe_coulomb_strength` | — | `1.0d0` | Overall scaling of the exchange kernel (set `0` to disable while leaving the flag on; `>1` to enhance). |
+| `sbe_coulomb_screen_au` | Bohr⁻¹ | `0.0d0` | Yukawa screening $\kappa$ regularizing $V(q)\propto1/(q^2+\kappa^2)$; `0` = bare Coulomb with the $q=0$ self-term excluded. |
+
+*Note: Internal conversions to atomic units (Hartree) are handled automatically (`kB_au`, `au_fs`).*
+
+### Super-compute / dissipation channels (Parts A–G)
+
+These `&sbe` parameters add Silicon support and the optional nonlocal CPTP dissipation channels. **Every flag below defaults OFF (or to a value that leaves the block inert), so a run that sets none of them is byte-for-byte identical to the legacy GaAs dynamics.**
+
+| Parameter | Units | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `sbe_ii_form` | — | `'auto'` | Impact-ionization fit form. `'auto'` ⇒ material default; or set `'stobbe_quartic'` (GaAs, $a=4$, hard threshold) / `'keldysh_quadratic'` (Si, $a=2$, soft threshold). |
+| `sbe_ii_exponent` | — | `-1.0d0` | Operative fit exponent $a$ in $\gamma=P(\varepsilon^{\rm kin}-E_{\rm th})^a$. `≤ 0` ⇒ material default (GaAs `4`, Si `2`; set `4.6` for Si full-band). |
+| `yn_sbe_superres` | — | `'n'` | `'y'`: nonlocal **super-compute** master switch — ring-pipeline-MPI $\Sigma^{\rm HF}$ + nonlocal-partner impact ionization + dissipator sub-cycling. |
+| `yn_sbe_eph` | — | `'n'` | `'y'`: **electron–phonon** population-relaxing Lindblad (full phonon table; toggle Kuhn-Zurek off when using it). |
+| `sbe_eph_temperature_k` | K | `300.0d0` | Phonon-bath temperature $T_{\rm ph}$ for the Bose factor $N_B$. |
+| `sbe_eph_nu_sat` | s⁻¹ | `-1.0d0` | e-ph saturation rate. `≤ 0` ⇒ **material default** (GaAs `1.0e14`, Si `1.3e14`). |
+| `sbe_eph_eps0_ev` | eV | `0.8d0` | Onset $\varepsilon_0$ of the rate saturation $\nu(\varepsilon)=\nu_{\rm sat}[1-e^{-(\varepsilon/\varepsilon_0)^n}]$. |
+| `sbe_eph_n` | — | `2` | Saturation shape exponent $n$. |
+| `yn_sbe_eeh` | — | `'n'` | `'y'`: **carrier–carrier** (e-e/e-h) CPTP thermalization to a Fermi–Dirac (conserves number + energy). |
+| `yn_sbe_auger` | — | `'n'` | `'y'`: **Auger recombination**, number-conserving CPTP. **Two paths:** (a) *with the nonlocal ring* (`yn_sbe_superres='y'` + `yn_sbe_impact_ionization='y'`) it is the **exact time-reverse of the inter-k impact ionization** — same \|M\|²/ε(q)/umklapp weight, reversed Fermi factors — so it needs **no separate $C$** (the rate scale *is* the cited II magnitude, by detailed balance; verified G=R at equilibrium). (b) *k-local fallback* (ring off): the density-gated $\gamma=C n^2$ ($R=C n^3$) Lindblad, inert below $n_{\rm gate}$, which **requires** an explicit `sbe_auger_c_cm6s` (no material ships a verified default). See [`wiki/07_nonlocal_auger.md`](wiki/07_nonlocal_auger.md). |
+| `sbe_auger_c_cm6s` | cm⁶/s | `-1.0d0` | Auger coefficient $C$. `≤ 0` ⇒ material default, but **no material has a verified default** (the former CdS `2.0e-30` carried a fabricated citation and was removed), so this must be set explicitly to use the channel. |
+| `sbe_auger_n_gate_cm3` | cm⁻³ | `-1.0d0` | Activation density $n_{\rm gate}$. `≤ 0` ⇒ material default (CdS `1e18` [Shah 1986], used only with a user-supplied $C$). |
+| `sbe_eeh_nu_sat` | s⁻¹ | `-1.0d0` | Carrier-carrier rate scale. `≤ 0` ⇒ `1.0e14` default (both materials). |
+| `yn_sbe_bgr_threshold` | — | `'n'` | `'y'`: density-dependent **band-gap-renormalized** II threshold $E_{\rm th}(t)=E_{\rm th0}-\lvert K\,n^{1/3}\rvert$ (needs impact ionization on). |
+| `sbe_bgr_n_gate` | cm⁻³ | `5.0d18` | Apply the BGR shift only above this carrier density. |
+| `sbe_bgr_coeff` | eV·cm | `1.9d-8` | BGR coefficient $K$ (tunable in $[1.9,3.8]\times10^{-8}$). |
+| `yn_sbe_hf_sublattice_proj` | — | `'y'` | Project $\Sigma^{\rm HF}$ block-diagonally onto the 4 FCC sublattices (folding fix). Inert unless Coulomb is on **and** unfold weights are present. |
+| `sbe_search_sigma_e_ev` | eV | grid-matched | Energy-bin width $\sigma_E$ for the final-state partner search (C3). |
+
+The EPM material is chosen in `&epm` (`epm_material = 'GaAs'` | `'Si'` | `'Si_cb'` | `'CdS'` | `'graphene'`); see [EPM ground-state solver](#epm-ground-state-solver-epm). `'CdS'` is wurtzite — its cell is the orthorhombic vector `al(1:3) = (a, a√3, c)`, not a single cubic constant — with three cited, enabled dissipation channels (e-ph, Coulomb, impact ionization); carrier-carrier (e-e) and Auger are **forbidden** for CdS (no cited e-e rate; and no verified CdS Auger coefficient — the previously-cited "Haury 1998" value was a fabricated reference and was removed — see the matrix above and `wiki/02`). **The `&epm` block must also appear in the SBE-step input** whenever a channel auto-selects per-material constants (electron-phonon, or impact ionization / Coulomb left at their `'auto'`/sentinel defaults): the solver reads `epm_material` from the registry and **`epm_material` itself defaults to `'GaAs'` if the block is absent**, so a Si run without it would silently use GaAs constants.
+
+### Baseline (clean) run and how to disable each effect
+
+**Clean run (pure unitary SBE — no dissipation, no decoherence).** All channel flags default OFF and the decoherence rate is disabled by its `-1` sentinels, so a `&sbe` block that sets *none* of the channel parameters runs the bare CF4 / Suzuki–Yoshida / Strang propagation — the reference for isolating the effect of any single block:
+
+```fortran
+&sbe
+  ! nothing here -> clean unitary baseline:
+  !   decoherence OFF (sbe_decoh_* = -1), impact ionization OFF,
+  !   Coulomb OFF, e-ph OFF, carrier-carrier OFF, BGR OFF, super-res OFF.
+  yn_vnl_correction = 'n'
+/
+```
+
+Enable one block at a time and compare against this baseline. The table gives the **enable** switch, how to **fully disable** it (the clean-baseline value), and the per-material settings (values that are auto-selected on the `epm_material` switch are marked *auto*):
+
+| Effect | Enable | Fully disable (baseline) | GaAs | Si | CdS |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Kuhn-Zurek decoherence** | `sbe_decoh_temperature_k > 0` **and** `sbe_decoh_tau_m_fs > 0` | either `≤ 0` (default `-1.0` ⇒ $D=0$, exactly the clean run) | $T$, $\tau_m$ user-set | same | ✅ (material-independent) |
+| **Impact ionization** | `yn_sbe_impact_ionization = 'y'` | `'n'` (default) | *auto:* `stobbe_quartic`, $a=4$, $E_{\rm th}=2.1$ | *auto:* `keldysh_quadratic`, $a=2$ ($4.6$ full-band), $E_{\rm th}=1.1$ | *auto:* `keldysh_quadratic`, $E_{\rm th}=3.6$; **must set `sbe_ii_prefactor`** (fit param) |
+| **Electron–phonon** | `yn_sbe_eph = 'y'` (+ `&epm epm_material`) | `'n'` (default) | *auto:* Fröhlich-LO 36 meV + 5 intervalley, `ν_sat=1.0e14` | *auto:* 6 intervalley g/f, `ν_sat=1.3e14` | *auto:* Fröhlich-LO 38 meV, `ν_sat=2.9e13` (=α·ω_LO) |
+| **Carrier–carrier (e-e/e-h)** | `yn_sbe_eeh = 'y'` | `'n'` (default) | `ν_cc=1e14` (default), screening *auto* $\varepsilon=12.9$ | `ν_cc=1e14` (default), screening *auto* $\varepsilon=11.7$ | ⛔ **forbidden** (no cited rate) |
+| **Auger recombination** | `yn_sbe_auger = 'y'` (needs explicit `sbe_auger_c_cm6s`) | `'n'` (default) | ⛔ (no verified $C$ yet) | ⛔ (no verified $C$ yet) | ⛔ (no verified $C$; the "Haury 1998" value was fabricated, removed) |
+| **Coulomb HF** | `yn_sbe_coulomb = 'y'` | `'n'` (default) **or** `sbe_coulomb_strength=0` | *auto:* $\varepsilon=12.9$ | *auto:* $\varepsilon=11.7$ | *auto:* $\varepsilon=8.9$ |
+| **BGR-shifted II threshold** | `yn_sbe_bgr_threshold = 'y'` (needs II on) | `'n'` (default) | `sbe_bgr_n_gate=5e18`, `sbe_bgr_coeff=1.9e-8` | same defaults (tune $K$) | ⛔ (needs II) |
+| **HF sublattice projection** | `yn_sbe_hf_sublattice_proj = 'y'` (default; needs Coulomb + unfold) | `'n'` | applies to folded cubic cell | applies to folded cubic cell | n/a |
+| **Nonlocal super-compute** | `yn_sbe_superres = 'y'` | `'n'` (default) | ring $\Sigma^{\rm HF}$ + nonlocal-partner II | same | (depends on the channels above) |
+
+**`graphene` (gapless Dirac, not a column above):** its only cited dissipation channel is **electron–phonon** — the two Kohn-anomaly optical modes E2g(Γ, 196 meV) and A1′(K, 160 meV), EPC ⟨g²⟩ from [Piscanec PRL 93, 185503 (2004)] (×2 GW, [Lazzeri PRB 78, 081406 (2008)]). Both modes relax carriers to a *different* k on the cone, so graphene e-ph is physical **only with the ring** (`yn_sbe_eph='y'` **and** `yn_sbe_superres='y'`). The 3D gap-based / many-body channels are **forbidden** on the gapless cone (the k-local impact ionization, the C·n³ Auger, carrier–carrier, Coulomb HF all `error stop`) — graphene carrier multiplication is the nearly-thresholdless **2D Rana process**, which has its own branch: the collinear-collapsed CCCV/CVCC integral (`rana_rcccv`/`dirac_mu_2d`/`rana_qtf`, [Rana PRB 76, 155431 (2007)]) is **implemented and validated** against the cited lifetimes (τ_r≈1.1 ps at n=10¹² cm⁻², 300 K; `tests/test_rana_2d.f90`). *Wiring this into a live CPTP SBE channel is the one remaining Auger TODO* — until then graphene `auger_ok` stays `.false.`. Kuhn–Zurek decoherence (`sbe_decoh_*`) is also **forbidden** for graphene (gapless coherence loss is many-body), aborting with a clear message.
+
+**Provenance rule (strict):** a channel is enabled for a material **only** if its constants are backed by a cited source for that material — *no source ⇒ forbidden*, and the run **aborts** (`error stop`) rather than borrow another material's numbers. The per-material constants come from a single **material registry** (`get_material_params` in `src/ssbe/sbe_superres_ssbe.f90`), which carries per-channel provenance gates `ii_ok / eph_ok / eeh_ok / coulomb_ok`. **CdS** (wurtzite): the band structure is validated against [BC1967](#references--theoretical-background), and three dissipation channels use cited CdS-specific constants — Fröhlich polar-optical e-ph (the primary room-T channel), Coulomb (ε=8.9 [Berlincourt 1963]), and impact ionization (E_th=3.6 eV; the prefactor is a *fit parameter* with no cited value, so the run aborts unless you set `sbe_ii_prefactor`). **Carrier-carrier (e-e) is forbidden** (`eeh_ok=.false.`): there is no cited CdS e-e *rate*, so the FD-thermalization channel would have to borrow the GaAs/Si 1e14 scale. The CdS literature only fixes an e-e *timescale* (sub-100 fs at n ≳ 1e18 [Shah 1986; Elsaesser 1991]), not a rate. **There is no verified CdS Auger coefficient**: the value formerly carried as "C=2.0e-30 cm⁶/s [Haury 1998]" was a fabricated reference (the real Haury et al. paper is [PRL 79, 511 (1997)](https://doi.org/10.1103/PhysRevLett.79.511) on CdMnTe ferromagnetism, unrelated) and was removed, so CdS Auger is gated off. The piezoelectric and deformation-acoustic channels are cited but not yet implemented. **Adding a material is one cited `case` block.** The full effect-support matrix with sources is in [`wiki/02_constants.md`](wiki/02_constants.md).
+
+### Real-time output frequency (`&analysis`)
+
+Real-time SBE propagation writes three diagnostic files (`SYSNAME_sbe_rt_energy.data`, `SYSNAME_sbe_nex.data`, `SYSNAME_sbe_nex_k.data`), each on its own cadence selectable in the `&analysis` namelist. The k-resolved file in particular can grow to gigabytes for dense k-grids/long runs, so its default stride is ten times coarser than the band-projection output:
+
+| Parameter | Default | Description |
+| :--- | :--- | :--- |
+| `out_rt_energy_step` | `10` | Stride (in time steps) for `SYSNAME_sbe_rt_energy.data` (total energy / trace) and the stdout progress log. |
+| `out_projection_step` | `100` | Stride for `SYSNAME_sbe_nex.data` (number of excited electrons/holes, summed over k). |
+| `out_projection_k_step` | `1000` | Stride for `SYSNAME_sbe_nex_k.data` (Houston-basis population of the lowest conduction band, resolved per k-point). Defaults to 10× `out_projection_step` to avoid producing terabyte-scale output on dense k-grids; increase the stride (larger value) further for very large `nk`/`nt`. |
+
+`SYSNAME_sbe_nex_k.data` reports, for every saved time `t`, one block of `nk` lines `ik, kx, ky, kz, population_lcb`, where `population_lcb = (W^\dagger \rho W)_{aa}` is the diagonal element of the density matrix rotated into the instantaneous Houston (adiabatic) eigenbasis $W$ of $H_{VG}(t)$ for the lowest conduction band $a = N_{elec}/2+1$ — i.e. the same gauge-independent basis used internally by the CPTP dephasing step. With `yn_sbe_spinor='y'` the lowest conduction band is $a = N_{elec}+1$ (the lower spin sub-band of the first conduction level).
+
+### EPM ground-state solver (`&epm`)
+
+The `&epm` namelist configures the local-EPM ground-state solver (`theory='epm'`):
+
+| Parameter | Units | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `epm_material` | — | `'GaAs'` | `'GaAs'` \| `'Si'` \| `'Si_cb'` \| `'CdS'` \| `'graphene'` — selects the cited local form factors (see the materials table below). |
+| `epm_cell` | — | `'primitive'` | `'primitive'`: non-orthogonal primitive cell, NO folding (GaAs/Si FCC 2-atom; graphene & CdS hexagonal) — verified interchangeable with the Python primitive refs. `'folded'`: legacy cubic 8-atom supercell + FCC-in-cubic folding (GaAs/Si/Si_cb only; needed for the SBE unfold pipeline). For graphene/CdS only `'primitive'` is valid. |
+| `epm_lattice_constant_au` | Bohr | `10.68d0` | Lattice constant $a$ [Bohr] (zincblende/diamond; the FCC primitive cell is built from it). Graphene fixes its own cited $a=2.46$ Å and ignores this. |
+| `epm_pw_cutoff_ry` | Ry | `11.1d0` | Plane-wave cutoff. For the zincblende cells it bounds $|G|^2$ in $(2\pi/a)^2$ units (integer shells, same as the cubic ref). For the general non-orthogonal path (graphene) it is a **kinetic** cutoff $|G|^2\,[\text{a.u.}]\le$ value (e.g. `2.94` = 40 eV → the 7-PW Ramanujam basis). |
+
+#### Supported materials & EPM references (Python-primary)
+
+**The Python EPM references are the source of truth — each is validated against its cited benchmark.** The fast in-SALMON MPI EPM (`src/epm/`) is *secondary* but is **verified interchangeable** with the Python references. The cell is chosen by `epm_cell` (`'primitive'`, the default, or `'folded'`):
+* **`epm_cell='primitive'` (default) — non-orthogonal primitive cell, NO folding.** GaAs/Si/Si_cb use the FCC 2-atom cell (the Cohen-Bergstresser Hamiltonian on the single-parity plane-wave basis); graphene uses the 2-atom hexagonal honeycomb (Ramanujam π-EPM); CdS uses the 4-atom hexagonal wurtzite cell (polar, V^A≠0, BC1967 form factors interpolated over the cited shells) — graphene and CdS via a general multi-atom structure factor `S(dG)=Σₐ Pₐ e^{-i dG·τₐ}`. **Verified interchangeable with the Python primitive references** (`epm_{gaas,si,graphene,cds}_primitive.py`): identical k-points, band energies to **5×10⁻¹¹ Ha** (GaAs/Si/CdS) / **~6×10⁻⁸ eV** (graphene), identical occupations.
+* **`epm_cell='folded'` — legacy cubic 8-atom supercell + FCC-in-cubic parity band-folding** (GaAs/Si/Si_cb only; feeds the SBE folding/unfold pipeline). Same `(2π/a)²`-unit cutoff and reduced-coordinate `k.data`; **verified byte-equivalent to the folded Python reference** (`epm_gaas_reference.py`).
+
+The validated Python references:
+
+| Material | Module | Structure / folding | Validation (cited benchmark) | EPM→SBE pipeline |
+| :--- | :--- | :--- | :--- | :--- |
+| GaAs | `epm_gaas_reference.py` | zincblende (V^A≠0), 4-fold FCC fold | Cohen-Bergstresser PR 141, 789 (1966) | ✅ full (folding + GS files) |
+| **Si** (Kunikiyo, default) | `epm_si_reference.py` | diamond (V^A≡0), 4-fold FCC fold | indirect gap **1.059 eV** (Kunikiyo calc 1.068), CBM @ 0.850·2π/a [Kunikiyo JAP 75, 297 (1994)] | ✅ full |
+| **Si_cb** (Cohen-Bergstresser) | `epm_si_reference.py --variant Si_cb` | diamond, same machinery as Si | indirect gap **0.818 eV**, CBM @ 0.850 [CB PR 141, 789 (1966)] | ✅ full |
+| CdS | `epm_wurtzite_cds.py` | wurtzite (polar), orthorhombic `al(1:3)`, **2-fold fold (verified exact)** | direct gap **2.55 eV** vs Bergstresser-Cohen PR 164, 1069 (1967) 2.58 eV | ✅ Python emits GS files + **band path** + **2-coset unfold map**; ran end-to-end in the SBE (trace conserved) |
+| graphene | `epm_graphene.py` | honeycomb (D6h, V_A=0), **rectangular 4-atom cell + 2-fold fold (verified exact)** | **zero gap** at Dirac K, **v_F=9.6×10⁵ m/s**, Γ=−7.78 eV, M=−2.70 eV [Ramanujam thesis, ASU 2015] | ✅ Python emits GS files + **band path** + **2-coset unfold map**; ran end-to-end in the SBE (trace conserved; unfolded carriers localize at the Dirac points) |
+
+> **Pipeline status (honest):** **all four materials emit SBE ground-state files** (`SYSNAME_k/_eigen/_tm.data`) and run in the SBE, in **two interchangeable representations**:
+>
+> * **PRIMITIVE (the default, `epm_cell='primitive'`) — recommended.** The non-orthogonal primitive cell, NO folding. The **Fortran `theory='epm'`** path now does **all four** materials (GaAs/Si FCC 2-atom; graphene & CdS hexagonal) — each **verified interchangeable** with the Python primitive references (`epm_{gaas,si,graphene,cds}_primitive.py`): band energies to 5×10⁻¹¹ Ha (GaAs/Si/CdS) / ~6×10⁻⁸ eV (graphene). So the whole EPM→SBE primitive pipeline runs in-SALMON for every material (`samples/exercise_x7_primitive_cell_epm/*_epm_gs.inp`), including the **spinor GaAs** path (`yn_spinorbit='y'` — verified interchangeable with the Python `INCLUDE_SPIN_ORBIT` reference to 5×10⁻¹¹ Ha).
+> * **FOLDED (`epm_cell='folded'`) — legacy, for the band-unfold map.** The cubic/orthorhombic supercell + an `_unfold.data` coset map. GaAs/Si fold in-SALMON (Fortran, 4-coset FCC) or via the Python ref; **CdS and graphene use the Python references** (`epm_wurtzite_cds.py` / `epm_graphene.py`) on their folded supercells (CdS orthorhombic 2-fold; graphene rectangular 4-atom 2-fold — both verified exact). The unfold infrastructure (`gs_info_ssbe`, `bloch_solver`, `datafile`, the plotter) is generalized from the hardcoded **4 FCC cosets to N** (4 = cubic, 2 = wurtzite/rectangular); legacy 4-coset GaAs maps still read.
+>
+> See `wiki/00_implementation_status.md` for the full TODO.
+
+> **graphene is a minimal π-model:** the Ramanujam 3-form-factor local EPM represents the π/π* frontier (1 π electron per carbon, Dirac cone = the lowest band pair), not the full 4-electron valence. The emitted dataset uses `nelec = 4` (4-atom cell), `nstate = 8`, occupation 2 per filled π band, Fermi level at the Dirac point — a clean low-energy model for THz/Dirac physics, not a full-band one.
+
+**`Si` vs `Si_cb`:** identical machinery (diamond, V^A≡0, a=10.26 Bohr, 4-fold folding) — the *only* difference is the V^S form-factor triplet. `Si` uses Kunikiyo (−0.2258, +0.05698, +0.070709 Ry → gap 1.059 eV); `Si_cb` uses Cohen-Bergstresser (−0.21, +0.04, +0.08 Ry → gap 0.818 eV). `Si` (Kunikiyo) is the default as it matches the modern Si gap target; `Si_cb` is for cross-validation. Run `python3 tests/run_all.py` to validate all references.
+
+## Examples
+
+### Minimal SBE Input Example
+
+```fortran
+&calculation
+  theory = 'sbe'
+/
+
+&sbe
+  ! ... standard SALMON SBE system parameters ...
+
+  ! ---------------------------------------------------------
+  ! 1. Kuhn-Zurek/Caldeira-Leggett Decoherence (strictly CPTP)
+  ! ---------------------------------------------------------
+  ! lambda = kB*T / tau_m;  enabled only when both are > 0
+  sbe_decoh_temperature_k = 300.0d0
+  sbe_decoh_tau_m_fs      = 10.0d0
+
+  ! ---------------------------------------------------------
+  ! 2. Frozen Core / Active Subspace Optimization
+  ! ---------------------------------------------------------
+  ! Only evolve bands within ±15 eV of the Fermi level non-linearly.
+  ! Deep core bands will only undergo exact linear phase oscillation.
+  frozen_core_threshold_ev = -15.0d0
+  frozen_free_threshold_ev =  15.0d0
+/
+```
+
+**Reverting to default behavior:**
+* Set `sbe_decoh_temperature_k` and/or `sbe_decoh_tau_m_fs` to a non-positive value to recover the original purely-coherent (no dephasing, $D\equiv 0$, trivially CPTP) behavior.
+* Set both `frozen_core_threshold_ev` and `frozen_free_threshold_ev` to `0.0d0` to force all bands into the active nonlinear subspace.
+
+### Minimal EPM → SBE Pipeline Example
+
+#### Standalone Python reference (`epm_gaas_reference.py`)
+
+For quick debugging without building/running SALMON, the repository root also contains `epm_gaas_reference.py` -- a monolithic, single-machine NumPy/SciPy reimplementation of the GaAs Cohen-Bergstresser local-EPM solver (no MPI/OpenMP). It builds the same lattice/plane-wave basis/Hamiltonian/momentum matrices as `src/epm`, and writes byte-compatible `SYSNAME_k.data`/`_eigen.data`/`_tm.data` files that `gs_info_ssbe` can read directly -- so its output can be diffed against the Fortran `theory='epm'` run, or fed straight into an SBE real-time calculation. All parameters (lattice constant, plane-wave cutoff, k-grid, number of bands/electrons, sysname) are hardcoded constants at the top of the script -- including the spinor switch `INCLUDE_SPIN_ORBIT` (see the spinor pipeline example below) -- edit them there and run:
+
+```sh
+python3 epm_gaas_reference.py
+```
+
+This is a debugging aid only -- `theory='epm'` in SALMON remains the primary, MPI/OpenMP-parallel ground-state path.
+
+```fortran
+! Step 1: ground state via local EPM (writes GaAs_k/_eigen/_tm.data)
+&calculation
+  theory = 'epm'
+/
+&epm
+  epm_material            = 'GaAs'
+  epm_lattice_constant_au = 10.68d0
+  epm_pw_cutoff_ry        = 11.1d0
+/
+```
+```fortran
+! Step 2: real-time SBE propagation reading the files generated above
+&calculation
+  theory = 'sbe'
+/
+&system
+  ! sysname, lattice vectors, num_kgrid, nstate, nelec must match the EPM run
+/
+```
+
+### Spinor (spin-orbit) EPM → SBE Pipeline Example
+
+Step 1 — generate the spin-orbit split ground state with the Python reference (the spinor switch is a hardcoded constant at the top of the script):
+
+```sh
+# epm_gaas_reference.py:  INCLUDE_SPIN_ORBIT = True   (default)
+python3 epm_gaas_reference.py
+# writes GaAs_cubic_so_k.data / _eigen.data / _tm.data:
+#   64 spin-orbit split bands (occupation 1 per band),
+#   mu auto-calibrated at Gamma to Delta0 = 0.341 eV (Gamma8-Gamma7),
+#   v_SO = grad_k H_SO written analytically into block 2 (rvnl_tm)
+```
+
+Step 2 — real-time SBE propagation on the spinor dataset (note `nstate` doubled, `yn_sbe_spinor` and `yn_vnl_correction` both `'y'`):
+
+```fortran
+&calculation
+  theory = 'sbe'
+/
+&control
+  sysname = 'GaAs_cubic_so'
+/
+&units
+  unit_system = 'au'
+/
+&system
+  yn_periodic = 'y'
+  al(1:3) = 10.68d0, 10.68d0, 10.68d0   ! must match the EPM run
+  nelec  = 32
+  nstate = 64                            ! 2*Nb spinor bands
+/
+&kgrid
+  num_kgrid(1:3) = 4, 4, 4               ! must match the EPM run
+/
+&tgrid
+  dt = 0.05d0
+  nt = 20000
+/
+&emfield
+  ae_shape1 = "Acos2"
+  epdir_re1(1:3) = 0.0d0, 0.0d0, 1.0d0
+  I_wcm2_1 = 1.0d+11
+  tw1 = 500.0d0
+  omega1 = 0.056d0
+/
+&sbe
+  yn_sbe_spinor     = 'y'   ! spinor input: occupation 1/band, nelec valence bands
+  yn_vnl_correction = 'y'   ! use pi = p + v_SO from rvnl_tm everywhere
+/
+```
+
+Step 3 — plot (spin pairs are summed into levels automatically):
+
+```sh
+python3 plot_sbe_results.py
+```
+
+Setting `INCLUDE_SPIN_ORBIT = False` in the script restores the scalar pipeline (`GaAs_cubic`, 32 bands, occupation 2 per band) byte-for-byte; the SBE input then keeps `yn_sbe_spinor = 'n'` (default).
+
+### Band-structure calculation (`theory='dft_band'`)
+
+`theory='dft_band'` diagonalizes the **converged** Kohn-Sham Hamiltonian at k-points along a high-symmetry path and writes the eigenvalues to `band.dat` **and** to `SYSNAME_bandpath.data` (the same plotter/SBE-spectral contract the EPM emits). It is a post-processing step: run a normal `theory='dft'` ground state first, then restart from it. A ready-to-run pair lives in `samples/exercise_04_bulkSi_gs/` (`Si_gs.inp` + `Si_band.inp`).
+
+> **Feeding real DFT levels straight into the SBE.** Beyond band structure, a `theory='dft'` run with `yn_out_tm='y'` writes `SYSNAME_k/_eigen/_tm.data` in the exact `gs_info_ssbe` format (reduced k with the `# b1/b2/b3` header for non-orthogonal cells; `esp[eV]` auto-converted to Hartree; both `_tm.data` blocks, the nonlocal one genuinely non-zero for a real pseudopotential) — so a real (even rough) DFT band structure can replace the EPM as the SBE ground state. The SBE's active/frozen-core window (`frozen_core_threshold_ev`) freezes the deep DFT bonding bands the EPM never had. End-to-end example: [`samples/exercise_x9_bulkSi_dft_sbe/`](samples/exercise_x9_bulkSi_dft_sbe/) (Si FCC primitive, explicit `al_vec`, rough DFT GS → `dft_band` path → short SBE, electrons conserved). **Gotcha:** point `dft_band`'s `base_directory` at a sub-directory (e.g. `./band`) so its path-k `_k.data`/`_eigen.data` don't overwrite the MP-grid GS files the SBE reads.
+
+```sh
+cd samples/exercise_04_bulkSi_gs
+
+# 1. Ground state (writes the restart directory data_for_restart/)
+salmon < Si_gs.inp
+
+# 2. dft_band restarts from ./restart — point it at the GS output
+ln -s data_for_restart restart
+
+# 3. Band structure along L-G-X-M-G  ->  band.dat
+salmon < Si_band.inp
+```
+
+The path is given explicitly in the `&band` namelist (reduced reciprocal coordinates):
+
+```fortran
+&calculation
+  theory = 'dft_band'
+/
+&control
+  sysname    = 'Si'
+  yn_restart = 'y'      ! restart from the ground-state density in ./restart
+/
+&band
+  lattice         = 'non'              ! use the explicit kpt/ndiv_segment path below
+  nref_band       = 20                 ! converge eigenvalues up to this band index
+  tol_esp_diff    = 1.0d-5             ! per-band convergence tolerance on |dE| (a.u.)
+  num_of_segments = 4                  ! L-G-X-M-G : 4 segments, 5 end points
+  ndiv_segment(1:4) = 16, 16, 16, 16   ! k-points per segment
+  kpt(1:3,1) = 0.5d0, 0.5d0, 0.5d0     ! L
+  kpt(1:3,2) = 0.0d0, 0.0d0, 0.0d0     ! G
+  kpt(1:3,3) = 0.5d0, 0.0d0, 0.0d0     ! X
+  kpt(1:3,4) = 0.5d0, 0.5d0, 0.0d0     ! M
+  kpt(1:3,5) = 0.0d0, 0.0d0, 0.0d0     ! G
+  kpt_label(1) = 'L'
+  kpt_label(2) = 'G'
+  kpt_label(3) = 'X'
+  kpt_label(4) = 'M'
+  kpt_label(5) = 'G'
+/
+```
+
+`band.dat` starts with a small header (`Number_of_Bands`, `Number_of_kpt_in_each_block`, `Number_of_blocks`), then one `ik  k_red(1:3)  k_cart(1:3)` line per k-point, followed by `ik  ib  energy(spin...)` eigenvalue lines (energies in Hartree). For the sample above the silicon valence-band top sits at $\Gamma$ with the conduction-band minimum near $X$ (indirect gap), as expected for an LDA silicon band structure.
+
+`plot_sbe_results.py` plots `band.dat` directly (it is picked up automatically alongside the other band-structure files): energies are converted to eV and shifted to a valence-band-maximum reference, with vertical guides drawn at the detected path nodes (direction changes). Since `band.dat` carries no occupations, the VBM band index defaults to `nb//2` (half filling); override it with `--band-vbm IDX`.
+
+```sh
+cp plot_sbe_results.py /path/to/band_calculation/
+cd /path/to/band_calculation/
+python3 plot_sbe_results.py --only-bands --energy-range -13 7   # -> sbe_plots/band_dat_band.png
+```
+
+| `&band` parameter | Default | Description |
+| :--- | :--- | :--- |
+| `lattice` | `''` | `'non'`: take the path from `kpt`/`ndiv_segment` below. `'sc'`/`'fcc'`/`'bcc'`/`'hex'`: use a built-in default path for that Bravais lattice. |
+| `nref_band` | `0` | Eigenvalues are converged (and convergence is checked) up to this band index. |
+| `tol_esp_diff` | `1.0d-5` | Per-band convergence tolerance on the eigenvalue change between iterations (a.u.). |
+| `num_of_segments` | `0` | Number of straight segments in the path (a path of `N` segments has `N+1` end points). |
+| `ndiv_segment(:)` | `0` | Number of k-points sampled along each segment. |
+| `kpt(1:3,:)` | `0` | Segment end points in **reduced reciprocal** coordinates (one more than `num_of_segments`). |
+| `kpt_label(:)` | `''` | Optional labels for the end points (`'G'`, `'X'`, ...). |

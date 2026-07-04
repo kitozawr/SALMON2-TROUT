@@ -23,7 +23,7 @@ Branch `claude/inter-k-ring-eph-ii` **merged into `develop-2.0.0`** (merge commi
 1. ✅ **DONE (2026-07-04) — graphene Rana Auger/CM wired into a live CPTP SBE channel.** `rana_auger_dpop` (sbe_superres, pure/unit-testable) + `apply_rana_auger_ring` (bloch_solver, ring-gated like graphene e-ph): net pair relaxation `R−G` (CCCV+CVVV vs their Eq.-17 reverses) on INSTANTANEOUS quasi-Fermi levels from the gathered populations; uniform-fractional CB→VB transfer (or VB→CB when G>R — thresholdless CM) with smooth `cap·(1−exp(−ΔN/cap))` saturation against BOTH source and destination; trace conserved by construction; coherences damped √(f_new/f_old). Registry: graphene `auger_ok=.true.` + NEW discriminator `auger_2d_rana` (+ `rana_vf_au` = 1e8 cm/s, `rana_eps_r` = 10 — both [R07]-cited; ε_r override via `sbe_coulomb_epsilon`, T = e-ph bath). Guards: needs the ring (error stop otherwise), needs the b-matrix header + out-of-plane b3 (2D slab). k-local C·n³ and gap-threshold ring Auger both OFF for graphene. Unit test `test_rana_auger_cptp` (trace/bounds/equilibrium-fixed-point/R07 lifetime/saturation/no-op) — **20 tests total, all pass** (`python3 tests/run_all.py`). **Calc-validated** (graphene 12²×1, serial): electrons=2.000 every step; below n₀(300 K) gentle generation toward equilibrium (detailed balance — expected physics), above it monotone post-pulse nex decay (−4.6% over the 3 fs tail at n₂d≈6e13 cm⁻²). Plot sent to the maintainer (`rana_auger_validation.png`).
 2. ✅ **RESOLVED AS REDUNDANT (2026-07-04) — Bloch-overlap factors I(G) in the ring II/Auger kernel.** Kept `I(G)→1`, and here is WHY that is the right call, not an omission: **(a)** the kernels' ABSOLUTE rate scale is pinned to the cited Stobbe/Keldysh magnitude (`g0 = pref·(ε−E_th)^a`), so multiplying by sub-unity overlaps and re-fitting the prefactor to the same cited rate is an exact no-op on the magnitude — I(G) could only reshape the *q-distribution*; **(b)** [L90] itself identifies the umklapp G-sum and ε(q) as the order-of-magnitude effects (both implemented, PR #57) and the overlap factors as an O(1) modulation; **(c)** implementing it for real would require carrying the plane-wave coefficients (npw×nb×nk complex) into the SBE dataset and evaluating O(nk²·G) overlap products per step — a large data-plumbing change buying a second-order shape correction. Revisit ONLY if a k-resolved Auger final-state distribution becomes a deliverable (then: emit `_pwcoef.data` from the EPM writers and weight `interk_vq` per pair). If the maintainer wants, supply the L90 PDF section on overlap factors and I will bound the residual error quantitatively.
 3. ✅ **DONE (2026-07-04) — GaAs dynamic free-carrier screening λ²(n(t)) in the ring kernels.** Registry-gated `dyn_lambda_ok` (**GaAs only**; Si stays λ=0 — CORRECT physics by Burt's dynamical argument [L90], now unit-test-asserted). After the ring gather, λ² = **min(Debye, degenerate-TF)** on the gathered excited density (each Part-G formula overestimates κ² outside its own regime — Debye ~n/kT diverges degenerate, TF ~n^{1/3} overestimates dilute — so min() picks the valid branch at every n); T = e-ph bath. One-time diagnostic print at first activation. Unit-tested (λ²>0 reduces the II rate monotonically, λ²→∞ kills the channel, trace still exact). **Calc-validated live** (GaAs 4³ impact+ring): `lambda^2 = 1.0175E-04 a.u. at n_exc = 6.6964E+17 cm^-3` — hand-checked to match 4πn/(ε₀kT) exactly (the Debye branch, as it must be at that density); electrons=8.000 conserved.
-4. ✅ **RESOLVED — RECOMMEND CLOSING PR #45 (deeppseudodot) as superseded (2026-07-04).** Assessment of the draft: **(a)** its motivation ("EPM tables exist only for a handful of materials; any other crystal needs DFT") is served BETTER by the merged direct **DFT→SBE** path (#54/exercise_x9) — no EPM middleman needed; **(b)** the PR vendors a 44k-line DeePseudopot snapshot **with no upstream LICENSE** — a liability sitting unmerged; **(c)** its base (`81bf85d`, June 23) predates ~20 merged PRs. The genuinely useful small pieces (`epm_material='file'` reader + the `tools/dft_to_epm` extractor, tested to 1e-14) can be re-extracted WITHOUT the vendored snapshot in a fresh small PR if the use-case ever returns; the branch itself survives the PR closure. **Maintainer action: close #45** (or say the word and it gets re-cut minus the vendored tree).
+4. ✅ **CLOSED — PR #45 (deeppseudodot) closed by the maintainer's instruction (2026-07-04, "согласен, закрой 45").** The branch `claude/dft-epm-coefficients-pdvguw` survives; the salvageable pieces are listed below if the use-case returns. Original assessment kept for the record: Assessment of the draft: **(a)** its motivation ("EPM tables exist only for a handful of materials; any other crystal needs DFT") is served BETTER by the merged direct **DFT→SBE** path (#54/exercise_x9) — no EPM middleman needed; **(b)** the PR vendors a 44k-line DeePseudopot snapshot **with no upstream LICENSE** — a liability sitting unmerged; **(c)** its base (`81bf85d`, June 23) predates ~20 merged PRs. The genuinely useful small pieces (`epm_material='file'` reader + the `tools/dft_to_epm` extractor, tested to 1e-14) can be re-extracted WITHOUT the vendored snapshot in a fresh small PR if the use-case ever returns; the branch itself survives the PR closure. **Maintainer action: close #45** (or say the word and it gets re-cut minus the vendored tree).
 5. ✅ **DONE / BOUNDED (2026-07-04) — the four optional refinements** (maintainer's TODO-sweep instruction = the go-ahead):
    - ✅ **O(nk³) ring-II MPI distribution**: both kernels take optional `i1_lo/i1_hi` (exactly additive over the outer source k — unit-tested rank-split additivity to 1e-13); `apply_ii_interk_ring` passes each rank's `ik_min..ik_max` and `comm_summation`s the dpop → **O(nk³/P)**. Serial bit-identical (full range default); MPI differs only by float summation order.
    - ✅ **voxel-cloud `--bz3d` variant (b)**: `_save_bz3d_voxel` + `--bz3d-voxel` in `plot_sbe_results.py` — Gaussian-smoothed semi-transparent voxel cloud from the un-sheared Cartesian `cpop3d` (opacity ∝ population, floor-masked, BZ wireframe overlay) — the volumetric SHAPE view complementing the MP-scatter variant (a).
@@ -31,6 +31,51 @@ Branch `claude/inter-k-ring-eph-ii` **merged into `develop-2.0.0`** (merge commi
    - ⬜→📌 **e-ph ring dissipative sub-cycling** — DEFERRED with a bound: the ring e-ph applies `exp(−Γτ)` forms that are CPTP for ANY τ (no positivity risk); sub-cycling would only refine the Houston-basis rotation WITHIN dt, an error O((Γdt)²) — at the validated rates (Γdt ≲ 0.02 for dt=0.2 a.u.t, ν_sat=5e13 s⁻¹) that is ≤4e-4 per step. Revisit if ν_sat-scale channels are ever run with 10× larger dt.
 
 Everything else the maintainer set out this session is merged.
+
+### ✅ DONE (2026-07-04) — DOCS RESTRUCTURE + x11 SHOWCASE (maintainer: "творчески перепиши документацию… мастер-уравнение раскрыть математически" + "пример для всех 4-х материалов со всеми эффектами")
+- **README rewritten from scratch (613 → ~180 lines):** the point edits had
+  destroyed its structure. New shape: pitch → *the model in one equation* (the
+  master equation + term↔flag table) → features (each line links its wiki page)
+  → quick start → **examples index** (x7/x8/x9/x10/x11/04) → configuration
+  *philosophy* (3 rules: default-OFF, provenance, no-double-count guards) →
+  analysis-tools index → wiki map → references → license. NOTHING deleted:
+  every moved section landed verbatim or curated in the wiki (audit below).
+- **NEW `wiki/08_master_equation.md` — the complete mathematical specification**
+  (the maintainer's "не в учебнике искать": every effect as an explicit term,
+  long formulas): §0 the GKLS equation + term/flag/routine table; §1 velocity
+  gauge from minimal coupling, π = p + v_NL (spinor ∇ₖH_SO), Houston basis,
+  A²/2 bookkeeping; §2 Σ^HF (GKMK) with both renormalizations from the single
+  commutator, δρ subtraction, BGR mutual exclusion; §3 GKLS/CPTP superstructure
+  — the two primitive maps (amplitude damping with the exact √(f_new/f_old)
+  Kraus factor; PSD-kernel Hadamard dephasing), Strang/Yoshida placement; §4
+  every channel term-by-term with the full formulas (KZ kernel; e-ph ν(ε),
+  Bose split, the inter-k Γ_{(ak)→(bq)} sum; the nonlocal II quadruple rate
+  with the MP index map, CDRB ε(q) formula (α=1.563) + 27-image umklapp sum,
+  λ²(n) Debye/TF crossover; ring Auger reversed-Pauli + the detailed-balance
+  identity; the graphene Rana R_CCCV integral with |M|², Q_TF, μ-inversion;
+  carrier-carrier FD-fit map; the Part-G screening library); §5 observables;
+  §6 per-channel invariants table.
+- **NEW `wiki/09_plotting_and_analysis.md`:** the plotter (incl. --bz3d /
+  --bz3d-voxel / --spectral), spinor plotting, folded-vs-unfolded pictures, the
+  3-stage unfold pipeline, and the three injection probes (band_field_coupling
+  / zener / si_three_photon) — moved & curated from the README.
+- **`wiki/04` APPENDIX (canonical parameter reference):** the README's
+  config tables (core &sbe, Parts A–G, baseline enable/disable matrix,
+  &analysis, &epm + materials tables, minimal/spinor/dft_band pipelines) moved
+  VERBATIM; the appendix supersedes the older per-part tables above it where
+  they disagree. `wiki/03` §10 took the frozen-core/exact-current paragraphs.
+- **NEW `samples/exercise_x11_full_dissipation_showcase/`** — the flagship
+  demo the maintainer requested: all 4 materials × EVERY valid channel at once
+  (per-material matrix in its README), analytic Acos2 fields (no field files),
+  12 bz3d frames per run for the valley-rolling movies. The three deliberate
+  absences ARE the design: Σ^HF replaces BGR (double-count guard), collisional
+  decoherence replaces Kuhn-Zurek, the nonlocal ring II replaces k-local.
+  Per-material stories: Si Γ→Δ rolling; GaAs Γ needle → L spill + the λ²(n)
+  diagnostic line; CdS Γ-locked Fröhlich cooling with E⊥c (Γ9 selection rule;
+  II prefactor explicitly marked FIT); graphene K/K′ + Rana recombination
+  tail. Files only — heavy compute deliberately left to the maintainer's MPI
+  machine (ring O(nk³/P)).
+- **PR #45 (deeppseudodot) CLOSED** per the maintainer's "согласен, закрой 45".
 
 ### ✅ MERGED (2026-07-03/04, PRs #60 + #61) — Si direct MULTIPHOTON injection maps (`si_three_photon_isosurfaces.py`)
 Maintainer-driven analysis tool (pure Python on the EPM refs; **no SBE/Fortran changes**). The multiphoton counterpart to `zener_tunneling_estimate.py` (GaAs tunnelling): a **power-law I^N process with a different prefactor**, NOT the tunnelling exponential.
