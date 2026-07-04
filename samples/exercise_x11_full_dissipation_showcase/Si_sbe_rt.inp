@@ -1,0 +1,107 @@
+!########################################################################################!
+! x11 SHOWCASE - Si: EVERY available channel at once (the "maximally loaded" run).       !
+!----------------------------------------------------------------------------------------!
+! Step 2 of 2 (step 1: ../Si_epm_gs.inp -> Si_prim_k/_eigen/_tm.data).                     !
+!                                                                                          !
+! THE PHYSICS STORY this run demonstrates (watch it in the bz3d frames):                   !
+!   1. INJECTION: the strong below-gap pulse creates carriers by the VERTICAL             !
+!      (k-conserving) multiphoton/Zener channel -> the newborn electron cloud sits         !
+!      near Gamma and along the low-direct-gap Gamma-L diagonals (see                      !
+!      si_three_photon_isosurfaces.py: the direct-gap minimum is at Gamma, 3.34 eV,        !
+!      and stays low along <111>).                                                         !
+!   2. ROLLING INTO THE VALLEYS: Si's CBM is NOT at Gamma - it is the six Delta            !
+!      valleys at 0.85*(2pi/a) along <100>. The inter-k e-ph channel (6 cited              !
+!      intervalley g/f modes, through the ring) drains the Gamma-born cloud into           !
+!      the Delta valleys frame by frame - THE signature picture of this code.              !
+!   3. While that happens: nonlocal II multiplies hot carriers (momentum-conserving        !
+!      2-particle events), ring Auger recombines them (detailed-balance partner),          !
+!      carrier-carrier thermalizes the distribution to a hot Fermi-Dirac, and              !
+!      Sigma^HF renormalizes the gap with the growing density.                             !
+!                                                                                          !
+! CHANNEL CHOICES (the subtleties of a maximally-loaded VALID run):                        !
+!   * yn_sbe_coulomb='y' AND yn_sbe_bgr_threshold='n': Sigma^HF already shifts the         !
+!     Houston eigenvalues the II threshold is measured against - adding the BGR            !
+!     n^(1/3) law would COUNT THE SAME PHYSICS TWICE (the init guard aborts on both).      !
+!   * NO Kuhn-Zurek (sbe_decoh_* unset): decoherence is supplied by the COLLISION          !
+!     channels themselves (e-ph/II/Auger/e-e amplitude-damp the coherences);               !
+!     the single-particle wave-packet dephasing would be a double count on top.            !
+!   * NO k-local impact ionization: with the ring on, the momentum-conserving              !
+!     NONLOCAL II replaces it automatically (k-local is gated off; the BZ-averaged         !
+!     imitation was the first-generation approximation).                                   !
+!                                                                                          !
+! HEAVY MODE: ring II/Auger is O(nk^3) - at 8^3=512 k this is the intended "heavy          !
+! compute" demonstration. The k1 loop is MPI-distributed (O(nk^3/P)): run with             !
+!   mpiexec -n P ../../build/salmon < Si_sbe_rt.inp   (pick P | 512, e.g. 8, 16, 32)       !
+!                                                                                          !
+! WATCH THE VALLEY ROLLING:                                                                !
+!   python3 ../../plot_sbe_results.py -i . -o plots --snapshots --valleys --bz3d \         !
+!           --bz3d-voxel --spectral                                                        !
+!   -> plots/*_bz3d_t*.png      : 3D BZ scatter, Gamma cloud -> six Delta spots            !
+!   -> plots/*_bz3dvox_t*.png   : the same as a smoothed voxel cloud (shape view)          !
+!   -> plots/*_cart_snap_*.png  : Cartesian kx-ky/kx-kz/ky-kz slices with valley marks     !
+!   -> spectral_frames/*.png    : A(k,E) band map, valence depleting / Delta filling       !
+!########################################################################################!
+
+&calculation
+  theory = 'sbe'
+/
+
+&control
+  sysname = 'Si_prim'
+/
+
+&units
+  unit_system = 'au'
+/
+
+&system
+  yn_periodic  = 'y'
+  al_vec1(1:3) = 0.0d0,  5.13d0, 5.13d0     ! FCC primitive a/2*(0,1,1), a = 10.26 Bohr
+  al_vec2(1:3) = 5.13d0, 0.0d0,  5.13d0
+  al_vec3(1:3) = 5.13d0, 5.13d0, 0.0d0
+  nelec  = 8
+  nstate = 8
+/
+
+&kgrid
+  num_kgrid(1:3) = 8, 8, 8                   ! must match the GS step; 9^3 puts Gamma
+                                             ! ON the mesh (sharper injection spot)
+/
+
+&tgrid
+  dt = 0.4d0
+  nt = 6000                                  ! 2400 a.u.t ~ 58 fs: pulse ends ~19 fs,
+                                             ! then ~39 fs of pure valley relaxation
+/
+
+&emfield
+  ! Analytic field - no input file needed. Strong below-gap Acos2:
+  ! omega = 0.125 eV << E_g, so ALL injection is multiphoton/Zener (vertical).
+  ae_shape1      = 'Acos2'
+  epdir_re1(1:3) = 0.0d0, 0.0d0, 1.0d0
+  I_wcm2_1       = 1.0d+12
+  tw1            = 800.0d0
+  omega1         = 0.0046d0
+/
+
+&analysis
+  out_projection_k_step = 500                ! 12 frames -> the rolling as a movie
+/
+
+&epm
+  epm_material            = 'Si'             ! registry: 6 intervalley g/f phonons,
+  epm_lattice_constant_au = 10.26d0          ! Keldysh II fit, eps, Laks Auger scale
+/
+
+&sbe
+  ! ---- EVERYTHING available for Si, all at once --------------------------------
+  yn_sbe_superres          = 'y'    ! the ring: REQUIRED backbone of every inter-k channel
+  yn_sbe_eph               = 'y'    ! 6 cited intervalley g/f modes -> Delta-valley rolling
+  yn_sbe_impact_ionization = 'y'    ! momentum-conserving nonlocal II (k-local gated off)
+  yn_sbe_auger             = 'y'    ! ring Auger = exact time-reverse of the II (no extra C)
+  yn_sbe_eeh               = 'y'    ! carrier-carrier -> hot Fermi-Dirac thermalization
+  yn_sbe_coulomb           = 'y'    ! Sigma^HF: dynamic gap renormalization (replaces BGR)
+  yn_sbe_bgr_threshold     = 'n'    ! MUST stay off with Coulomb on (double-count guard)
+  sbe_eph_temperature_k    = 300.0d0
+  ! NO sbe_decoh_* (Kuhn-Zurek): collisions provide the decoherence.
+/

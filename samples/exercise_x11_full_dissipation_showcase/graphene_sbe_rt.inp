@@ -1,0 +1,89 @@
+!########################################################################################!
+! x11 SHOWCASE - graphene: the gapless-Dirac channel set, all at once.                   !
+!----------------------------------------------------------------------------------------!
+! Step 2 of 2 (step 1: ../graphene_epm_gs.inp -> graphene_prim_k/_eigen/_tm.data).         !
+!                                                                                          !
+! THE PHYSICS STORY (the gapless contrast):                                                !
+!   No gap -> ANY in-plane field excites; the carriers are born along the field-           !
+!   swept lines and RELAX TOWARD THE SIX K/K' DIRAC CORNERS (the band minima) via          !
+!   the two cited Kohn-anomaly optical modes E2g(Gamma, 196 meV) and A1'(K, 160            !
+!   meV) - both inter-k on the cone, so the ring is mandatory. On top of that the          !
+!   2D RANA Auger/carrier-multiplication channel [R07] runs: above the 300 K               !
+!   thermal pair density it recombines (watch nex decay monotonically after the            !
+!   pulse - the validated -4.6%/3fs tail at n_2d ~ 6e13 cm^-2), below it it                !
+!   GENERATES toward equilibrium (detailed balance: R = G exactly at n0).                  !
+!                                                                                          !
+! WHY THE &sbe BLOCK IS SHORT (gapless provenance - each absence is physics):              !
+!   * yn_sbe_impact_ionization FORBIDDEN: the Stobbe/Keldysh gap-threshold law is          !
+!     meaningless on a gapless cone; the Rana channel IS the thresholdless CM.             !
+!   * yn_sbe_eeh FORBIDDEN: no cited graphene FD-thermalization rate.                      !
+!   * yn_sbe_coulomb FORBIDDEN: Sigma^HF needs the 2D kernel 2*pi/(eps*q) (not wired).     !
+!   * Kuhn-Zurek sbe_decoh_* FORBIDDEN outright (error stop): single-particle              !
+!     dephasing is unphysical for gapless Dirac carriers.                                  !
+!   eps_r of the Rana rates defaults to 10 (the R07 Fig.4 benchmark substrate);            !
+!   on SiO2 set sbe_coulomb_epsilon = 4.0d0 (roughly doubles the Auger rate).              !
+!                                                                                          !
+! WATCH IT:                                                                                !
+!   python3 ../../plot_sbe_results.py -i . -o plots --snapshots --valleys --bz3d \         !
+!           --bz3d-voxel                                                                   !
+!   -> the hexagonal BZ wireframe with the six K/K' corner spots growing, plus the         !
+!      *_sbe_nex.data trace showing the Rana recombination tail after the pulse.           !
+!########################################################################################!
+
+&calculation
+  theory = 'sbe'
+/
+
+&control
+  sysname = 'graphene_prim'
+/
+
+&units
+  unit_system = 'au'
+/
+
+&system
+  yn_periodic  = 'y'
+  al_vec1(1:3) = 4.64873d0, 0.00000d0,  0.00000d0
+  al_vec2(1:3) = 2.32436d0, 4.02592d0,  0.00000d0
+  al_vec3(1:3) = 0.00000d0, 0.00000d0, 37.79452d0     ! 20 A vacuum (2D slab)
+  nelec  = 2
+  nstate = 2
+/
+
+&kgrid
+  num_kgrid(1:3) = 12, 12, 1          ! multiple of 3 -> K on the mesh; 1 along vacuum
+/
+
+&tgrid
+  dt = 0.2d0
+  nt = 6000                           ! 1200 a.u.t ~ 29 fs: ~19 fs of post-pulse
+                                      ! relaxation + Rana recombination tail
+/
+
+&emfield
+  ! Analytic in-plane Acos2 (any field excites - gapless).
+  ae_shape1      = 'Acos2'
+  epdir_re1(1:3) = 1.0d0, 0.0d0, 0.0d0
+  I_wcm2_1       = 1.0d+11
+  tw1            = 400.0d0
+  omega1         = 0.02d0
+/
+
+&analysis
+  out_projection_k_step = 500
+/
+
+&epm
+  epm_material = 'graphene'           ! registry: E2g/A1' phonons + 2D Rana Auger/CM
+/
+
+&sbe
+  ! ---- EVERYTHING available on the gapless cone --------------------------------
+  yn_sbe_superres       = 'y'    ! ring: MANDATORY for both graphene channels
+  yn_sbe_eph            = 'y'    ! E2g(196 meV) + A1'(160 meV) -> K/K' relaxation
+  yn_sbe_auger          = 'y'    ! 2D Rana Auger/CM [R07] on quasi-Fermi levels
+  sbe_eph_temperature_k = 300.0d0
+  ! Forbidden-by-physics (error stop if enabled): impact_ionization, eeh,
+  ! coulomb, sbe_decoh_* - see the header.
+/
