@@ -34,6 +34,7 @@ FORTRAN_DEPS = {
     "test_ii_interk_cptp.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
     "test_auger_interk_cptp.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
     "test_rana_2d.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
+    "test_rana_auger_cptp.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
 }
 
 

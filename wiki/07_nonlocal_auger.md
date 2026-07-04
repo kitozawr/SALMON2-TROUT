@@ -14,10 +14,44 @@ G-sum** (§3, PR #57); the **graphene 2D Rana** branch (§6) is implemented &
 validated against the cited lifetimes (PR #58); the effective-C(n)
 order-of-magnitude check vs S14/L90 is done (§7, PR #62). All four journal
 sources (R07/K15/S14/L90) are **source-verified** against the PDFs.
-**The one remaining piece:** wire the graphene 2D Rana rate into a live CPTP
-SBE channel (the 3D ring Auger is already live); graphene `auger_ok` stays
-`.false.` until then (see §6). Other open refinements: the Bloch-overlap
-factors I(G) (currently →1), and GaAs dynamic λ(n(t)) free-carrier screening.
+**The one remaining piece:** ~~wire the graphene 2D Rana rate into a live CPTP
+SBE channel~~ — **DONE 2026-07-04 (see the UPDATE below)**; graphene
+`auger_ok` is now `.true.` (with the `auger_2d_rana` discriminator). GaAs
+dynamic λ(n(t)) free-carrier screening — **also DONE 2026-07-04**. The
+Bloch-overlap factors I(G) (currently →1) are **resolved as redundant at the
+current calibration level** (see the wiki/00 decisions entry): the kernels'
+absolute rate scale is pinned to the cited Stobbe/Keldysh magnitude, so the
+sub-unity I(G) factors renormalise a quantity that is *calibrated away*; the
+residual shape effect on the q-distribution is second order per [L90] (the G-sum and
+ε(q) are the big effects — both in), and carrying the plane-wave coefficients
+into the SBE dataset would be a large data-plumbing change for it.
+
+**UPDATE 2026-07-04 (wiki/00 TODO sweep): the graphene 2D Rana CPTP channel is
+LIVE** (`rana_auger_dpop` in sbe_superres + `apply_rana_auger_ring` in
+bloch_solver, ring-gated like graphene e-ph). Net pair relaxation R − G =
+(CCCV+CVVV) − (their Eq.-17 reverses) on the INSTANTANEOUS quasi-Fermi levels
+(`dirac_mu_2d` inversion of the gathered CB-electron / VB-hole sheet
+densities); applied as a uniform-fractional CB→VB (or VB→CB when G > R —
+thresholdless carrier multiplication) population transfer with smooth
+`cap·(1−exp(−ΔN/cap))` saturation against BOTH the source population and the
+destination phase space; trace exactly conserved by construction; coherences
+amplitude-damped √(f_new/f_old). ε_r default = 10 (the R07 Fig. 4 benchmark
+substrate), override via `sbe_coulomb_epsilon`; T = the e-ph bath
+(`sbe_eph_temperature_k`); cell area from V·|b3|/2π (guards: b3 must be the
+out-of-plane axis and the b-matrix must be in the GS header). Unit test
+`test_rana_auger_cptp` (trace, bounds, the equilibrium μ=0 fixed point, the
+implied τ_r = 1.48 ps R07 benchmark, τ→∞ saturation, empty no-op).
+**Calc-validated** (graphene 12²×1, serial build): electrons = 2.000 every
+step; below the 300 K thermal density the channel gently GENERATES toward
+equilibrium (detailed balance — expected, not a bug), above it the post-pulse
+nex decays monotonically (−4.6% over the 3 fs tail at n₂d ≈ 6×10¹³ cm⁻²,
+consistent with the steep R07 τ_r(n) drop). The GaAs λ²(n(t)) also went live
+in the ring kernels: min(Debye, degenerate-TF) crossover on the gathered
+excited density (each formula overestimates outside its regime), registry-
+gated `dyn_lambda_ok` (GaAs only; Si stays λ=0 per Burt [L90]); one-time
+diagnostic print at first activation; verified live on GaAs 4³ impact+ring
+(λ² = 1.02e-4 a.u. at n_exc = 6.7e17 cm⁻³ — hand-checked against the Debye
+formula; electrons = 8.000 conserved).
 
 **UPDATE 2026-07-03 (branch `claude/auger-eps-q-umklapp`): the K15 ε(q) +
 umklapp piece of §3 is IN** — both ring kernels now weight the quadruples with

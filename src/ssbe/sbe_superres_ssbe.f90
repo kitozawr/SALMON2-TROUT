@@ -37,7 +37,7 @@ module sbe_superres_ssbe
               eps_thomas_fermi, tf_kappa2_degenerate, debye_kappa2, &
               lindhard_F, eps_lindhard_static, plasmon_freq2, lopc_branches, &
               eps_cdrb, interk_vq, &
-              dirac_mu_2d, rana_qtf, rana_rcccv, &
+              dirac_mu_2d, rana_qtf, rana_rcccv, rana_auger_dpop, &
               energy_partner_weights, fermi_dirac, fit_fermi_dirac, &
               carrier_carrier_relax, eph_interk_dpop, ii_interk_dpop, &
               auger_interk_dpop, mp_grid_triple, mp_partner_triple, &
@@ -167,6 +167,15 @@ module sbe_superres_ssbe
     real(8), parameter, public :: GRAPH_G2_A1P    = 0.0994d0  ! <g^2_K> [eV^2] DFT [Piscanec 2004]
     real(8), parameter, public :: GRAPH_GW_K      = 2.0d0     ! GW enhancement of the K coupling [Lazzeri 2008]
     real(8), parameter, public :: GRAPH_NU_SAT_SI = 5.0d13    ! OP-emission rate cap [~20 fs; hot-carrier cooling]
+    ! 2D Rana Auger / carrier-multiplication constants [R07 = F. Rana,
+    ! PRB 76, 155431 (2007); journal text verified, wiki/07 sec.6]:
+    real(8), parameter, public :: GRAPH_VF_AU     = 1.0d8 / 2.18769126364d8
+    !                              ^ Dirac velocity v_F = 1e8 cm/s [R07] in a.u.
+    real(8), parameter, public :: GRAPH_RANA_EPS  = 10.0d0
+    !                              ^ background eps_r of the R07 Fig.4 lifetime
+    !                                benchmarks (Al2O3-like); SUBSTRATE-dependent
+    !                                (R07 Fig.5: eps=4 SiO2 doubles the rate) --
+    !                                override via sbe_coulomb_epsilon.
 
     ! =====================================================================
     ! Material registry -- the SINGLE place that maps a material name to all
@@ -199,6 +208,20 @@ module sbe_superres_ssbe
         ! Auger recombination (Sec 13): R = C n^3, density-gated above n_gate.
         real(8)       :: auger_c_cm6s    = 0d0    ! Auger coefficient C [cm^6/s]
         real(8)       :: auger_n_gate_cm3 = 0d0   ! activation density [cm^-3]
+        ! 2D Rana Auger/CM branch (graphene [R07]): auger_ok with this flag set
+        ! means the CITED channel is the gapless 2D collinear one -- NOT C*n^3
+        ! and NOT the gap-threshold ring kernel. Ring-gated (needs the gather).
+        logical       :: auger_2d_rana = .false.
+        real(8)       :: rana_vf_au    = 0d0      ! Dirac velocity [a.u.]
+        real(8)       :: rana_eps_r    = 0d0      ! background eps_r [R07 Fig.4]
+        ! dynamic free-carrier screening lambda^2(n(t)) in the ring II/Auger
+        ! |V(q)|^2 (Debye/TF from the Part-G primitives, evaluated on the
+        ! gathered carrier density). Si stays .false. -- lambda=0 is CORRECT by
+        ! Burt's dynamical argument [L90]: the ~1 eV Auger transition frequency
+        ! far exceeds the carrier plasma frequency, so the static free-carrier
+        ! screen does not act. GaAs (polar, LOPC-prone) takes the density-
+        ! dependent lambda as the cited Part-G refinement.
+        logical       :: dyn_lambda_ok = .false.
         ! dielectric (Coulomb HF exchange / carrier screening)
         real(8)       :: eps0         = 1d0       ! static dielectric
         real(8)       :: eps_inf      = 1d0       ! high-frequency dielectric
@@ -236,6 +259,11 @@ contains
             mp%eps0 = GAAS_EPS0;  mp%eps_inf = GAAS_EPS_INF
             mp%ii_form = 'stobbe_quartic'; mp%ii_exponent = 4d0
             mp%ii_prefactor = 2d12;        mp%ii_threshold_ev = 2.1d0
+            ! dynamic free-carrier lambda^2(n(t)) in the ring II/Auger screen:
+            ! GaAs is the polar material where the free-carrier (Debye/TF)
+            ! screen acts on the collision kernel (Part-G; static Lindhard is
+            ! the default screen class for GaAs). Si stays lambda=0 [L90/Burt].
+            mp%dyn_lambda_ok = .true.
             mp%eph_nu_sat_si = 1.0d14      ! [Fischetti IEEE TED 38, 634 (1991)]
             mp%eph_polar = .true.
             ! Frohlich polar-LO (mode 1) + 5 intervalley modes
@@ -338,14 +366,27 @@ contains
             !        inter-k RING (yn_sbe_superres='y'); the k-local same-k search
             !        is inert on the 2-band Dirac cone. **
             !
+            ! CITED, ENABLED channel (the 2D Rana branch, wiki/07 sec.6):
+            !   * Auger / carrier multiplication (auger_ok=.true. + auger_2d_rana):
+            !     the gapless 2D collinear CCCV/CVVV recombination and its CVCC
+            !     generation partner [R07 = F. Rana, PRB 76, 155431 (2007),
+            !     Eqs. (13),(14),(17); journal text verified; lifetime benchmarks
+            !     unit-tested in test_rana_2d]. Applied as the net CPTP relaxation
+            !     R - G of the Dirac-cone pair density (rana_auger_dpop); at
+            !     equilibrium R = G exactly (detailed balance). There is NO single
+            !     C [cm^6/s] -- the rate comes from the R07 integrals evaluated on
+            !     the instantaneous quasi-Fermi levels. ** Ring-gated
+            !     (yn_sbe_superres='y'): needs the global population gather, like
+            !     graphene e-ph. ** eps_r default = 10 (the R07 Fig.4 benchmark
+            !     substrate); override via sbe_coulomb_epsilon (R07 Fig.5: eps=4
+            !     SiO2 roughly doubles the rate).
+            !
             ! FORBIDDEN channels (GAPLESS physics -- the gap-based maps don't apply):
             !   * impact ionization (ii_ok=.false.): the Stobbe/Keldysh fit is a
             !     (eps_kin - E_th)^a law with E_th a GAP threshold -- meaningless for
-            !     a gapless cone. Graphene carrier multiplication is the (nearly
-            !     thresholdless) 2D collinear process -- the Rana branch of the
-            !     nonlocal-Auger task (wiki/07), NOT this gap-threshold channel.
-            !   * Auger recombination (auger_ok=.false.): recombination across a gap
-            !     with C*n^3 -- no gap, no single cm^6/s C. Again the 2D Rana branch.
+            !     a gapless cone. Graphene carrier multiplication IS the generation
+            !     side of the 2D Rana channel above (thresholdless, collinear) --
+            !     NOT this gap-threshold channel.
             !   * carrier-carrier (eeh_ok=.false.): no cited graphene FD-thermalization
             !     RATE (the graphene e-e coupling alpha=2.2/eps_eff is a coupling, not
             !     a rate); the gapless e-e/CM physics is the Rana branch.
@@ -360,7 +401,10 @@ contains
             mp%cell_au = (/ GRAPH_A_BOHR, GRAPH_A_BOHR*sqrt(3d0), 0d0 /)  ! informational
             mp%is_diamond = .true.    ! V^A = 0 (centrosymmetric)
             mp%eph_ok = .true.
-            mp%ii_ok = .false.; mp%auger_ok = .false.
+            mp%ii_ok = .false.
+            ! 2D Rana Auger/CM [R07] -- cited & enabled (ring-gated; see above)
+            mp%auger_ok = .true.;  mp%auger_2d_rana = .true.
+            mp%rana_vf_au = GRAPH_VF_AU;  mp%rana_eps_r = GRAPH_RANA_EPS
             mp%eeh_ok = .false.; mp%coulomb_ok = .false.
             ! non-polar optical deformation-potential modes (no Frohlich LO branch)
             mp%eph_polar = .false.
@@ -848,6 +892,109 @@ contains
         end function fdocc
     end function rana_rcccv
 
+    ! =====================================================================
+    ! 2D Rana Auger/CM as a CPTP population channel (the wiki/00 TODO-1 wiring).
+    ! ---------------------------------------------------------------------
+    ! Net pair relaxation of the Dirac-cone populations by the [R07] rates:
+    !   R = R_CCCV + R_CVVV  (recombination, Eq. 14),
+    !   G = G_CVCC + G_VCCC  (generation / carrier multiplication, Eq. 17),
+    ! evaluated on the INSTANTANEOUS quasi-Fermi levels mu_c(n), mu_v(p) of the
+    ! gathered conduction/valence populations (dirac_mu_2d inversion). The net
+    ! rate R - G is applied as a uniform-fractional population transfer
+    ! CB -> VB (R > G, net recombination) or VB -> CB (G > R, net carrier
+    ! multiplication), which is exactly the "R - G = (n - n0)/tau_r" relaxation
+    ! of the pair density: at equilibrium R = G identically (detailed balance,
+    ! unit-tested in test_rana_2d), so dpop == 0 -- the fixed point.
+    !
+    ! CPTP by construction:
+    !   * trace: sum(dpop) = -dN + dN = 0 exactly (removal ~ f/sum(f) balances
+    !     addition ~ room/sum(room));
+    !   * bounds: dN is saturated below both the available source population
+    !     and the available destination phase space by the smooth cap
+    !     dN = cap*(1 - exp(-dN_lin/cap)), cap = min(avail, room) -- the same
+    !     1-exp form as the other channels (never overshoots, linear for small
+    !     rates); per-state amounts dN*f/avail <= f and dN*room_a/room <= room_a.
+    ! Energy bookkeeping: the released/absorbed energy goes to the third
+    ! carrier IN the R07 integrand; at this collapsed rate-model level the
+    ! populations move without an explicit hot tail (e-ph + the ring channels
+    ! thermalize) -- exactly the wiring the maintainer specified in wiki/00.
+    !
+    ! Units: f = per-k populations (sum_k f/nk = electrons per cell);
+    ! area = 2D cell area [a.u.^2]; the R07 rates are per area per a.u.t, so
+    ! dN_lin = |R-G| * area * nk * tau in population units. rnet_out [a.u.^-2
+    ! a.u.t^-1] is returned for the tau_r diagnostic print.
+    ! =====================================================================
+    subroutine rana_auger_dpop(nk, nba, f, occ_max, iv, ic, area, kT, vf, &
+                               eps_r, tau, dpop, rnet_out)
+        implicit none
+        integer, intent(in)  :: nk, nba, iv, ic
+        real(8), intent(in)  :: f(nba, nk), occ_max, area, kT, vf, eps_r, tau
+        real(8), intent(out) :: dpop(nba, nk), rnet_out
+        real(8) :: n2d, p2d, mu_c, mu_v, rrec, rgen, rnet
+        real(8) :: avail, room, dn_lin, cap, dn
+        integer :: a, ik
+        real(8), parameter :: n_eps = 1d-14
+
+        dpop = 0d0
+        rnet_out = 0d0
+        if (iv < 1 .or. ic > nba .or. ic <= iv) return
+        if (area <= 0d0 .or. kT <= 0d0 .or. vf <= 0d0) return
+
+        ! Gathered CB electron / VB hole sheet densities [a.u.^-2].
+        n2d = sum(f(ic:nba, :)) / (dble(nk) * area)
+        p2d = (dble(iv) * occ_max - sum(f(1:iv, :)) / dble(nk)) / area
+        p2d = max(p2d, 0d0)
+        if (n2d < n_eps .and. p2d < n_eps) return
+
+        ! Instantaneous quasi-Fermi levels and the [R07] rates (CCCV + CVVV
+        ! recombination; their reverse generation partners).
+        mu_c =  dirac_mu_2d(n2d, kT, vf)
+        mu_v = -dirac_mu_2d(p2d, kT, vf)
+        rrec = rana_rcccv( mu_c,  mu_v, kT, vf, eps_r, .false.) &
+             + rana_rcccv(-mu_v, -mu_c, kT, vf, eps_r, .false.)
+        rgen = rana_rcccv( mu_c,  mu_v, kT, vf, eps_r, .true.) &
+             + rana_rcccv(-mu_v, -mu_c, kT, vf, eps_r, .true.)
+        rnet = rrec - rgen
+        rnet_out = rnet
+        if (abs(rnet) < 1d-300) return
+
+        dn_lin = abs(rnet) * area * dble(nk) * tau      ! population units
+        if (rnet > 0d0) then
+            ! net RECOMBINATION: remove electrons from the CB (~f), fill VB
+            ! holes (~room). avail/room in the same population units.
+            avail = sum(f(ic:nba, :))
+            room  = dble(iv) * occ_max * dble(nk) - sum(f(1:iv, :))
+        else
+            ! net GENERATION (carrier multiplication): remove from the VB,
+            ! promote into empty CB phase space.
+            avail = sum(f(1:iv, :))
+            room  = dble(nba - ic + 1) * occ_max * dble(nk) - sum(f(ic:nba, :))
+        end if
+        cap = min(avail, room)
+        if (cap < n_eps) return
+        dn = cap * (1d0 - exp(-dn_lin / cap))           ! smooth CPTP saturation
+
+        if (rnet > 0d0) then
+            do ik = 1, nk
+                do a = ic, nba
+                    dpop(a, ik) = dpop(a, ik) - dn * f(a, ik) / avail
+                end do
+                do a = 1, iv
+                    dpop(a, ik) = dpop(a, ik) + dn * (occ_max - f(a, ik)) / room
+                end do
+            end do
+        else
+            do ik = 1, nk
+                do a = 1, iv
+                    dpop(a, ik) = dpop(a, ik) - dn * f(a, ik) / avail
+                end do
+                do a = ic, nba
+                    dpop(a, ik) = dpop(a, ik) + dn * (occ_max - f(a, ik)) / room
+                end do
+            end do
+        end if
+    end subroutine rana_auger_dpop
+
     ! Bulk plasmon frequency squared [a.u.]: omega_p^2 = 4 pi n/(eps_inf m*).
     ! (the high-frequency plasmon screens with eps_inf, not eps_0). [Mahan]
     pure function plasmon_freq2(n_au, eps_inf, mstar) result(wp2)
@@ -1110,23 +1257,32 @@ contains
     ! Primary out capped at f(ih,k1)*(1-exp(-Gamma*tau)) <= f (no negativity).
     ! klut(0:nk-1): flattened MP lookup, triple (m1,m2,m3) -> ik via
     ! lidx = m1 + n1*(m2 + n2*m3). The caller precomputes it once.
+    ! i1_lo/i1_hi (optional): restrict the OUTER source loop to a k subrange.
+    ! The kernel is exactly additive over i1 (each i1 only accumulates its own
+    ! -amt/+amt quadruples), so ranks can each run a disjoint subrange and
+    ! comm_summation the dpop -- O(nk^3/P) instead of every rank redoing the
+    ! full O(nk^3) sum. Omitting them keeps the full serial loop (unit tests).
     subroutine ii_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
                               pref, expo, iv, ic, kidx, kn, klut, &
-                              bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dpop)
+                              bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dpop, &
+                              i1_lo, i1_hi)
         implicit none
         integer, intent(in)  :: nk, nba, iv, ic, kidx(3, nk), kn(3), klut(0:nk-1)
         real(8), intent(in)  :: eval(nba, nk), f(nba, nk), occ_max, a2half
         real(8), intent(in)  :: ecbm, eth, pref, expo, sigma, tau
         real(8), intent(in)  :: bmat(3,3), eps_inf, qtf2, wp2, lambda2, q2reg
         real(8), intent(out) :: dpop(nba, nk)
-        integer :: i1, i1p, i2, ih, ipass, jj, m2p(3), d
+        integer, intent(in), optional :: i1_lo, i1_hi
+        integer :: i1, i1p, i2, ih, ipass, jj, m2p(3), d, i1s, i1e
         real(8) :: ekin, dd, g0, etgt, vq, df(3), shp, pauli, gpart, gamtot, out_tot, amt
         real(8), parameter :: occ_eps = 1d-12
 
         dpop = 0d0
         if (iv < 1 .or. ic > nba .or. ic <= iv) return
+        i1s = 1;  if (present(i1_lo)) i1s = max(i1_lo, 1)
+        i1e = nk; if (present(i1_hi)) i1e = min(i1_hi, nk)
 
-        do i1 = 1, nk
+        do i1 = i1s, i1e
             do ih = ic, nba
                 if (f(ih, i1) < occ_eps) cycle
                 ekin = eval(ih, i1) + a2half - ecbm
@@ -1196,23 +1352,29 @@ contains
     ! in the linear (Gamma*tau -> 0) regime the net II + Auger dpop vanishes
     ! identically -- the equilibrium-fixed-point unit test.
     ! =====================================================================
+    ! i1_lo/i1_hi: same optional outer-loop subrange as ii_interk_dpop (the
+    ! kernel is additive over i1 -- MPI ranks sum disjoint subranges).
     subroutine auger_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
                                  pref, expo, iv, ic, kidx, kn, klut, &
-                                 bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dpop)
+                                 bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dpop, &
+                                 i1_lo, i1_hi)
         implicit none
         integer, intent(in)  :: nk, nba, iv, ic, kidx(3, nk), kn(3), klut(0:nk-1)
         real(8), intent(in)  :: eval(nba, nk), f(nba, nk), occ_max, a2half
         real(8), intent(in)  :: ecbm, eth, pref, expo, sigma, tau
         real(8), intent(in)  :: bmat(3,3), eps_inf, qtf2, wp2, lambda2, q2reg
         real(8), intent(out) :: dpop(nba, nk)
-        integer :: i1, i1p, i2, ih, ipass, jj, m2p(3), d
+        integer, intent(in), optional :: i1_lo, i1_hi
+        integer :: i1, i1p, i2, ih, ipass, jj, m2p(3), d, i1s, i1e
         real(8) :: ekin, dd, g0, etgt, vq, df(3), shp, pauli, gpart, gamtot, in_tot, amt, room
         real(8), parameter :: occ_eps = 1d-12
 
         dpop = 0d0
         if (iv < 1 .or. ic > nba .or. ic <= iv) return
+        i1s = 1;  if (present(i1_lo)) i1s = max(i1_lo, 1)
+        i1e = nk; if (present(i1_hi)) i1e = min(i1_hi, nk)
 
-        do i1 = 1, nk
+        do i1 = i1s, i1e
             do ih = ic, nba
                 room = occ_max - f(ih, i1)          ! empty hot-state phase space
                 if (room < occ_eps) cycle

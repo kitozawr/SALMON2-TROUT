@@ -64,7 +64,20 @@
   !     yn_sbe_superres       = 'y'     ! REQUIRED: inter-k e-ph through the ring
   !     sbe_eph_temperature_k = 300.0d0
   ! Validated: electrons=2.000 conserved (CPTP); carriers relax toward the K/K'
-  ! Dirac corners. FORBIDDEN for graphene (gapless): yn_sbe_impact_ionization,
-  ! yn_sbe_auger, yn_sbe_eeh, yn_sbe_coulomb, and Kuhn-Zurek sbe_decoh_* (all
-  ! error stop). Gapless carrier multiplication = the nonlocal-Auger task (wiki/07).
+  ! Dirac corners.
+  !
+  ! graphene AUGER / CARRIER MULTIPLICATION (2D Rana [R07], wiki/07 sec.6) is
+  ! also available and likewise RING-ONLY:
+  !     yn_sbe_auger          = 'y'
+  !     yn_sbe_superres       = 'y'     ! REQUIRED (global population gather)
+  !     sbe_eph_temperature_k = 300.0d0 ! carrier/bath temperature of the rates
+  ! Net CPTP pair relaxation R - G on instantaneous quasi-Fermi levels: above
+  ! the 300 K thermal density it RECOMBINES (tau_r ~ ps at 1e12 cm^-2 [R07]),
+  ! below it it GENERATES toward equilibrium (detailed balance). eps_r defaults
+  ! to the R07 benchmark 10 (substrate-dependent); override: sbe_coulomb_epsilon.
+  ! Validated: electrons=2.000 conserved; post-pulse nex decays monotonically.
+  !
+  ! FORBIDDEN for graphene (gapless): yn_sbe_impact_ionization (the Rana channel
+  ! IS the thresholdless CM), yn_sbe_eeh, yn_sbe_coulomb, and Kuhn-Zurek
+  ! sbe_decoh_* (all error stop).
 /

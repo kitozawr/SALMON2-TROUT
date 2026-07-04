@@ -121,11 +121,22 @@ program test_material_registry
     ! A1' (K, Kohn anomaly, x2 GW) must dominate the E2g (Gamma) weight.
     if (gr%eph_wraw(2) <= gr%eph_wraw(1)) call bad('graphene A1'' weight should dominate E2g (Kohn anomaly)')
     if (sum(gr%eph_wraw(1:gr%eph_nph)) <= 0d0) call bad('graphene eph weights non-positive')
-    ! ALL gap-based / many-body channels are FORBIDDEN on the gapless cone:
+    ! Gap-based / many-body channels FORBIDDEN on the gapless cone -- EXCEPT
+    ! the Auger, which is now the CITED 2D Rana branch (R07; wiki/00 TODO-1):
     if (gr%ii_ok)      call bad('graphene impact ionization must be forbidden (gapless: no E_th)')
-    if (gr%auger_ok)   call bad('graphene Auger must be forbidden (gapless: no gap-recombination C)')
+    if (.not. gr%auger_ok) call bad('graphene Auger should be ENABLED (2D Rana branch, R07 cited)')
+    if (.not. gr%auger_2d_rana) call bad('graphene Auger must be flagged 2D-Rana (not C n^3)')
+    call chk('graphene Rana v_F = 1e8 cm/s (a.u.)', gr%rana_vf_au, 1.0d8/2.18769126364d8, 1d-12)
+    call chk('graphene Rana eps_r = 10 (R07 Fig.4)', gr%rana_eps_r, 10.0d0)
     if (gr%eeh_ok)     call bad('graphene carrier-carrier must be forbidden (no cited FD rate)')
     if (gr%coulomb_ok) call bad('graphene Coulomb HF must be forbidden (needs 2D V(q), not yet wired)')
+    ! the bulk materials must NOT carry the 2D flag; Si must NOT take the
+    ! dynamic free-carrier lambda (Burt [L90]: lambda = 0 is the Si physics),
+    ! GaAs DOES (registry dyn_lambda_ok gates the ring-kernel lambda^2(n(t))).
+    if (ga%auger_2d_rana .or. si%auger_2d_rana .or. cds%auger_2d_rana) &
+        call bad('bulk materials must not be flagged 2D-Rana')
+    if (si%dyn_lambda_ok) call bad('Si must keep lambda=0 in the ring kernels (Burt/L90)')
+    if (.not. ga%dyn_lambda_ok) call bad('GaAs should take the dynamic lambda^2(n(t)) (Part-G)')
 
     ! every cited phonon table's weights must be positive (normalizable)
     if (sum(ga%eph_wraw(1:ga%eph_nph)) <= 0d0) call bad('GaAs eph weights non-positive')
