@@ -1,14 +1,23 @@
 # Nonlocal Auger recombination — implementation spec
 
-**Status: CORE IMPLEMENTED (2026-07-02, branch `claude/nonlocal-auger-bgr`).**
-The detailed-balance kernel reuse (§0/§5) is done: `auger_interk_dpop` (the
-exact time-reverse of `ii_interk_dpop` — same quadruples, |V(q)|², broadened δ
-and cited II magnitude; reversed occupations; hot-gain capped), wired as *one
-gather, two kernels* inside `apply_ii_interk_ring`, ring-gated, requiring the
-II channel (shared constants — no separate C), with the k-local C·n³ Auger off
-when the ring is on. Unit test incl. the **Fermi-Dirac detailed-balance fixed
-point** (net II+Auger dpop < 1e-6). The **BGR↔Σ^HF guard** (§0.2b) is in
-(mutual exclusion, error stop).
+**Status: MERGED into `develop-2.0.0` (2026-07-02→03, PRs #52/#57/#58/#62).**
+The 3D detailed-balance kernel reuse (§0/§5) is done and merged:
+`auger_interk_dpop` (the exact time-reverse of `ii_interk_dpop` — same
+quadruples, |V(q)|², broadened δ and cited II magnitude; reversed occupations;
+hot-gain capped), wired as *one gather, two kernels* inside
+`apply_ii_interk_ring`, ring-gated, requiring the II channel (shared constants
+— no separate C), with the k-local C·n³ Auger off when the ring is on. Unit
+test incl. the **Fermi-Dirac detailed-balance fixed point** (net II+Auger dpop
+< 1e-6). The **BGR↔Σ^HF guard** (§0.2b) is in (mutual exclusion, error stop).
+The |V(q)|² weight now carries the **CDRB model ε(q) + Cartesian umklapp
+G-sum** (§3, PR #57); the **graphene 2D Rana** branch (§6) is implemented &
+validated against the cited lifetimes (PR #58); the effective-C(n)
+order-of-magnitude check vs S14/L90 is done (§7, PR #62). All four journal
+sources (R07/K15/S14/L90) are **source-verified** against the PDFs.
+**The one remaining piece:** wire the graphene 2D Rana rate into a live CPTP
+SBE channel (the 3D ring Auger is already live); graphene `auger_ok` stays
+`.false.` until then (see §6). Other open refinements: the Bloch-overlap
+factors I(G) (currently →1), and GaAs dynamic λ(n(t)) free-carrier screening.
 
 **UPDATE 2026-07-03 (branch `claude/auger-eps-q-umklapp`): the K15 ε(q) +
 umklapp piece of §3 is IN** — both ring kernels now weight the quadruples with

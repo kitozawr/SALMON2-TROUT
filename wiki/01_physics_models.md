@@ -103,8 +103,13 @@ W(q)=V(q)/ε(q[,ω]); three selectable models (pure functions in `sbe_superres_s
 
 Static screening under-estimates the rate; dynamic (LOPC) is needed for sub-100-fs thermalization (Elsaesser/Shah).
 
-## 12. Auger recombination as a number-conserving CPTP Lindblad ✅ channel (k-local); ⛔ no cited C yet
-The inverse of impact ionization (§3): instead of a hot carrier creating an e–h pair, two carriers + a hole give one hot carrier and a destroyed pair. It is a **3-body, density-gated** process whose recombination rate goes as **R = C·n³** (the per-carrier rate is γ = C·n²), with a per-material coefficient C and an activation density n_gate.
+## 12. Auger recombination as a number-conserving CPTP Lindblad channel
+The inverse of impact ionization (§3): instead of a hot carrier creating an e–h pair, two carriers + a hole give one hot carrier and a destroyed pair. **Two representations, selected by the ring:**
+
+- ✅ **Nonlocal (ring on, `yn_sbe_superres='y'` + `yn_sbe_impact_ionization='y'`) — the primary path, merged.** Auger is the **exact time-reverse of the momentum-conserving inter-k impact ionization** (`auger_interk_dpop`): same quadruples, |M|²/ε(q)/umklapp weight and broadened δ, with the Fermi factors swapped. By detailed balance it needs **no separate C** — the rate scale *is* the cited II magnitude (verified: at equilibrium the net II+Auger dpop → 0). This is the fully **nonlocal** rebuild `wiki/07` describes; the effective C(n) extracted from it lands within ~1 order of magnitude of the source-verified Dziewior–Schmid Si C (wiki/07 §7).
+- ✅ **k-local fallback (ring off) — the density-gated C·n³ channel described below.** Rate R = C·n³ (per-carrier γ = C·n²), per-material coefficient C and activation density n_gate. Provenance-gated (⛔ no material ships a verified C — see the note), so it needs an explicit `sbe_auger_c_cm6s`.
+
+The k-local closure follows.
 
 > **Provenance note (2026-06-30):** the value formerly used as the CdS default, "C = 2.0×10⁻³⁰ cm⁶/s [Haury et al., PRB 57, 11513 (1998)]", was a **fabricated citation** (the real Haury et al. paper is PRL 79, 511 (1997) on CdMnTe ferromagnetism, unrelated to Auger in CdS; the coefficient is unconfirmed). It has been **removed** and CdS Auger is gated off. **No material currently ships a verified C**, so the channel requires an explicit `sbe_auger_c_cm6s`. Cited per-material coefficients (GaAs / Si / graphene) and the full **nonlocal** rebuild are the subject of `wiki/07_nonlocal_auger.md`.
 

@@ -38,7 +38,7 @@
 | sbe_eph_n | — | 2 | saturation shape exponent n. |
 | yn_sbe_eeh | — | 'n' | carrier-carrier (e-e/e-h) CPTP thermalization to a Fermi-Dirac (F). |
 | sbe_eeh_nu_sat | s⁻¹ | 1e14 | carrier-carrier rate scale. |
-| yn_sbe_auger | — | 'n' | Auger recombination (density-gated, number-conserving CPTP; Sec 13). γ=C·n² (R=C·n³). Provenance-gated: **no material ships a verified C**, so requires an explicit `sbe_auger_c_cm6s` (else `error stop`). Cited GaAs/Si/graphene coeffs = nonlocal-Auger task (wiki/07). |
+| yn_sbe_auger | — | 'n' | Auger recombination, number-conserving CPTP. **With the ring** (`yn_sbe_superres='y'`+`yn_sbe_impact_ionization='y'`) it is the exact **time-reverse of the inter-k impact ionization** — same \|M\|²/ε(q)/umklapp weight, reversed Fermi factors, **no separate C** (rate scale = the cited II magnitude, detailed balance). **Ring off:** the k-local density-gated γ=C·n² (R=C·n³) fallback, which requires an explicit `sbe_auger_c_cm6s` (no verified default). See wiki/07. |
 | sbe_auger_c_cm6s | cm⁶/s | −1.0 | Auger coefficient C; ≤0 ⇒ material default, but **no material has a verified default** (the former CdS 2.0e-30 carried a fabricated citation, removed) — must be set explicitly. |
 | sbe_auger_n_gate_cm3 | cm⁻³ | −1.0 | activation density; ≤0 ⇒ material default (CdS 1e18 [Shah 1986], used only with a user-supplied C). |
 | yn_sbe_bgr_threshold | — | 'n' | density-dependent II threshold E_th(t)=E_th0−|ΔE_BGR(n)| (C7). |
