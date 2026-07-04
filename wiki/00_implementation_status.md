@@ -217,6 +217,12 @@ Everything else the maintainer set out this session is merged. The maintainer's 
 | `test_epm_cubic_folding_contract.py` | Fortran↔Python EPM convention (cubic) | simple-cubic basis count (171 PW @ cutoff 11.1), exact 4-coset (FCC-in-cubic) folding block-diagonality, folded spectrum = union of coset spectra, reduced-k MP grid (first pt −3/8) — the contract the Fortran `src/epm` solver must mirror |
 | `test_auger_cptp.f90` | Auger recombination map (Sec 13) | replicates apply_auger_recombination's two-amp_damp map: number (trace) conserved, excited population decreases (recombination), PSD/CPTP, Hermitian, γ=0 identity, populations in [0,occ], recombination rate→0 with no hole (standalone gfortran) |
 | `test_epm_folded_gs.py` | CdS+graphene folded GS + bandpath + 2-coset unfold (Python) | epm_io writer round-trip + non-orthogonal-cell rejection; graphene rect 4-atom 2-fold exact + gapless folded Dirac + struct_norm reproduces primitive Dirac + bandpath-K is the gapless Dirac point; CdS bandpath Γ gap ~2.5 eV; main_gs band count/occupations/reduced-k; graphene 2-coset unfold map (n_coset=2, weights sum to 1, exact one-coset folding) |
+| `test_mp_kmap.f90` | MP momentum map | `mp_grid_triple`/`mp_partner_triple`: k1+k2−k1' (mod G) exact integer index arithmetic; residual gate on non-MP grids |
+| `test_eph_interk_cptp.f90` | inter-k e-ph (ring) | `eph_interk_dpop` trace-conserving, resonant inter-k downhill transfer, bounds, γ=0/empty no-op |
+| `test_ii_interk_cptp.f90` | inter-k impact ionization (ring) | `ii_interk_dpop` CPTP (sum dpop=0), pair creation in the momentum-matched valley, bounds, no-pair/sub-threshold no-op |
+| `test_auger_interk_cptp.f90` | inter-k Auger (ring) | `auger_interk_dpop` = time-reverse of `ii_interk_dpop`: trace conserved, recombining+promoting, bounded, **Fermi-Dirac detailed-balance fixed point** (net II+Auger dpop <1e-6) |
+| `test_rana_2d.f90` | graphene 2D Rana Auger/CM [R07] | `rana_rcccv`/`dirac_mu_2d`/`rana_qtf` [R07 Eqs.13/14/17]: **cited lifetimes** (τ_r=1.48 ps @1e12/300K/ε10; >5 ps @1e11; >1 ps @77K), equilibrium G=R, CVVV mirror, ε-ordering, monotonicity |
+| _manual_ `validate_auger_c.f90` | effective Auger C(n) vs S14/L90 | NOT in run_all (needs `Si_prim_eigen/_k.data`): C_eff=R/(n²p) from `auger_interk_dpop` on the Si 4³ EPM spectrum; n-independent (R∝n³), ~9–10× the Dziewior–Schmid Cₙ (order-of-mag agreement) |
 | _(add per increment)_ | | |
 
 End-to-end smoke (manual): scalar GaAs 4³, `yn_sbe_superres='y'` + `yn_sbe_eph='y'`
