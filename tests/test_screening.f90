@@ -54,6 +54,26 @@ program test_screening
     call chk("LOPC product = wp^2 wTO^2", wLp2*wLm2, wp2*wTO2, 1d-3)
     if (.not. (wLp2 > wLO2 .and. wLm2 < wTO2)) call bad("LOPC branches not split around modes")
 
+
+    ! A4-CdS: acoustic TF screening table S(q) = [q/(q+q_TF)]^2
+    block
+        use sbe_superres_ssbe, only: build_acscreen_table
+        integer :: knl(3)
+        real(8) :: bm(3,3), tb(27), tb0(27)
+        knl = (/2, 2, 2/)   ! (2n-1)^3 = 27
+        bm = 0d0; bm(1,1) = 1d0; bm(2,2) = 1d0; bm(3,3) = 1d0
+        call build_acscreen_table(knl, bm, 0.5d0, tb)
+        ! S(q=0) = 0: the central (d=0) entry is index 14 of 27
+        if (abs(tb(14)) > 1d-14) call bad('ac screen: S(q=0) /= 0 (forward scattering must die)')
+        if (any(tb > 1d0 + 1d-14) .or. any(tb < 0d0)) call bad('ac screen: S outside [0,1]')
+        ! qtf = 0 -> bare (all ones)
+        call build_acscreen_table(knl, bm, 0d0, tb0)
+        if (any(abs(tb0 - 1d0) > 1d-14)) call bad('ac screen: qtf=0 must be bare (S=1)')
+        ! stronger screening -> smaller S everywhere (monotone in q_TF)
+        call build_acscreen_table(knl, bm, 2.0d0, tb0)
+        if (any(tb0 > tb + 1d-14)) call bad('ac screen: not monotone in q_TF')
+    end block
+
     if (nfail == 0) then
         write(*,'(a)') 'PASS'; call exit(0)
     else

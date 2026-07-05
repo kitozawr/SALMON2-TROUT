@@ -630,6 +630,7 @@ contains
       & sbe_ii_phassist, &
       & yn_sbe_ii_holes, &
       & yn_sbe_eph_acoustic, &
+      & sbe_eph_ac_xi_ev, &
       & sbe_checkpoint_step, &
       & yn_sbe_checkpoint_restart
 
@@ -1103,6 +1104,7 @@ contains
     sbe_ii_phassist         = 0.0d0      ! A1 phonon-assisted sidebands off
     yn_sbe_ii_holes         = 'n'        ! A2 hole-initiated II/Auger off
     yn_sbe_eph_acoustic     = 'n'        ! A4 acoustic e-ph mode off
+    sbe_eph_ac_xi_ev        = -1.0d0     ! A4 DP override [eV]; <=0 = registry (substrate knob)
     sbe_checkpoint_step     = 0          ! B4 checkpoint off
     yn_sbe_checkpoint_restart = 'n'
                                             ! (occupation 1 per spinor band, nelec valence bands instead of nelec/2)
@@ -1778,6 +1780,7 @@ contains
     call comm_bcast(sbe_ii_phassist,         nproc_group_global)
     call comm_bcast(yn_sbe_ii_holes,         nproc_group_global)
     call comm_bcast(yn_sbe_eph_acoustic,     nproc_group_global)
+    call comm_bcast(sbe_eph_ac_xi_ev,        nproc_group_global)
     call comm_bcast(sbe_checkpoint_step,     nproc_group_global)
     call comm_bcast(yn_sbe_checkpoint_restart, nproc_group_global)
     call comm_bcast(sbe_auger_n_gate_cm3,    nproc_group_global)
@@ -2814,6 +2817,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_ii_phassist', sbe_ii_phassist
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_ii_holes', yn_sbe_ii_holes
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_eph_acoustic', yn_sbe_eph_acoustic
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_eph_ac_xi_ev', sbe_eph_ac_xi_ev
       write(fh_variables_log, '("#",4X,A,"=",I8)')     'sbe_checkpoint_step', sbe_checkpoint_step
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_checkpoint_restart', yn_sbe_checkpoint_restart
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_auger_n_gate_cm3', sbe_auger_n_gate_cm3

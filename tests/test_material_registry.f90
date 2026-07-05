@@ -142,12 +142,14 @@ program test_material_registry
     call chk('GaAs Cp/Cn = 4.8 (S14)', ga%ii_cpcn, 4.8d0, 1d-12)
     if (cds%ii_cpcn > 0d0) call bad('CdS must have no cited Cp/Cn')
     ! A4 acoustic constants: Si [Jacoboni-Reggiani], GaAs [Fischetti-Laux 7.0 eV],
-    ! graphene [Hwang-Das Sarma 16 eV]; CdS none (piezo pending)
+    ! graphene [Hwang-Das Sarma 16 eV, input-overridable], CdS [Rode PRB 2,
+    ! 1012 (1970): E1 = 14.5 eV -- maintainer-supplied; MUST run TF-screened]
     call chk('Si acoustic Xi_d = 9.0 eV', si%eph_ac_xi_ev, 9.0d0)
     call chk('GaAs acoustic Xi_d = 7.0 eV', ga%eph_ac_xi_ev, 7.0d0)
     call chk('graphene acoustic D = 16 eV', gr%eph_ac_xi_ev, 16.0d0)
-    if (cds%eph_ac_xi_ev > 0d0) call bad('CdS acoustic must be uncited/off (piezo separate)')
-    if (si%eph_ac_cs_cmps <= 0d0 .or. ga%eph_ac_cs_cmps <= 0d0 .or. gr%eph_ac_cs_cmps <= 0d0) &
+    call chk('CdS acoustic E1 = 14.5 eV (Rode 1970)', cds%eph_ac_xi_ev, 14.5d0)
+    if (si%eph_ac_cs_cmps <= 0d0 .or. ga%eph_ac_cs_cmps <= 0d0 .or. &
+        gr%eph_ac_cs_cmps <= 0d0 .or. cds%eph_ac_cs_cmps <= 0d0) &
         call bad('acoustic sound velocities missing')
 
     ! every cited phonon table's weights must be positive (normalizable)

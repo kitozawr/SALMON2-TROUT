@@ -93,8 +93,13 @@
   yn_sbe_bgr_threshold     = 'n'    ! double-count guard (as in Si/GaAs)
   sbe_eph_temperature_k    = 300.0d0
   sbe_checkpoint_step      = 1000   ! B4 crash-safe checkpoints
-  ! A4 acoustic UNAVAILABLE for CdS (piezoelectric channel pending, no cited Xi_d);
-  ! A2 holes UNAVAILABLE (no cited CdS Cp/Cn) -- both abort if enabled (provenance).
+  yn_sbe_eph_acoustic      = 'y'    ! A4-CdS: E1 = 14.5 eV [Rode PRB 2, 1012 (1970)].
+                                    ! ALWAYS applied with the Thomas-Fermi factor
+                                    ! [q/(q+q_TF)]^2 from the instantaneous carrier
+                                    ! density: the bare DP channel with this large E1
+                                    ! is unphysical at n >= 1e18 cm^-3; screened, it is
+                                    ! the physical fallback cooling below hbar*w_LO.
+  ! A2 holes UNAVAILABLE (no cited CdS Cp/Cn) -- aborts if enabled (provenance).
   ! yn_sbe_eeh ABSENT: no cited CdS carrier-carrier rate (provenance gate).
   ! NO sbe_decoh_* (Kuhn-Zurek): collisions provide the decoherence.
 /

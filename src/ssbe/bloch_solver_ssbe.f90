@@ -103,6 +103,7 @@ module bloch_solver_ssbe
         ! every rank (kernels are deterministic on the gathered state).
         real(8) :: led_dn(4) = 0d0
         real(8) :: led_de(4) = 0d0
+        integer :: eph_ip_ac = 0        ! A4: index of the appended acoustic mode (0 = none)
 
         ! Nonlocal impact ionization (Part C4): the hot electron ionizes a
         ! valence partner drawn from the WHOLE BZ (momentum exchange), so the
@@ -230,7 +231,7 @@ subroutine stop_forbidden_channel(name, channel)
 end subroutine stop_forbidden_channel
 
 
-subroutine init_eph_phonon_table(sbe, mp, kT_au, ac_qtyp_au)
+subroutine init_eph_phonon_table(sbe, mp, kT_au, ac_qtyp_au, ac_xi_ev)
     use sbe_superres_ssbe, only: bose_factor, mev_to_ha, s_material_params
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
@@ -244,21 +245,27 @@ subroutine init_eph_phonon_table(sbe, mp, kT_au, ac_qtyp_au)
     ! Laux; graphene: Hwang-Das Sarma). Removes the sub-optical-phonon
     ! cooling freeze-out.
     real(8), intent(in), optional :: ac_qtyp_au
+    ! substrate-dependent DP override (sbe_eph_ac_xi_ev; graphene use-case)
+    real(8), intent(in), optional :: ac_xi_ev
     integer :: np, p, nadd
-    real(8) :: wsum, hw_ac_mev, wraw_ac, q_cm, cs_au
+    real(8) :: wsum, hw_ac_mev, wraw_ac, q_cm, cs_au, xi_ev
     real(8), parameter :: BOHR_CM = 0.52917721067d-8, V_AU_CMPS = 2.18769126364d8
 
     np = mp%eph_nph
     nadd = 0
     hw_ac_mev = 0d0; wraw_ac = 0d0
     if (present(ac_qtyp_au)) then
-        if (ac_qtyp_au > 0d0 .and. mp%eph_ac_xi_ev > 0d0) then
+        xi_ev = mp%eph_ac_xi_ev
+        if (present(ac_xi_ev)) then
+            if (ac_xi_ev > 0d0) xi_ev = ac_xi_ev     ! substrate override
+        end if
+        if (ac_qtyp_au > 0d0 .and. xi_ev > 0d0) then
             nadd = 1
             cs_au = mp%eph_ac_cs_cmps / V_AU_CMPS
             hw_ac_mev = cs_au * ac_qtyp_au * 27.211386245988d3   ! Ha -> meV
             q_cm = ac_qtyp_au / BOHR_CM
             ! raw weight in the table convention D[1e8 eV/cm]^2 / hw[meV]
-            wraw_ac = (mp%eph_ac_xi_ev * q_cm / 1d8)**2 / max(hw_ac_mev, 1d-12)
+            wraw_ac = (xi_ev * q_cm / 1d8)**2 / max(hw_ac_mev, 1d-12)
         end if
     end if
     sbe%eph_nph = np + nadd
@@ -296,6 +303,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
                              yn_sbe_auger, sbe_auger_c_cm6s, sbe_auger_n_gate_cm3, &
                              sbe_ring_vq_floor, yn_sbe_ii_fk_soften, sbe_ii_fk_mu, &
                              sbe_ii_phassist, yn_sbe_ii_holes, yn_sbe_eph_acoustic, &
+                             sbe_eph_ac_xi_ev, &
                              num_kgrid
     use sbe_superres_ssbe, only: bose_factor, s_material_params, &
                                  get_material_params, MAT_SUPPORTED
@@ -681,10 +689,19 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
                     if (num_kgrid(iid) > 1) qt = min(qt, bl / dble(num_kgrid(iid)))
                 end do
                 if (qt >= huge(1d0)) qt = 0d0
-                call init_eph_phonon_table(sbe, mp, kB_au * sbe_eph_temperature_k, ac_qtyp_au=qt)
-                if (lprint) write(*,'(a,f7.3,a)') &
-                    '#   A4 acoustic mode appended: hw_ac = ', &
-                    sbe%eph_hw(sbe%eph_nph)*au_ev*1d3, ' meV (grid-resolved q)'
+                call init_eph_phonon_table(sbe, mp, kB_au * sbe_eph_temperature_k, &
+                                            ac_qtyp_au=qt, ac_xi_ev=sbe_eph_ac_xi_ev)
+                sbe%eph_ip_ac = sbe%eph_nph          ! the appended acoustic mode
+                if (lprint) then
+                    write(*,'(a,f7.3,a)') &
+                        '#   A4 acoustic mode appended: hw_ac = ', &
+                        sbe%eph_hw(sbe%eph_nph)*au_ev*1d3, ' meV (grid-resolved q)'
+                    if (sbe_eph_ac_xi_ev > 0d0) write(*,'(a,f6.2,a)') &
+                        '#   A4 DP OVERRIDE from input: Xi_d = ', sbe_eph_ac_xi_ev, &
+                        ' eV (substrate-dependent)'
+                    write(*,'(a)') '#   A4 screening: TF factor [q/(q+q_TF)]^2 from the'
+                    write(*,'(a)') '#   instantaneous carrier density (mandatory small-q cut).'
+                end if
             end block
         else
             call init_eph_phonon_table(sbe, mp, kB_au * sbe_eph_temperature_k)
@@ -2138,8 +2155,8 @@ end subroutine apply_eph_relaxation
 subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
     use sbe_superres_ssbe, only: eph_interk_dpop, ii_interk_dpop, auger_interk_dpop, &
                                  rana_auger_dpop, mp_grid_triple, get_material_params, &
-                                 s_material_params, build_vq_table, t_ring_opts, &
-                                 debye_kappa2, tf_kappa2_degenerate, fit_fermi_dirac
+                                 s_material_params, build_vq_table, build_acscreen_table, &
+                                 t_ring_opts, debye_kappa2, tf_kappa2_degenerate, fit_fermi_dirac
     use eigen_lapack, only: eigen_zheev
     use communication, only: comm_summation
     use salmon_global, only: num_kgrid, epm_material, sbe_eph_temperature_k
@@ -2156,7 +2173,9 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
     real(8) :: a2half, pcoset, resid, maxresid, sig, rnet
     real(8) :: eps_inf, qtf2, wp2, lambda2, q2reg, n_val, kf, blen2, kt_au
     real(8),    allocatable :: eval_loc(:,:), f_loc(:,:), eval_all(:,:), f_all(:,:)
-    real(8),    allocatable :: dpop(:,:), dpop2(:,:), dpop_loc(:,:), gout(:,:)
+    real(8),    allocatable :: dpop(:,:), dpop2(:,:), dpop_loc(:,:), gout(:,:), actab(:)
+    integer :: ipol_use, ipac_use
+    real(8) :: kappa2_c, pnorm
     complex(8), allocatable :: U_loc(:,:,:)
     real(8)    :: eigen_active(sbe%n_active_bands), evals(sbe%n_active_bands)
     complex(8) :: p_active(sbe%n_active_bands, sbe%n_active_bands, 3)
@@ -2172,6 +2191,7 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
     ic = sbe%nv_act + 1
     a2half = 0.5d0 * dot_product(Ac, Ac)
     sig    = max(sbe%eph_sigma_au, 2d-3)
+    kappa2_c = 0d0
 
     allocate(eval_loc(nba,nk), f_loc(nba,nk), eval_all(nba,nk), f_all(nba,nk))
     allocate(dpop(nba,nk), U_loc(nba,nba, sbe%ik_min:sbe%ik_max))
@@ -2231,7 +2251,8 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
     ! ---- II/Auger screening context + the B1 vq table (also reused by A3) ---
     mp = get_material_params(epm_material)
     if ((sbe%flag_impact .or. sbe%flag_auger) .and. .not. sbe%flag_rana2d &
-        .or. (sbe%flag_eph .and. mp%found .and. mp%eph_polar)) then
+        .or. (sbe%flag_eph .and. mp%found .and. mp%eph_polar) &
+        .or. (sbe%flag_eph .and. sbe%eph_ip_ac > 0)) then
         eps_inf = merge(mp%eps_inf, 1d0, mp%found)
         n_val   = dble(gs%ne) / max(gs%volume, 1d-30)
         kf      = (3d0 * pi * pi * n_val) ** (1d0 / 3d0)
@@ -2244,10 +2265,11 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
             q2reg = min(q2reg, blen2 / dble(max(num_kgrid(idir), 1))**2)
         end do
         q2reg = 0.25d0 * q2reg
-        ! dynamic free-carrier lambda^2(n(t)) -- GaAs registry gate; A8: use the
-        ! CARRIER temperature from an FD fit of the gathered CB distribution
-        ! when carriers exist (Debye ~ n/kT overestimates for a hot plasma).
-        if (mp%found .and. mp%dyn_lambda_ok .and. ic <= nba) then
+        ! Shared instantaneous free-carrier screen kappa^2 = min(Debye, TF) on
+        ! the gathered CB density with the FD-fit carrier temperature (A8).
+        ! Consumers: the GaAs lambda^2(n,T_c) in |V(q)|^2 (registry-gated) and
+        ! the MANDATORY A4 acoustic TF factor [q/(q+q_TF)]^2 (all materials).
+        if ((mp%found .and. mp%dyn_lambda_ok .or. sbe%eph_ip_ac > 0) .and. ic <= nba) then
             block
                 real(8) :: n_exc_au, ntot, etot, beta, muf
                 real(8), allocatable :: ecb(:), fcb(:), ftgt(:)
@@ -2274,13 +2296,15 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
                         call fit_fermi_dirac(ncb, ecb, ntot, etot, beta, muf, ftgt, okf)
                         if (okf .and. beta > 1d-12) kt_au = max(kt_au, 1d0 / beta)
                     end if
-                    lambda2 = min(debye_kappa2(n_exc_au, mp%eps0, kt_au), &
-                                  tf_kappa2_degenerate(n_exc_au, mp%eps0))
-                    if (.not. lam_printed .and. lambda2 > 1d-4 .and. sbe%irank == 0) then
+                    kappa2_c = min(debye_kappa2(n_exc_au, mp%eps0, kt_au), &
+                                   tf_kappa2_degenerate(n_exc_au, mp%eps0))
+                    if (mp%dyn_lambda_ok) lambda2 = kappa2_c
+                    if (.not. lam_printed .and. kappa2_c > 1d-4 .and. sbe%irank == 0) then
                         write(*, '(a,es12.4,a,es12.4,a,f8.1,a)') &
-                            '# ring II/Auger: dynamic free-carrier screen, lambda^2 = ', &
-                            lambda2, ' a.u. at n_exc = ', n_exc_au * sbe%au_dens_cm3, &
-                            ' cm^-3, T_c = ', kt_au / kB_au, ' K (Debye/TF crossover)'
+                            '# free-carrier screen active: kappa^2 = ', &
+                            kappa2_c, ' a.u. at n_exc = ', n_exc_au * sbe%au_dens_cm3, &
+                            ' cm^-3, T_c = ', kt_au / kB_au, ' K (Debye/TF; -> lambda^2'// &
+                            ' and/or the acoustic [q/(q+q_TF)]^2 cut)'
                         lam_printed = .true.
                     end if
                 end if
@@ -2298,20 +2322,49 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
     ! ---- channel 1: inter-k e-ph (+ A3 screened Frohlich weight, polar LO) --
     if (sbe%flag_eph .and. sbe%eph_nph > 0) then
         allocate(gout(nba, nk))
-        if (mp%found .and. mp%eph_polar .and. allocated(opts%vq_tab)) then
+        ! q-resolved weights: A3 polar Frohlich (unit-average-normalized -> the
+        ! cited nu_sat total rate is preserved, only the q-distribution becomes
+        ! small-q-peaked) and the A4 acoustic TF screen [q/(q+q_TF)]^2 from the
+        ! instantaneous carrier density (MANDATORY small-q cut -- CdS E1=14.5 eV
+        ! [Rode 1970] would otherwise blow up at n >= 1e18 cm^-3). Neutral
+        ! placeholders (index 0 / size 1) when a weight is inactive.
+        ipol_use = 0;  pnorm = 0d0;  ipac_use = 0
+        if ((mp%found .and. mp%eph_polar .and. allocated(opts%vq_tab)) &
+            .or. sbe%eph_ip_ac > 0) then
             if (.not. sbe%kmap_built) call build_kmap(sbe, gs)
         end if
-        if (mp%found .and. mp%eph_polar .and. allocated(opts%vq_tab) .and. sbe%kmap_ok) then
-            ! A3: screened Frohlich 1/q^2 weight on the polar-LO mode (mode 1),
-            ! normalized to a unit table average so the cited nu_sat total-rate
-            ! calibration is preserved (only the q-DISTRIBUTION changes).
-            call eph_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
-                     sbe%eph_ecbm_au, sbe%eph_evbm_au, sbe%eph_nph, &
-                     sbe%eph_hw(1:sbe%eph_nph), sbe%eph_wrel(1:sbe%eph_nph), &
-                     sbe%eph_nb(1:sbe%eph_nph), sbe%eph_nusat_au, sbe%eph_eps0_au, &
-                     sbe%eph_n, sbe%eph_sigma_au, tau, dpop, gout, &
-                     kidx=sbe%kmap_idx, kn=sbe%kmap_n, pol_tab=opts%vq_tab, &
-                     pol_norm=sum(opts%vq_tab)/dble(size(opts%vq_tab)), ip_polar=1)
+        if (sbe%kmap_ok) then
+            if (mp%found .and. mp%eph_polar .and. allocated(opts%vq_tab)) then
+                ipol_use = 1
+                pnorm = sum(opts%vq_tab) / dble(size(opts%vq_tab))
+            end if
+            if (sbe%eph_ip_ac > 0) ipac_use = sbe%eph_ip_ac
+        end if
+        if (ipac_use > 0) then
+            allocate(actab((2*num_kgrid(1)-1)*(2*num_kgrid(2)-1)*(2*num_kgrid(3)-1)))
+            call build_acscreen_table(num_kgrid, gs%b_matrix, &
+                                      sqrt(max(kappa2_c, 0d0)), actab)
+        else
+            allocate(actab(1));  actab = 1d0
+        end if
+        if (ipol_use > 0 .or. ipac_use > 0) then
+            if (ipol_use > 0) then
+                call eph_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
+                         sbe%eph_ecbm_au, sbe%eph_evbm_au, sbe%eph_nph, &
+                         sbe%eph_hw(1:sbe%eph_nph), sbe%eph_wrel(1:sbe%eph_nph), &
+                         sbe%eph_nb(1:sbe%eph_nph), sbe%eph_nusat_au, sbe%eph_eps0_au, &
+                         sbe%eph_n, sbe%eph_sigma_au, tau, dpop, gout, &
+                         kidx=sbe%kmap_idx, kn=sbe%kmap_n, pol_tab=opts%vq_tab, &
+                         pol_norm=pnorm, ip_polar=1, ac_tab=actab, ip_ac=ipac_use)
+            else
+                call eph_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
+                         sbe%eph_ecbm_au, sbe%eph_evbm_au, sbe%eph_nph, &
+                         sbe%eph_hw(1:sbe%eph_nph), sbe%eph_wrel(1:sbe%eph_nph), &
+                         sbe%eph_nb(1:sbe%eph_nph), sbe%eph_nusat_au, sbe%eph_eps0_au, &
+                         sbe%eph_n, sbe%eph_sigma_au, tau, dpop, gout, &
+                         kidx=sbe%kmap_idx, kn=sbe%kmap_n, &
+                         ac_tab=actab, ip_ac=ipac_use)
+            end if
         else
             call eph_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
                      sbe%eph_ecbm_au, sbe%eph_evbm_au, sbe%eph_nph, &
@@ -2319,6 +2372,7 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
                      sbe%eph_nb(1:sbe%eph_nph), sbe%eph_nusat_au, sbe%eph_eps0_au, &
                      sbe%eph_n, sbe%eph_sigma_au, tau, dpop, gout)
         end if
+        deallocate(actab)
         call ring_ledger(sbe, 1, nba, nk, ic, eval_all, dpop)
         call ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
         deallocate(gout)
