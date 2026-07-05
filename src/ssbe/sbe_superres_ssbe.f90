@@ -204,6 +204,9 @@ module sbe_superres_ssbe
         logical       :: eph_ok       = .false.   ! e-ph rate (nu_sat) cited?
         logical       :: eeh_ok       = .false.   ! carrier-carrier rate cited?
         logical       :: coulomb_ok   = .false.   ! dielectric for Coulomb cited?
+        ! A7: Sigma^HF uses the 2D sheet kernel V(q) = 2 pi/(eps A (q+kappa))
+        ! instead of the 3D 4 pi/(eps Omega q^2) (graphene: 2D slab geometry).
+        logical       :: coulomb_2d   = .false.
         logical       :: auger_ok     = .false.   ! Auger coeff C cited?
         ! Auger recombination (Sec 13): R = C n^3, density-gated above n_gate.
         real(8)       :: auger_c_cm6s    = 0d0    ! Auger coefficient C [cm^6/s]
@@ -435,8 +438,11 @@ contains
             !   * carrier-carrier (eeh_ok=.false.): no cited graphene FD-thermalization
             !     RATE (the graphene e-e coupling alpha=2.2/eps_eff is a coupling, not
             !     a rate); the gapless e-e/CM physics is the Rana branch.
-            !   * Coulomb HF (coulomb_ok=.false.): needs the 2D kernel V(q)=2*pi*e^2/
-            !     (eps*q), not the 3D 4*pi/(eps*q^2) used by the current Sigma^HF.
+            !   * Coulomb HF: ENABLED as the 2D SHEET kernel (A7, coulomb_2d):
+            !     V_2D(q) = 2 pi e^2/(eps_r A (q + kappa)) with the substrate
+            !     eps_r (default = the R07 benchmark 10; override via
+            !     sbe_coulomb_epsilon) -- unlocks the Dirac-velocity/excitonic
+            !     HF renormalization on the cone.
             !
             ! Also: a Kuhn-Zurek (single-particle wave-packet) dephasing is
             ! UNPHYSICAL for gapless Dirac carriers (coherence loss is many-body) --
@@ -450,7 +456,11 @@ contains
             ! 2D Rana Auger/CM [R07] -- cited & enabled (ring-gated; see above)
             mp%auger_ok = .true.;  mp%auger_2d_rana = .true.
             mp%rana_vf_au = GRAPH_VF_AU;  mp%rana_eps_r = GRAPH_RANA_EPS
-            mp%eeh_ok = .false.; mp%coulomb_ok = .false.
+            mp%eeh_ok = .false.
+            ! A7: 2D-sheet Sigma^HF enabled; eps_r = the substrate dielectric
+            ! (R07 benchmark 10 by default, sbe_coulomb_epsilon overrides).
+            mp%coulomb_ok = .true.;  mp%coulomb_2d = .true.
+            mp%eps0 = GRAPH_RANA_EPS;  mp%eps_inf = GRAPH_RANA_EPS
             ! non-polar optical deformation-potential modes (no Frohlich LO branch)
             mp%eph_polar = .false.
             mp%eph_nph = 2
@@ -1102,14 +1112,15 @@ contains
     ! dN_lin = |R-G| * area * nk * tau in population units. rnet_out [a.u.^-2
     ! a.u.t^-1] is returned for the tau_r diagnostic print.
     ! =====================================================================
-    subroutine rana_auger_dpop(nk, nba, f, occ_max, iv, ic, area, kT, vf, &
+    subroutine rana_auger_dpop(nk, nba, eval, f, occ_max, iv, ic, area, kT, vf, &
                                eps_r, tau, dpop, rnet_out)
         implicit none
         integer, intent(in)  :: nk, nba, iv, ic
-        real(8), intent(in)  :: f(nba, nk), occ_max, area, kT, vf, eps_r, tau
+        real(8), intent(in)  :: eval(nba, nk), f(nba, nk), occ_max, area, kT, vf, eps_r, tau
         real(8), intent(out) :: dpop(nba, nk), rnet_out
         real(8) :: n2d, p2d, mu_c, mu_v, rrec, rgen, rnet
         real(8) :: avail, room, dn_lin, cap, dn
+        real(8) :: ec_bar, ev_bar, e_rel, we, sw, dn2, wgt
         integer :: a, ik
         real(8), parameter :: n_eps = 1d-14
 
@@ -1170,6 +1181,72 @@ contains
                     dpop(a, ik) = dpop(a, ik) + dn * (occ_max - f(a, ik)) / room
                 end do
             end do
+        end if
+
+        ! ---- A6: energy bookkeeping -- the pair energy goes to a THIRD carrier.
+        ! Recombination (CCCV): the mean electronic energy released per pair,
+        ! E_rel = Ec_bar (f-weighted CB mean, the removed distribution) minus
+        ! Ev_bar (room-weighted VB mean, the refilled states), is absorbed by a
+        ! second CB electron -> shuffle dn2 of CB population UPWARD by E_rel
+        ! with a thermal-width Gaussian energy match. Generation (CVCC) is the
+        ! mirror: the created pair's energy is TAKEN from a hot electron ->
+        ! shuffle DOWNWARD. Trace-neutral by construction; per-state caps keep
+        ! the map CPTP; skipped gracefully when the target energy has no phase
+        ! space inside the active window (the energy leaves the basis -- the
+        ! honest statement of a finite band set).
+        ! energy-match width: thermal, but never narrower than ~3 mean level
+        ! spacings of the discrete CB spectrum (else the Gaussian falls between
+        ! grid levels and the shuffle silently vanishes on coarse meshes).
+        we = max(kT, 1d-4, &
+                 3d0 * (maxval(eval(ic:nba,:)) - minval(eval(ic:nba,:))) &
+                     / dble(max((nba - ic + 1) * nk, 1)))
+        if (rnet > 0d0) then
+            ec_bar = sum(eval(ic:nba,:) * f(ic:nba,:)) / max(avail, n_eps)
+            ev_bar = sum(eval(1:iv,:) * (occ_max - f(1:iv,:))) / max(room, n_eps)
+            e_rel  = ec_bar - ev_bar
+            sw = 0d0
+            do ik = 1, nk
+                do a = ic, nba
+                    sw = sw + (occ_max - f(a,ik)) &
+                            * exp(-0.5d0*((eval(a,ik) - (ec_bar + e_rel))/we)**2)
+                end do
+            end do
+            dn2 = min(dn, 0.999d0*max(avail - dn, 0d0), &
+                      sw * max(1d0 - dn/max(room,n_eps), 0d0))
+            if (dn2 > n_eps .and. sw > n_eps) then
+                do ik = 1, nk
+                    do a = ic, nba
+                        wgt = (occ_max - f(a,ik)) &
+                            * exp(-0.5d0*((eval(a,ik) - (ec_bar + e_rel))/we)**2)
+                        dpop(a,ik) = dpop(a,ik) - dn2 * f(a,ik) / avail &
+                                                + dn2 * wgt / sw
+                    end do
+                end do
+            end if
+        else
+            ! generation: created CB electrons land ~room-weighted (ec_bar) and
+            ! the absorbed energy e_rel comes from electrons near ec_bar+e_rel.
+            ec_bar = sum(eval(ic:nba,:) * (occ_max - f(ic:nba,:))) / max(room, n_eps)
+            ev_bar = sum(eval(1:iv,:) * f(1:iv,:)) / max(avail, n_eps)
+            e_rel  = ec_bar - ev_bar
+            sw = 0d0
+            do ik = 1, nk
+                do a = ic, nba
+                    sw = sw + f(a,ik) &
+                            * exp(-0.5d0*((eval(a,ik) - (ec_bar + e_rel))/we)**2)
+                end do
+            end do
+            dn2 = min(dn, sw, 0.999d0*max(room - dn, 0d0))
+            if (dn2 > n_eps .and. sw > n_eps) then
+                do ik = 1, nk
+                    do a = ic, nba
+                        wgt = f(a,ik) &
+                            * exp(-0.5d0*((eval(a,ik) - (ec_bar + e_rel))/we)**2)
+                        dpop(a,ik) = dpop(a,ik) - dn2 * wgt / sw &
+                                                + dn2 * (occ_max - f(a,ik)) / max(room,n_eps)
+                    end do
+                end do
+            end if
         end if
     end subroutine rana_auger_dpop
 
@@ -1669,6 +1746,8 @@ contains
 
         dpop = 0d0
         if (iv < 1 .or. ic > nba .or. ic <= iv) return
+        ! empty conduction band -> Auger needs two occupied CB sources; no-op.
+        if (maxval(f(ic:nba, :)) < occ_eps) return
         i1s = 1;  if (present(i1_lo)) i1s = max(i1_lo, 1)
         i1e = nk; if (present(i1_hi)) i1e = min(i1_hi, nk)
         call ring_opts_unpack(opts, havetab, vfloor, fk, pa, nphl, prefh, evbm, &

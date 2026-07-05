@@ -26,13 +26,19 @@ program test_rana_auger_cptp
     integer, parameter :: NK = 64, NBA = 2, IV = 1, IC = 2
     real(8), parameter :: OCC = 2d0                       ! scalar occupation
 
-    real(8) :: f(NBA, NK), dpop(NBA, NK), rnet
+    real(8) :: f(NBA, NK), dpop(NBA, NK), rnet, eval(NBA, NK), ebal
     real(8) :: kT, area, n_target, ftot_cb, dsum, tau, tau_ps
     real(8) :: avail, room
-    integer :: ik, nfail
+    integer :: ik, nfail, a
 
     nfail = 0
     kT   = 300d0 * KB_HA_K
+    ! Dirac-like two-band spectrum: VB mirrored below zero, CB spread above --
+    ! gives the A6 energy shuffle genuine phase space above the CB mean.
+    do a = 1, NK
+        eval(IV, a) = -0.10d0 * dble(a) / dble(NK)
+        eval(IC, a) = +0.30d0 * dble(a) / dble(NK)   ! wide CB: room for the A6 shuffle
+    end do
     ! Pick the 2D cell area so that a convenient per-k population gives
     ! n = 1e12 cm^-2: n_au = ftot_cb/(nk*area).
     n_target = 1.0d12 * A0_CM**2                          ! a.u.^-2
@@ -43,17 +49,20 @@ program test_rana_auger_cptp
     ! ---- (6) EMPTY: full valence, empty conduction -> no-op --------------
     f(IV, :) = OCC
     f(IC, :) = 0d0
-    call rana_auger_dpop(NK, NBA, f, OCC, IV, IC, area, kT, V_F_AU, 10d0, &
+    call rana_auger_dpop(NK, NBA, eval, f, OCC, IV, IC, area, kT, V_F_AU, 10d0, &
                          tau, dpop, rnet)
     if (maxval(abs(dpop)) > 1d-14) call bad('empty CB is not a no-op')
 
     ! ---- (4) NET RECOMBINATION of an excess e-h pair population ----------
     ! n = p = 1e12 cm^-2 spread uniformly (equal hole count in the VB).
-    do ik = 1, NK
-        f(IC, ik) = ftot_cb / dble(NK)
-        f(IV, ik) = OCC - ftot_cb / dble(NK)
+    ! populate the LOW quarter of the CB (a cooled distribution): the A6
+    ! third-carrier target Ec_bar + E_rel then lies INSIDE the band window.
+    f(IC, :) = 0d0
+    do ik = 1, NK/4
+        f(IC, ik) = ftot_cb / dble(NK/4)
     end do
-    call rana_auger_dpop(NK, NBA, f, OCC, IV, IC, area, kT, V_F_AU, 10d0, &
+    f(IV, :) = OCC - ftot_cb / dble(NK)
+    call rana_auger_dpop(NK, NBA, eval, f, OCC, IV, IC, area, kT, V_F_AU, 10d0, &
                          tau, dpop, rnet)
     ! (1) trace conservation
     dsum = sum(dpop)
@@ -73,6 +82,23 @@ program test_rana_auger_cptp
         ' ps  [R07 window 0.5..3 ps]'
     if (tau_ps < 0.5d0 .or. tau_ps > 3.0d0) &
         call bad('implied lifetime outside the R07 benchmark window')
+    ! A6: energy bookkeeping -- the third-carrier shuffle must cancel most of
+    ! the electronic energy the naive pair transfer would have destroyed.
+    ! Without the shuffle, sum(E*dpop) = -(Ec_bar - Ev_bar)*dn < 0 strictly.
+    block
+        real(8) :: erel_t, dn_t
+        dn_t = -sum(dpop(IV, :))                       ! pairs moved (VB gain)
+        erel_t = sum(eval(IC,:)*f(IC,:))/max(sum(f(IC,:)),1d-30) &
+               - sum(eval(IV,:)*(OCC-f(IV,:)))/max(sum(OCC-f(IV,:)),1d-30)
+        ebal = sum(eval * dpop)
+        ! naive pair transfer alone would give ebal ~ -dn*erel_t; the shuffle
+        ! must cancel most of it (Gaussian-width residual allowed)
+        if (abs(ebal) > 0.35d0 * abs(dn_t * erel_t)) &
+            call bad('A6: energy not balanced by the third-carrier shuffle')
+    end block
+    ! trace must STILL be exact with the shuffle on
+    if (abs(sum(dpop)) > 1d-12 * max(sum(abs(dpop)), 1d-300)) &
+        call bad('A6: shuffle broke trace conservation')
 
     ! ---- (3) EQUILIBRIUM FIXED POINT: mu = 0 thermal populations ----------
     ! Same THERMAL pair density on both branches (electrons in CB = holes in
@@ -85,7 +111,7 @@ program test_rana_auger_cptp
             f(IC, ik) = fth
             f(IV, ik) = OCC - fth
         end do
-        call rana_auger_dpop(NK, NBA, f, OCC, IV, IC, area, kT, V_F_AU, 10d0, &
+        call rana_auger_dpop(NK, NBA, eval, f, OCC, IV, IC, area, kT, V_F_AU, 10d0, &
                              tau, dpop, rnet)
         ! dpop must be tiny relative to what the same tau does to the excess
         ! case (rnet is the residual of the R = G cancellation; the mu
@@ -99,7 +125,7 @@ program test_rana_auger_cptp
         f(IC, ik) = ftot_cb / dble(NK)
         f(IV, ik) = OCC - ftot_cb / dble(NK)
     end do
-    call rana_auger_dpop(NK, NBA, f, OCC, IV, IC, area, kT, V_F_AU, 10d0, &
+    call rana_auger_dpop(NK, NBA, eval, f, OCC, IV, IC, area, kT, V_F_AU, 10d0, &
                          1d30, dpop, rnet)
     avail = sum(f(IC, :))
     room  = dble(IV) * OCC * dble(NK) - sum(f(1:IV, :))

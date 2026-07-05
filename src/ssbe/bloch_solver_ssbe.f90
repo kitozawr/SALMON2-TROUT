@@ -157,6 +157,10 @@ module bloch_solver_ssbe
 
         real(8) :: coul_pref     = 0d0  ! strength * 4 pi / (eps * Omega_cell * Nk)
         real(8) :: coul_screen2  = 0d0  ! kappa^2 [1/Bohr^2] (Yukawa regulariser)
+        ! A7: 2D-sheet exchange kernel (graphene): V_2D = 2 pi/(eps A Nk (q+kappa))
+        logical :: coul_2d       = .false.
+        real(8) :: coul_pref2d   = 0d0  ! strength * 2 pi / (eps * A_cell * Nk)
+        real(8) :: coul_screen1  = 0d0  ! kappa [1/Bohr] (2D linear screening)
         integer :: icomm         = 0    ! MPI communicator (for the non-local exchange sum)
         complex(8), allocatable :: sigma_hf(:, :, :) ! (nba, nba, ik_min:ik_max) exchange Sigma
 
@@ -610,6 +614,26 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
         sbe%coul_pref = sbe_coulomb_strength * 4d0 * pi &
                       / (max(coul_eps_eff, 1d-12) * gs%volume * dble(gs%nk))
         sbe%coul_screen2 = sbe_coulomb_screen_au**2
+        ! A7: 2D-sheet kernel for slab materials (graphene): V_2D(q) =
+        ! 2 pi/(eps A Nk (q+kappa)), q = the IN-PLANE |k-q| (b3 = the vacuum
+        ! axis). Unlocks the Dirac-velocity / excitonic HF renormalization.
+        sbe%coul_2d = mp%found .and. mp%coulomb_2d
+        if (sbe%coul_2d) then
+            block
+                real(8) :: b3len, area2d
+                b3len = sqrt(dot_product(gs%b_matrix(3,1:3), gs%b_matrix(3,1:3)))
+                if (b3len < 1d-12 .or. &
+                    abs(gs%b_matrix(3,1)) + abs(gs%b_matrix(3,2)) > 1d-8*b3len) then
+                    write(*,'(a)') '# ERROR: 2D Sigma^HF needs a slab cell (b3 || z'
+                    write(*,'(a)') '#        out-of-plane) and the b-matrix header.'
+                    error stop 'A7: 2D Coulomb needs a 2D slab geometry'
+                end if
+                area2d = gs%volume * b3len / (2d0 * pi)
+                sbe%coul_pref2d = sbe_coulomb_strength * 2d0 * pi &
+                                / (max(coul_eps_eff, 1d-12) * area2d * dble(gs%nk))
+                sbe%coul_screen1 = max(sbe_coulomb_screen_au, 0d0)
+            end block
+        end if
         ! sbe%icomm already set above (used by all collectives, not just Coulomb)
         if (sbe%n_active_bands > 0) &
             allocate(sbe%sigma_hf(1:sbe%n_active_bands, 1:sbe%n_active_bands, &
@@ -628,7 +652,11 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
         end if
         if (lprint) then
             write(*, '(a)') '# Coulomb HF (Golde-Kira-Meier-Koch SBE) enabled:'
-            write(*, '(a,ES12.5)') '#   exchange prefactor 4pi*str/(eps*Omega*Nk) = ', sbe%coul_pref
+            if (sbe%coul_2d) then
+                write(*, '(a,ES12.5)') '#   A7 2D-SHEET kernel: 2pi*str/(eps*A*Nk) = ', sbe%coul_pref2d
+            else
+                write(*, '(a,ES12.5)') '#   exchange prefactor 4pi*str/(eps*Omega*Nk) = ', sbe%coul_pref
+            end if
             write(*, '(a,f8.3,a,ES12.5,a)') '#   eps = ', coul_eps_eff, &
                 ', screening kappa^2 = ', sbe%coul_screen2, ' 1/Bohr^2'
             write(*, '(a)') '#   NOTE: non-k-local mean field, O(Nk^2) per step (frozen over dt)'
@@ -1533,6 +1561,16 @@ pure function coulomb_kernel(sbe, gs, ik, iq) result(vkq)
     dkx = dr(1)*gs%b_matrix(1,1) + dr(2)*gs%b_matrix(2,1) + dr(3)*gs%b_matrix(3,1)
     dky = dr(1)*gs%b_matrix(1,2) + dr(2)*gs%b_matrix(2,2) + dr(3)*gs%b_matrix(3,2)
     dkz = dr(1)*gs%b_matrix(1,3) + dr(2)*gs%b_matrix(2,3) + dr(3)*gs%b_matrix(3,3)
+    if (sbe%coul_2d) then
+        ! A7: 2D sheet -- IN-PLANE |q|, V ~ 1/(q + kappa) (linear 2D screening)
+        q2 = dkx*dkx + dky*dky
+        if (q2 < 1d-12) then
+            vkq = 0d0
+        else
+            vkq = sbe%coul_pref2d / (sqrt(q2) + sbe%coul_screen1)
+        end if
+        return
+    end if
     q2 = dkx*dkx + dky*dky + dkz*dkz
     if (q2 < 1d-12) then
         vkq = 0d0                          ! exclude q = k (the V(0) self term)
@@ -2430,9 +2468,9 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
 
     ! ---- channel 4: graphene 2D Rana Auger/CM -------------------------------
     if (sbe%flag_rana2d .and. iv >= 1 .and. ic <= nba) then
-        call rana_auger_dpop(nk, nba, f_all, sbe%occ_max, iv, ic, sbe%rana_area_au, &
-                             sbe%rana_kt_au, sbe%rana_vf_au, sbe%rana_eps_r, tau, &
-                             dpop, rnet)
+        call rana_auger_dpop(nk, nba, eval_all, f_all, sbe%occ_max, iv, ic, &
+                             sbe%rana_area_au, sbe%rana_kt_au, sbe%rana_vf_au, &
+                             sbe%rana_eps_r, tau, dpop, rnet)
         call ring_ledger(sbe, 4, nba, nk, ic, eval_all, dpop)
         call ring_apply_dpop(sbe, gs, U_loc, dpop, tau)
     end if
