@@ -129,7 +129,12 @@ program test_material_registry
     call chk('graphene Rana v_F = 1e8 cm/s (a.u.)', gr%rana_vf_au, 1.0d8/2.18769126364d8, 1d-12)
     call chk('graphene Rana eps_r = 10 (R07 Fig.4)', gr%rana_eps_r, 10.0d0)
     if (gr%eeh_ok)     call bad('graphene carrier-carrier must be forbidden (no cited FD rate)')
-    if (gr%coulomb_ok) call bad('graphene Coulomb HF must be forbidden (needs 2D V(q), not yet wired)')
+    ! A7: graphene Sigma^HF now ENABLED as the 2D sheet kernel (eps_r substrate)
+    if (.not. gr%coulomb_ok) call bad('graphene Coulomb should be ENABLED (A7 2D sheet kernel)')
+    if (.not. gr%coulomb_2d) call bad('graphene Coulomb must be flagged 2D (sheet kernel)')
+    call chk('graphene eps_r (substrate, R07 benchmark)', gr%eps0, 10.0d0)
+    if (ga%coulomb_2d .or. si%coulomb_2d .or. cds%coulomb_2d) &
+        call bad('bulk materials must use the 3D Coulomb kernel')
     ! the bulk materials must NOT carry the 2D flag; Si must NOT take the
     ! dynamic free-carrier lambda (Burt [L90]: lambda = 0 is the Si physics),
     ! GaAs DOES (registry dyn_lambda_ok gates the ring-kernel lambda^2(n(t))).

@@ -24,7 +24,7 @@ injection → intervalley transfer → cooling — with every channel contributi
 | nonlocal II `yn_sbe_impact_ionization` | ✅ Stobbe quartic | ✅ Keldysh quadratic | ✅ E_th cited, **prefactor = FIT** (explicit `sbe_ii_prefactor`) | 🚫 gapless: no threshold law — CM is the Rana channel |
 | Auger `yn_sbe_auger` | ✅ ring (II time-reverse, no extra C) | ✅ ring | ✅ ring (inherits the II fit scale) | ✅ **2D Rana [R07]** (quasi-Fermi R−G) |
 | carrier-carrier `yn_sbe_eeh` | ✅ | ✅ | 🚫 no cited CdS rate (provenance gate) | 🚫 no cited rate |
-| Coulomb Σ^HF `yn_sbe_coulomb` | ✅ | ✅ | ✅ (ε₀ = 8.9) | 🚫 needs the 2D kernel 2π/(εq), not wired |
+| Coulomb Σ^HF `yn_sbe_coulomb` | ✅ | ✅ | ✅ (ε₀ = 8.9) | ✅ **2D sheet kernel** 2π/(ε_r·A·(q+κ)), substrate ε_r |
 | dynamic λ²(n(t)) in the ring II/Auger | ✅ auto (registry) | — (λ=0 **correct**, Burt [L90]) | — | — |
 
 **The three deliberate absences (the subtlety of a maximally-loaded *valid* run):**
@@ -102,9 +102,13 @@ ffmpeg -framerate 4 -pattern_type glob -i 'plots/*_bz3d_t*.png' si_rolling.mp4
 - **Grids must match** between the GS and SBE steps (`nelec/nstate/num_kgrid`).
   Odd grids (9³, and 7×7×5 for CdS) put Γ on the mesh — sharper injection spots at
   ~1.4× the k-count of 8³.
-- **CdS `sbe_ii_prefactor = 2.0d12` is a FIT parameter** (E_th is cited, the
-  prefactor is not — the registry sentinel aborts without an explicit value).
-  The demo value is the GaAs/Si scale; rescale before quantitative II claims.
+- **CdS `sbe_ii_prefactor = 1.03e12` is CALIBRATED** on our own BC1967 EPM bands
+  by the Stobbe golden-rule procedure (`tools/cds_ii_calibrate.py`, fit RMS 3%) —
+  the same standing as Stobbe's GaAs 2e12 (the registry sentinel still aborts
+  without an explicit value, by design).
+- **CdS acoustic (Rode E₁ = 14.5 eV) is ALWAYS TF-screened** `[q/(q+q_TF)]²` from
+  the instantaneous carrier density — the bare DP channel would be unphysical at
+  n ≥ 1e18 cm⁻³; screened, it is the fallback cooling below ħω_LO.
 - **Graphene ε_r**: the Rana rates default to the R07 benchmark substrate
   (ε_r = 10); on SiO₂ set `sbe_coulomb_epsilon = 4.0d0` (≈2× the Auger rate).
 - dt = 0.4 a.u. is fine for the population movie; for converged currents/HHG on
