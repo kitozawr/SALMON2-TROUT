@@ -270,9 +270,9 @@ contains
                     if (ik .ne. iik) stop "ik mismatch"
                     if (ib .ne. iib) stop "ib mismatch"
                     if (jb .ne. jjb) stop "jb mismatch"
-                    gs%p_tm_matrix(ib, jb, 1, ik) = dcmplx(tmp(1), tmp(2))
-                    gs%p_tm_matrix(ib, jb, 2, ik) = dcmplx(tmp(3), tmp(4))
-                    gs%p_tm_matrix(ib, jb, 3, ik) = dcmplx(tmp(5), tmp(6))
+                    gs%p_tm_matrix(ib, jb, 1, ik) = cmplx(tmp(1), tmp(2), 8)
+                    gs%p_tm_matrix(ib, jb, 2, ik) = cmplx(tmp(3), tmp(4), 8)
+                    gs%p_tm_matrix(ib, jb, 3, ik) = cmplx(tmp(5), tmp(6), 8)
                 end do
             end do
         end do
@@ -284,9 +284,9 @@ contains
                     if (ik .ne. iik) stop "ik mismatch"
                     if (ib .ne. iib) stop "ib mismatch"
                     if (jb .ne. jjb) stop "jb mismatch"
-                    gs%rvnl_tm_matrix(ib, jb, 1, ik) = dcmplx(tmp(1), tmp(2))
-                    gs%rvnl_tm_matrix(ib, jb, 2, ik) = dcmplx(tmp(3), tmp(4))
-                    gs%rvnl_tm_matrix(ib, jb, 3, ik) = dcmplx(tmp(5), tmp(6))
+                    gs%rvnl_tm_matrix(ib, jb, 1, ik) = cmplx(tmp(1), tmp(2), 8)
+                    gs%rvnl_tm_matrix(ib, jb, 2, ik) = cmplx(tmp(3), tmp(4), 8)
+                    gs%rvnl_tm_matrix(ib, jb, 3, ik) = cmplx(tmp(5), tmp(6), 8)
                 end do
             end do
         end do

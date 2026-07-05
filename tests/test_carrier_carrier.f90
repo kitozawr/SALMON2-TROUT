@@ -40,7 +40,7 @@ program test_carrier_carrier
         real(8) :: alpha
         alpha = 1d0 - exp(-nu*tau)
         call chk("coherence damped (1-alpha)", abs(rho(1,3)), &
-                 (1d0-alpha)*abs(dcmplx(0.2d0,0.1d0)), 1d-9)
+                 (1d0-alpha)*abs(cmplx(0.2d0,0.1d0, 8)), 1d-9)
     end block
     ! populations stay in [0,occ] and Hermiticity preserved
     do a = 1, n

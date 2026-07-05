@@ -1371,12 +1371,12 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
                 if (i == j) then
                     if (gs%occup(i, ik) > 0.5d0) then
                         ! Ground-state occupation: 2 (scalar bands) or 1 (spinor bands)
-                        sbe%rho(i, j, ik) = dcmplx(gs%occup(i, ik), 0.0d0)
+                        sbe%rho(i, j, ik) = cmplx(gs%occup(i, ik), 0.0d0, 8)
                     else
-                        sbe%rho(i, j, ik) = dcmplx(0.0d0, 0.0d0)
+                        sbe%rho(i, j, ik) = cmplx(0.0d0, 0.0d0, 8)
                     end if
                 else
-                    sbe%rho(i, j, ik) = dcmplx(0.0d0, 0.0d0)
+                    sbe%rho(i, j, ik) = cmplx(0.0d0, 0.0d0, 8)
                 end if
             end if
         end do; end do
@@ -1601,7 +1601,7 @@ subroutine compute_coulomb_selfenergy_allgather(sbe, gs)
                 in = sbe%active_idx(i)
                 rho_loc(i, j, ik) = sbe%rho(in, im, ik)
             end do
-            rho_loc(j, j, ik) = rho_loc(j, j, ik) - dcmplx(gs%occup(im, ik), 0d0)
+            rho_loc(j, j, ik) = rho_loc(j, j, ik) - cmplx(gs%occup(im, ik), 0d0, 8)
         end do
     end do
     call comm_summation(rho_loc, rho_all, nba * nba * sbe%nk, sbe%icomm)
@@ -1660,7 +1660,7 @@ subroutine compute_coulomb_selfenergy_ring(sbe, gs)
                 in = sbe%active_idx(i)
                 transit(i, j, jq) = sbe%rho(in, im, ik)
             end do
-            transit(j, j, jq) = transit(j, j, jq) - dcmplx(gs%occup(im, ik), 0d0)
+            transit(j, j, jq) = transit(j, j, jq) - cmplx(gs%occup(im, ik), 0d0, 8)
         end do
     end do
     do ik = sbe%ik_min, sbe%ik_max
@@ -1763,17 +1763,17 @@ subroutine apply_unitary_rotation(nba, rho, Omega)
 
     call eigen_zheev(Omega, evals, W)
 
-    call ZGEMM('C', 'N', nba, nba, nba, dcmplx(1d0, 0d0), W,  nba, rho, nba, dcmplx(0d0, 0d0), t1, nba)
-    call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0, 0d0), t1, nba, W,   nba, dcmplx(0d0, 0d0), t2, nba)
+    call ZGEMM('C', 'N', nba, nba, nba, cmplx(1d0, 0d0, 8), W,  nba, rho, nba, cmplx(0d0, 0d0, 8), t1, nba)
+    call ZGEMM('N', 'N', nba, nba, nba, cmplx(1d0, 0d0, 8), t1, nba, W,   nba, cmplx(0d0, 0d0, 8), t2, nba)
 
     do j = 1, nba
         do i = 1, nba
-            t2(i, j) = t2(i, j) * exp(dcmplx(0d0, -(evals(i) - evals(j))))
+            t2(i, j) = t2(i, j) * exp(cmplx(0d0, -(evals(i) - evals(j)), 8))
         end do
     end do
 
-    call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0, 0d0), W,  nba, t2, nba, dcmplx(0d0, 0d0), t1, nba)
-    call ZGEMM('N', 'C', nba, nba, nba, dcmplx(1d0, 0d0), t1, nba, W,  nba, dcmplx(0d0, 0d0), rho, nba)
+    call ZGEMM('N', 'N', nba, nba, nba, cmplx(1d0, 0d0, 8), W,  nba, t2, nba, cmplx(0d0, 0d0, 8), t1, nba)
+    call ZGEMM('N', 'C', nba, nba, nba, cmplx(1d0, 0d0, 8), t1, nba, W,  nba, cmplx(0d0, 0d0, 8), rho, nba)
 end subroutine apply_unitary_rotation
 
 
@@ -1813,8 +1813,8 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
     call eigen_zheev(H, evals, W)
 
     ! rho~ = U^dagger rho U
-    call ZGEMM('C', 'N', nba, nba, nba, dcmplx(1d0, 0d0), W,  nba, rho, nba, dcmplx(0d0, 0d0), t1, nba)
-    call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0, 0d0), t1, nba, W,   nba, dcmplx(0d0, 0d0), t2, nba)
+    call ZGEMM('C', 'N', nba, nba, nba, cmplx(1d0, 0d0, 8), W,  nba, rho, nba, cmplx(0d0, 0d0, 8), t1, nba)
+    call ZGEMM('N', 'N', nba, nba, nba, cmplx(1d0, 0d0, 8), t1, nba, W,   nba, cmplx(0d0, 0d0, 8), t2, nba)
 
     ! Exact Hadamard/Gaussian dephasing kernel (PSD for tau >= 0)
     if (sbe%flag_decoh) then
@@ -1880,8 +1880,8 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
     end if
 
     ! rho = U rho~ U^dagger
-    call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0, 0d0), W,  nba, t2, nba, dcmplx(0d0, 0d0), t1, nba)
-    call ZGEMM('N', 'C', nba, nba, nba, dcmplx(1d0, 0d0), t1, nba, W,  nba, dcmplx(0d0, 0d0), rho, nba)
+    call ZGEMM('N', 'N', nba, nba, nba, cmplx(1d0, 0d0, 8), W,  nba, t2, nba, cmplx(0d0, 0d0, 8), t1, nba)
+    call ZGEMM('N', 'C', nba, nba, nba, cmplx(1d0, 0d0, 8), t1, nba, W,  nba, cmplx(0d0, 0d0, 8), rho, nba)
 
     ! Branch velocities, projected on the polarization direction of A(t);
     ! only the Kuhn-Zurek branch positions consume them.
@@ -1895,9 +1895,9 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
         end if
 
         do idir = 1, 3
-            call ZGEMM('C', 'N', nba, nba, nba, dcmplx(1d0, 0d0), W,  nba, p_active(:, :, idir), nba, &
-                       dcmplx(0d0, 0d0), t1, nba)
-            call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0, 0d0), t1, nba, W, nba, dcmplx(0d0, 0d0), t2, nba)
+            call ZGEMM('C', 'N', nba, nba, nba, cmplx(1d0, 0d0, 8), W,  nba, p_active(:, :, idir), nba, &
+                       cmplx(0d0, 0d0, 8), t1, nba)
+            call ZGEMM('N', 'N', nba, nba, nba, cmplx(1d0, 0d0, 8), t1, nba, W, nba, cmplx(0d0, 0d0, 8), t2, nba)
             do i = 1, nba
                 V(i) = V(i) + ehat(idir) * (real(t2(i, i)) + Ac(idir))
             end do
@@ -2276,8 +2276,8 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
                 rad(i, j) = sbe%rho(in, im, ik)
             end do
         end do
-        call ZGEMM('C','N', nba,nba,nba, dcmplx(1d0,0d0), W,nba, rad,nba, dcmplx(0d0,0d0), t1,nba)
-        call ZGEMM('N','N', nba,nba,nba, dcmplx(1d0,0d0), t1,nba, W,nba, dcmplx(0d0,0d0), rad,nba)
+        call ZGEMM('C','N', nba,nba,nba, cmplx(1d0,0d0, 8), W,nba, rad,nba, cmplx(0d0,0d0, 8), t1,nba)
+        call ZGEMM('N','N', nba,nba,nba, cmplx(1d0,0d0, 8), t1,nba, W,nba, cmplx(0d0,0d0, 8), rad,nba)
         do a = 1, nba
             eval_loc(a,ik) = evals(a)
             f_loc(a,ik)    = real(rad(a,a))
@@ -2523,8 +2523,8 @@ subroutine ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
                 rad(i, j) = sbe%rho(in, im, ik)
             end do
         end do
-        call ZGEMM('C','N', nba,nba,nba, dcmplx(1d0,0d0), W,nba, rad,nba, dcmplx(0d0,0d0), t1,nba)
-        call ZGEMM('N','N', nba,nba,nba, dcmplx(1d0,0d0), t1,nba, W,nba, dcmplx(0d0,0d0), rad,nba)
+        call ZGEMM('C','N', nba,nba,nba, cmplx(1d0,0d0, 8), W,nba, rad,nba, cmplx(0d0,0d0, 8), t1,nba)
+        call ZGEMM('N','N', nba,nba,nba, cmplx(1d0,0d0, 8), t1,nba, W,nba, cmplx(0d0,0d0, 8), rad,nba)
         do a = 1, nba
             fold = real(rad(a,a))
             fnew = max(fold + dpop(a,ik), 0d0)
@@ -2534,15 +2534,15 @@ subroutine ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
                 damp(a) = 1d0
             end if
             if (present(gout)) damp(a) = damp(a) * exp(-0.5d0 * gout(a, ik) * tau)
-            rad(a,a) = dcmplx(fnew, 0d0)
+            rad(a,a) = cmplx(fnew, 0d0, 8)
         end do
         do b = 1, nba
             do a = 1, nba
                 if (a /= b) rad(a,b) = rad(a,b) * damp(a) * damp(b)
             end do
         end do
-        call ZGEMM('N','N', nba,nba,nba, dcmplx(1d0,0d0), W,nba, rad,nba, dcmplx(0d0,0d0), t1,nba)
-        call ZGEMM('N','C', nba,nba,nba, dcmplx(1d0,0d0), t1,nba, W,nba, dcmplx(0d0,0d0), rad,nba)
+        call ZGEMM('N','N', nba,nba,nba, cmplx(1d0,0d0, 8), W,nba, rad,nba, cmplx(0d0,0d0, 8), t1,nba)
+        call ZGEMM('N','C', nba,nba,nba, cmplx(1d0,0d0, 8), t1,nba, W,nba, cmplx(0d0,0d0, 8), rad,nba)
         do j = 1, nba
             im = sbe%active_idx(j)
             do i = 1, nba
@@ -2834,8 +2834,8 @@ subroutine calc_bloch_population_k(sbe, gs, Ac, ib_target, pop_k, icomm)
         end do
 
         ! rho_crystal = U_sorted^dagger rho_VG U_sorted
-        call ZGEMM('C', 'N', nba, nba, nba, dcmplx(1d0,0d0), W_sorted, nba, rho_a,    nba, dcmplx(0d0,0d0), t1, nba)
-        call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0,0d0), t1,       nba, W_sorted, nba, dcmplx(0d0,0d0), t2, nba)
+        call ZGEMM('C', 'N', nba, nba, nba, cmplx(1d0,0d0, 8), W_sorted, nba, rho_a,    nba, cmplx(0d0,0d0, 8), t1, nba)
+        call ZGEMM('N', 'N', nba, nba, nba, cmplx(1d0,0d0, 8), t1,       nba, W_sorted, nba, cmplx(0d0,0d0, 8), t2, nba)
         pop_local(ik) = real(t2(ia_target, ia_target))
     end do
 
@@ -2981,8 +2981,8 @@ subroutine calc_unfolded_population_k(sbe, gs, Ac, pop_lev, icomm)
             W_sorted(:, zone_map(j)) = W(:, j)
         end do
 
-        call ZGEMM('C', 'N', nba, nba, nba, dcmplx(1d0,0d0), W_sorted, nba, rho_a,    nba, dcmplx(0d0,0d0), t1, nba)
-        call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0,0d0), t1,       nba, W_sorted, nba, dcmplx(0d0,0d0), t2, nba)
+        call ZGEMM('C', 'N', nba, nba, nba, cmplx(1d0,0d0, 8), W_sorted, nba, rho_a,    nba, cmplx(0d0,0d0, 8), t1, nba)
+        call ZGEMM('N', 'N', nba, nba, nba, cmplx(1d0,0d0, 8), t1,       nba, W_sorted, nba, cmplx(0d0,0d0, 8), t2, nba)
 
         ! Accumulate the spin-summed population of the top two valence and the
         ! bottom two conduction physical primitive bands of every sublattice.
@@ -3172,8 +3172,8 @@ subroutine calc_intraband_current_houston(sbe, gs, Ac, jmat_intra, icomm)
         call eigen_zheev(H, evals, W)
 
         ! f^H = U^dagger rho U  (diagonal = Houston populations)
-        call ZGEMM('C','N', nba,nba,nba, dcmplx(1d0,0d0), W, nba, rho_a, nba, dcmplx(0d0,0d0), t1, nba)
-        call ZGEMM('N','N', nba,nba,nba, dcmplx(1d0,0d0), t1, nba, W, nba, dcmplx(0d0,0d0), rhoH, nba)
+        call ZGEMM('C','N', nba,nba,nba, cmplx(1d0,0d0, 8), W, nba, rho_a, nba, cmplx(0d0,0d0, 8), t1, nba)
+        call ZGEMM('N','N', nba,nba,nba, cmplx(1d0,0d0, 8), t1, nba, W, nba, cmplx(0d0,0d0, 8), rhoH, nba)
 
         do idir = 1, 3
             ! velocity operator v = p + A + v_nl (A on the diagonal), rotate to Houston
@@ -3181,8 +3181,8 @@ subroutine calc_intraband_current_houston(sbe, gs, Ac, jmat_intra, icomm)
             do i = 1, nba
                 H(i, i) = H(i, i) + Ac(idir)
             end do
-            call ZGEMM('C','N', nba,nba,nba, dcmplx(1d0,0d0), W, nba, H, nba, dcmplx(0d0,0d0), t1, nba)
-            call ZGEMM('N','N', nba,nba,nba, dcmplx(1d0,0d0), t1, nba, W, nba, dcmplx(0d0,0d0), vH, nba)
+            call ZGEMM('C','N', nba,nba,nba, cmplx(1d0,0d0, 8), W, nba, H, nba, cmplx(0d0,0d0, 8), t1, nba)
+            call ZGEMM('N','N', nba,nba,nba, cmplx(1d0,0d0, 8), t1, nba, W, nba, cmplx(0d0,0d0, 8), vH, nba)
             do a = 1, nba
                 tmp1(idir) = tmp1(idir) + gs%kweight(ik) * real(rhoH(a, a)) * real(vH(a, a))
             end do
