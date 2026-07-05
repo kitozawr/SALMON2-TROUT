@@ -1,0 +1,64 @@
+SALMON-TROUT
+Copyright 2026 SALMON-TROUT contributors
+
+This product is a derivative work ("fork") based on:
+
+    SALMON - Scalable Ab-initio Light-Matter simulator for
+    Optics and Nanoscience
+    Copyright 2017-2026 SALMON developers
+    https://salmon-tddft.jp/
+    Licensed under the Apache License, Version 2.0.
+
+SALMON-TROUT is distributed under the same Apache License, Version 2.0
+(see the LICENSE file). Forking an Apache-2.0 project does not change its
+license: both the original SALMON code and the additions made in this fork
+are licensed under Apache-2.0. This fork retains all copyright, patent,
+trademark, and attribution notices from the upstream SALMON source. Source
+files inherited unchanged from SALMON keep their original
+"Copyright <year> SALMON developers" headers.
+
+------------------------------------------------------------------------
+Statement of changes (Apache License, Version 2.0, Section 4(b))
+------------------------------------------------------------------------
+
+The following areas were added or modified by the SALMON-TROUT contributors
+relative to upstream SALMON (branch develop-2.0.0). The authoritative record
+of every change is the project's git history.
+
+  * src/ssbe/ - a velocity-gauge semiconductor Bloch equation (SBE) solver
+    extended with many-body CPTP Lindblad dissipation (electron-phonon,
+    impact ionization, Auger, carrier-carrier thermalization, graphene 2D
+    Rana Auger/carrier-multiplication) and a nonlocal, momentum-conserving
+    "ring" super-mode for intervalley transfer.
+
+  * src/epm/ and the top-level epm_*.py builders - an empirical
+    pseudopotential (EPM) band-structure front end (Si, GaAs, CdS,
+    graphene; folded supercells and non-orthogonal primitive cells) that
+    feeds the SBE.
+
+  * Top-level Python tools - plot_sbe_results.py, plot_tddft_results.py,
+    si_three_photon_isosurfaces.py, zener_tunneling_estimate.py,
+    band_field_coupling.py and related analysis/visualization scripts.
+
+  * samples/exercise_x*/ - runnable EPM->SBE example input decks.
+
+  * wiki/ and README.md - fork documentation, including the master-equation
+    reference.
+
+  * tests/ - added Fortran and Python unit tests for the above.
+
+  * Integration hooks in pre-existing SALMON driver and I/O sources
+    (e.g. src/io/, src/rt/, src/main.f90). These modified upstream files
+    carry both their original SALMON copyright notice and, by reference,
+    this statement of modification.
+
+Modifications were made by the SALMON-TROUT contributors in 2025-2026.
+These changes do not affect the license of the unmodified SALMON code,
+which remains as stated above.
+
+This NOTICE file is provided for attribution purposes only and does not
+modify the License.
+
+------------------------------------------------------------------------
+Upstream third-party components (retained from SALMON) are listed in the
+ACKNOWLEDGEMENTS and LICENSE.THIRD-PARTY files.
