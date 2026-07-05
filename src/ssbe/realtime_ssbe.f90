@@ -25,6 +25,9 @@ subroutine main_realtime_ssbe(icomm)
     real(8) :: energy, tr_all, tr_vb
     integer :: nproc, irank, ierr
     integer :: fh_sbe_rt, fh_sbe_rt_energy, fh_sbe_nex, fh_sbe_nex_k
+    integer :: fh_sbe_channels, it0, ck_unit
+    logical :: ck_exists
+    character(256) :: ck_file
     integer :: fh_sbe_nex_k_unfold
     integer :: fh_sbe_nex_k_real, fh_sbe_nex_k_unfold_real
     integer :: fh_sbe_nex_k_lev_real
@@ -116,6 +119,12 @@ subroutine main_realtime_ssbe(icomm)
         open(unit=fh_sbe_nex_k_real, &
             & file=trim(base_directory)//trim(sysname)//"_sbe_nex_k_real.data", action="write")
         call write_sbe_nex_k_real_header(fh_sbe_nex_k_real, nk)
+        ! C1: per-channel dissipation ledger (ring channels; cumulative)
+        fh_sbe_channels = get_filehandle()
+        open(unit=fh_sbe_channels, file=trim(base_directory)//trim(sysname)//"_sbe_channels.data", action="write")
+        write(fh_sbe_channels, '(a)') '# C1 per-channel ledger (CUMULATIVE, per cell): ring channels only'
+        write(fh_sbe_channels, '(a)') '# dN = conduction-population change (pairs created > 0), dE [Ha]'
+        write(fh_sbe_channels, '(a)') '# t[au]  dN_eph dE_eph  dN_ii dE_ii  dN_auger dE_auger  dN_rana dE_rana'
         ! SYSNAME_sbe_nex_k_unfold.data: populations of PHYSICAL primitive
         ! bands at the unfolded primitive k-points (only with an unfold map)
         if (gs%have_unfold) then
@@ -182,8 +191,28 @@ subroutine main_realtime_ssbe(icomm)
 
     call comm_sync_all(icomm)
 
+    ! B4: checkpoint restart -- resume rho / X_branch / step index from the
+    ! per-rank stream file (same nproc required; the field is recomputed
+    ! deterministically from the input, so nothing else needs saving).
+    it0 = 1
+    if (yn_sbe_checkpoint_restart == 'y') then
+        write(ck_file, '(a,a,a,i5.5,a)') trim(base_directory), trim(sysname), '_sbe_ckpt_r', irank, '.bin'
+        inquire(file=trim(ck_file), exist=ck_exists)
+        if (.not. ck_exists) then
+            if (irank == 0) write(*,'(a)') '# ERROR: yn_sbe_checkpoint_restart but no checkpoint file'
+            error stop 'B4: checkpoint file missing'
+        end if
+        open(newunit=ck_unit, file=trim(ck_file), form='unformatted', access='stream', action='read')
+        read(ck_unit) it0, energy, sbe%led_dn, sbe%led_de
+        read(ck_unit) sbe%rho(:, :, sbe%ik_min:sbe%ik_max)
+        if (allocated(sbe%X_branch)) read(ck_unit) sbe%X_branch(:, sbe%ik_min:sbe%ik_max)
+        close(ck_unit)
+        it0 = it0 + 1
+        if (irank == 0) write(*,'(a,i8)') '# B4: resumed from checkpoint, continuing at step ', it0
+    end if
+
     ! Realtime calculation
-    do it = 1, nt
+    do it = it0, nt
         t = dt * it
         
         !---------------------------------------------------------------
@@ -229,6 +258,22 @@ subroutine main_realtime_ssbe(icomm)
             if (irank == 0) then
                 call write_sbe_rt_energy_line(fh_sbe_rt_energy, t, energy, energy)
                 write(*, "(i6,f12.3,3es12.3,2f12.3)") it, t * au_fs, Jmat(1:3), tr_all, energy
+                ! C1: cumulative per-channel ledger (identical on all ranks)
+                write(fh_sbe_channels, '(f14.4,8es14.5)') t, &
+                    sbe%led_dn(1), sbe%led_de(1), sbe%led_dn(2), sbe%led_de(2), &
+                    sbe%led_dn(3), sbe%led_de(3), sbe%led_dn(4), sbe%led_de(4)
+            end if
+        end if
+
+        ! B4: periodic checkpoint (per-rank stream file, overwritten in place)
+        if (sbe_checkpoint_step > 0) then
+            if (mod(it, sbe_checkpoint_step) == 0) then
+                write(ck_file, '(a,a,a,i5.5,a)') trim(base_directory), trim(sysname), '_sbe_ckpt_r', irank, '.bin'
+                open(newunit=ck_unit, file=trim(ck_file), form='unformatted', access='stream', action='write')
+                write(ck_unit) it, energy, sbe%led_dn, sbe%led_de
+                write(ck_unit) sbe%rho(:, :, sbe%ik_min:sbe%ik_max)
+                if (allocated(sbe%X_branch)) write(ck_unit) sbe%X_branch(:, sbe%ik_min:sbe%ik_max)
+                close(ck_unit)
             end if
         end if
 

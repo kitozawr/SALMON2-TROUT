@@ -213,6 +213,43 @@ def load_columns_streaming(filepath, downsample=1):
 
 
 # ===========================================================================
+# C1: per-channel dissipation ledger (*_sbe_channels.data)
+# ---------------------------------------------------------------------------
+def plot_channels(filepath, output_dir, dpi=150):
+    """Cumulative per-channel ledger: which dissipation channel did what.
+    Two panels: conduction-population change dN (pairs created > 0 /
+    recombined < 0) and energy change dE [Ha], per ring channel
+    (e-ph, II, ring Auger, 2D Rana), vs time."""
+    d = np.loadtxt(filepath, comments='#')
+    if d.ndim == 1:
+        d = d.reshape(1, -1)
+    if d.shape[0] < 2:
+        return
+    t = d[:, 0] * AU_TIME_FS
+    names  = ['e-ph', 'impact ionization', 'ring Auger', '2D Rana']
+    colors = ['#7a5195', '#ef5675', '#003f5c', '#ffa600']
+    fig, (a1, a2) = plt.subplots(2, 1, figsize=(8.5, 7.5), sharex=True)
+    for i, (nm, c) in enumerate(zip(names, colors)):
+        dn, de = d[:, 1 + 2*i], d[:, 2 + 2*i]
+        if np.max(np.abs(dn)) == 0 and np.max(np.abs(de)) == 0:
+            continue                       # channel off -> skip the flat line
+        a1.plot(t, dn, lw=2, color=c, label=nm)
+        a2.plot(t, de, lw=2, color=c, label=nm)
+    a1.axhline(0, color='k', lw=.6)
+    a2.axhline(0, color='k', lw=.6)
+    a1.set_ylabel('cumulative dN$_{CB}$ [e$^-$/cell]')
+    a2.set_ylabel('cumulative dE [Ha/cell]')
+    a2.set_xlabel('t [fs]')
+    a1.set_title('per-channel dissipation ledger (C1): pair creation (+) / recombination (-)')
+    a1.grid(alpha=.3); a2.grid(alpha=.3); a1.legend(fontsize=9)
+    out = output_dir / 'sbe_channels_ledger.png'
+    fig.tight_layout()
+    fig.savefig(out, dpi=dpi, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  saved {out.name}")
+
+
+# ---------------------------------------------------------------------------
 # RT line plots  (*_sbe_rt.data, *_sbe_rt_energy.data, *_sbe_nex.data)
 # ===========================================================================
 
@@ -2267,6 +2304,9 @@ def main():
 
     # --- RT line files --------------------------------------------------
     if not args.no_rt:
+        for f in sorted(input_dir.glob('*_sbe_channels.data')):
+            found_any = True
+            plot_channels(f, output_dir, dpi=args.dpi)
         for pattern in ('*_sbe_rt.data', '*_sbe_rt_energy.data', '*_sbe_nex.data'):
             for f in sorted(input_dir.glob(pattern)):
                 found_any = True

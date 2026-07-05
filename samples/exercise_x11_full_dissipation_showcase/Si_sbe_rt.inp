@@ -103,5 +103,12 @@
   yn_sbe_coulomb           = 'y'    ! Sigma^HF: dynamic gap renormalization (replaces BGR)
   yn_sbe_bgr_threshold     = 'n'    ! MUST stay off with Coulomb on (double-count guard)
   sbe_eph_temperature_k    = 300.0d0
+  ! ---- 2026-07-04 approved refinements (wiki/00), all cited ------------------
+  yn_sbe_ii_holes          = 'y'    ! A2: hole-initiated II + hole-Auger (Cp/Cn cited)
+  yn_sbe_eph_acoustic      = 'y'    ! A4: quasi-elastic acoustic cooling (Xi_d cited)
+  sbe_checkpoint_step      = 1000   ! B4: crash-safe rho checkpoints (per-rank .bin)
+  ! optional extras (defaults off): sbe_ii_phassist = 1.0 (A1 phonon-assisted
+  ! II/Auger sidebands, strength = K15-style knob); yn_sbe_ii_fk_soften='y' +
+  ! sbe_ii_fk_mu (A5 Franz-Keldysh threshold softening); sbe_ring_vq_floor (B3).
   ! NO sbe_decoh_* (Kuhn-Zurek): collisions provide the decoherence.
 /

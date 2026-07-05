@@ -11,7 +11,7 @@
 !  Standalone gfortran (uses sbe_superres_ssbe.f90).
 !
 program test_ii_interk_cptp
-    use sbe_superres_ssbe, only: ii_interk_dpop
+    use sbe_superres_ssbe, only: ii_interk_dpop, build_vq_table, t_ring_opts
     implicit none
     integer, parameter :: nk = 4, nba = 2, iv = 1, ic = 2
     integer :: kn(3), kidx(3, nk), klut(0:nk-1), nfail, a, k
@@ -110,9 +110,83 @@ program test_ii_interk_cptp
                  maxval(abs(dpop - dlo - dhi)), 0d0, 1d-13)
     end block
 
+    ! (7) B1 vq table: BIT-IDENTICAL to the direct evaluation
+    block
+        type(t_ring_opts) :: op
+        real(8) :: dt2(nba, nk)
+        allocate(op%vq_tab((2*kn(1)-1)*(2*kn(2)-1)*(2*kn(3)-1)))
+        call build_vq_table(kn, bmat, eps_inf, qtf2, wp2, lambda2, q2reg, op%vq_tab)
+        op%use_tab = .true.
+        call ii_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
+                            pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dt2, opts=op)
+        call chk("B1 vq table bit-identical (max|diff|)", maxval(abs(dt2 - dpop)), 0d0, 1d-300)
+        ! B3: a floor above the max kills the channel; tiny floor is a no-op
+        op%vq_floor = 2d0 * maxval(op%vq_tab)
+        call ii_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
+                            pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dt2, opts=op)
+        call chk("B3 floor > max -> channel off", maxval(abs(dt2)), 0d0, 1d-14)
+    end block
+
+    ! (8) A5 Franz-Keldysh softening: sub-threshold state ionizes, trace exact
+    block
+        type(t_ring_opts) :: op
+        real(8) :: dt2(nba, nk)
+        op%fk_theta = 0.3d0
+        call ii_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, 0.6d0, &
+                            pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dt2, opts=op)
+        if (sum(dt2(ic, :)) <= 0d0) call bad("A5: FK tail did not activate the sub-threshold state")
+        call chk("A5 trace conserved", sum(dt2), 0d0, TOL)
+        ! hard threshold (no opts) at eth=0.6 must stay dark (ekin=0.5)
+        call ii_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, 0.6d0, &
+                            pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dt2)
+        call chk("A5 control: hard threshold dark", maxval(abs(dt2)), 0d0, 1d-14)
+    end block
+
+    ! (9) A1 phonon sidebands: an off-shell quadruple becomes reachable
+    block
+        type(t_ring_opts) :: op
+        real(8) :: dt2(nba, nk), dt3(nba, nk)
+        ! narrow sigma so the direct delta misses everything
+        call ii_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
+                            pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, lambda2, q2reg, 0.02d0, tau, dt2)
+        op%phassist = 1d0;  op%nph = 1
+        allocate(op%hw(1), op%nbb(1), op%wrel(1))
+        op%hw = 0.5d0;  op%nbb = 0.1d0;  op%wrel = 1d0   ! sideband at the 0.5 mismatch
+        call ii_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
+                            pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, lambda2, q2reg, 0.02d0, tau, dt3, opts=op)
+        if (sum(dt3(ic, :)) <= sum(dt2(ic, :)) + 1d-14) &
+            call bad("A1: phonon sideband did not open the off-shell channel")
+        call chk("A1 trace conserved", sum(dt3), 0d0, TOL)
+    end block
+
+    ! (10) A2 hole-initiated channel: deep hole -> pair created, trace exact
+    block
+        type(t_ring_opts) :: op
+        real(8) :: dt2(nba, nk), ev2(nba, nk), f2(nba, nk)
+        ev2(iv, :) = 0d0;  ev2(iv, 1) = -1.0d0        ! k1 hosts a DEEP valence state
+        ev2(ic, :) = 0.5d0
+        f2(iv, :) = 2d0;  f2(iv, 1) = 1.0d0           ! deep hole at k1
+        f2(ic, :) = 0d0
+        op%pref_h = 1d0;  op%evbm = 0d0
+        call ii_interk_dpop(nk, nba, ev2, f2, occ_max, a2half, ecbm, 0.2d0, &
+                            pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, lambda2, q2reg, 0.3d0, tau, dt2, opts=op)
+        ! note: the ELECTRON channel is dark here (empty CB), only holes act
+        call chk("A2 trace conserved", sum(dt2), 0d0, TOL)
+        if (dt2(iv, 1) <= 0d0) call bad("A2: deep hole was not filled")
+        if (sum(dt2(ic, :)) <= 0d0) call bad("A2: no pair electron created (hhe)")
+    end block
+
     if (nfail == 0) then
         write(*,'(a)') 'PASS  (inter-k impact ionization: trace-conserving, '// &
-                       'carrier-multiplying, momentum+energy matched, bounded, sub-threshold no-op)'
+                       'carrier-multiplying, bounded, no-op below threshold; B1 table bit-identical, '// &
+                       'B3 floor, A5 FK tail, A1 sidebands, A2 hole channel)'
         call exit(0)
     else
         write(*,'(a,i0,a)') 'FAIL (', nfail, ' checks)'; call exit(1)

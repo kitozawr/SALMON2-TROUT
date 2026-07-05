@@ -22,8 +22,8 @@
 !   * sbe_ii_prefactor MUST be set explicitly: the CdS Keldysh II threshold                !
 !     E_th = 1.5 E_g = 3.6 eV is cited, but the PREFACTOR is a FIT PARAMETER with          !
 !     no citation - the registry ships a sentinel and the run aborts without an            !
-!     explicit value. The 2.0d12 below is the GaAs/Si-scale DEMO value: scale it           !
-!     to your own material data before drawing quantitative II conclusions.                !
+!     explicit value. The 1.03e12 below is CALIBRATED on our own BC1967 EPM bands          !
+!     by the Stobbe golden-rule procedure (tools/cds_ii_calibrate.py, fit RMS 3%).         !
 !   * ring Auger needs no C at all - its scale IS the II kernel's (detailed                !
 !     balance), so it inherits the same fit-parameter caveat here.                         !
 !                                                                                          !
@@ -85,11 +85,16 @@
   yn_sbe_superres          = 'y'    ! ring backbone
   yn_sbe_eph               = 'y'    ! Frohlich polar LO (intra-valley cooling)
   yn_sbe_impact_ionization = 'y'    ! nonlocal II (E_th cited; prefactor = FIT, below)
-  sbe_ii_prefactor         = 2.0d12 ! *** FIT PARAMETER (uncited for CdS) - demo value ***
+  sbe_ii_prefactor         = 1.03d12 ! CALIBRATED on our own BC1967 EPM bands by the
+                                     ! Stobbe procedure (tools/cds_ii_calibrate.py,
+                                     ! rel-RMS 3%); same standing as the cited GaAs 2e12.
   yn_sbe_auger             = 'y'    ! ring Auger (inherits the II scale, no separate C)
   yn_sbe_coulomb           = 'y'    ! Sigma^HF (eps0 = 8.9 cited) - replaces BGR
   yn_sbe_bgr_threshold     = 'n'    ! double-count guard (as in Si/GaAs)
   sbe_eph_temperature_k    = 300.0d0
+  sbe_checkpoint_step      = 1000   ! B4 crash-safe checkpoints
+  ! A4 acoustic UNAVAILABLE for CdS (piezoelectric channel pending, no cited Xi_d);
+  ! A2 holes UNAVAILABLE (no cited CdS Cp/Cn) -- both abort if enabled (provenance).
   ! yn_sbe_eeh ABSENT: no cited CdS carrier-carrier rate (provenance gate).
   ! NO sbe_decoh_* (Kuhn-Zurek): collisions provide the decoherence.
 /
