@@ -166,9 +166,18 @@ validation by calculation, signed-off commits) in
 
 ## License
 
-SALMON is available under the Apache License version 2.0.
+SALMON-TROUT is a fork of [SALMON](https://salmon-tddft.jp/) and, like the
+upstream project, is distributed under the **Apache License, Version 2.0**
+(see [`LICENSE`](LICENSE)). Forking an Apache-2.0 project does not change its
+license — the original SALMON code and this fork's additions are all Apache-2.0.
 
-    Copyright 2017-2026 SALMON developers
+    Original SALMON code:
+        Copyright 2017-2026 SALMON developers
+
+    Fork modifications and additions (the src/ssbe SBE dissipation engine,
+    the src/epm + epm_*.py EPM tooling, the Python analysis tools, the
+    samples, and the wiki):
+        Copyright 2026 SALMON-TROUT contributors
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -181,3 +190,9 @@ SALMON is available under the Apache License version 2.0.
     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
     See the License for the specific language governing permissions and
     limitations under the License.
+
+Attribution and the statement of changes required by Apache-2.0 §4(b)/§4(d)
+are recorded in [`NOTICE`](NOTICE). Source files inherited unchanged from
+SALMON retain their original copyright headers; bundled third-party
+components are listed in [`LICENSE.THIRD-PARTY`](LICENSE.THIRD-PARTY) and
+[`ACKNOWLEDGEMENTS`](ACKNOWLEDGEMENTS).
