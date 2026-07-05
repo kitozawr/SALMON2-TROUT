@@ -84,7 +84,11 @@
   yn_sbe_eph            = 'y'    ! E2g(196 meV) + A1'(160 meV) -> K/K' relaxation
   yn_sbe_auger          = 'y'    ! 2D Rana Auger/CM [R07] on quasi-Fermi levels
   sbe_eph_temperature_k = 300.0d0
-  yn_sbe_eph_acoustic   = 'y'    ! A4: D = 16 eV [Hwang-Das Sarma], grid-resolved q
+  yn_sbe_eph_acoustic   = 'y'    ! A4: D = 16 eV [Hwang-Das Sarma], grid-resolved q,
+                                 ! TF-screened by the instantaneous carrier density.
+  ! sbe_eph_ac_xi_ev    = 10.0d0 ! SUBSTRATE OVERRIDE of the acoustic DP [eV]: the
+                                 ! H&DS 16 eV is the upper literature scale; on some
+                                 ! substrates the effective D is lower -- set it here.
   sbe_checkpoint_step   = 1000   ! B4 crash-safe checkpoints
   ! Forbidden-by-physics (error stop if enabled): impact_ionization, eeh,
   ! coulomb, sbe_decoh_* - see the header.

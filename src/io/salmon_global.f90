@@ -511,6 +511,10 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: sbe_ii_phassist        ! A1: phonon-assisted II/Auger sideband strength; 0 = off
   character(1)   :: yn_sbe_ii_holes        ! A2: hole-initiated II + its Auger reverse (Cp/Cn from registry)
   character(1)   :: yn_sbe_eph_acoustic    ! A4: quasi-elastic acoustic deformation e-ph mode
+  real(8)        :: sbe_eph_ac_xi_ev       ! A4: acoustic deformation potential OVERRIDE [eV];
+                                           !     <=0 -> registry default. Graphene: substrate-
+                                           !     dependent (Hwang-Das Sarma D=16 eV is the upper
+                                           !     literature scale; on some substrates it is lower).
   ! SBE checkpoint/restart (B4)
   integer        :: sbe_checkpoint_step    ! write rho checkpoint every N steps; 0 = off
   character(1)   :: yn_sbe_checkpoint_restart ! resume from SYSNAME_sbe_ckpt_rank*.bin

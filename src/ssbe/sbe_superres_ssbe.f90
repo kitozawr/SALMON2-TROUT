@@ -36,7 +36,7 @@ module sbe_superres_ssbe
               golden_rule_prefactor, eph_thermal_split, &
               eps_thomas_fermi, tf_kappa2_degenerate, debye_kappa2, &
               lindhard_F, eps_lindhard_static, plasmon_freq2, lopc_branches, &
-              eps_cdrb, interk_vq, build_vq_table, t_ring_opts, &
+              eps_cdrb, interk_vq, build_vq_table, build_acscreen_table, t_ring_opts, &
               dirac_mu_2d, rana_qtf, rana_rcccv, rana_auger_dpop, &
               energy_partner_weights, fermi_dirac, fit_fermi_dirac, &
               carrier_carrier_relax, eph_interk_dpop, ii_interk_dpop, &
@@ -371,6 +371,17 @@ contains
             mp%auger_ok = .false.
             mp%auger_c_cm6s = 0d0;  mp%auger_n_gate_cm3 = CDS_EE_ACT_N
             mp%eps0 = CDS_EPS0;  mp%eps_inf = CDS_EPS_INF
+            ! A4-CdS acoustic deformation potential: E1 = 14.5 eV [D. L. Rode,
+            ! PRB 2, 1012 (1970), maintainer-supplied]; LA sound velocity
+            ! ~4.25e5 cm/s from the Rode elastic constants (verify vs PDF).
+            ! CRITICAL: this anomalously LARGE E1 makes the BARE DP channel
+            ! unphysically strong at working densities n >= 1e18 cm^-3 -- the
+            ! acoustic mode is therefore ALWAYS applied with the free-carrier
+            ! screening factor S(q) = [q/(q+q_TF)]^2 built from the gathered
+            ! carrier density (see apply_ring_channels); screening cuts the
+            ! small-q divergence and leaves acoustics as the physical fallback
+            ! for carriers cooled below hbar*omega_LO.
+            mp%eph_ac_xi_ev = 14.5d0;  mp%eph_ac_cs_cmps = 4.25d5
             ! Frohlich polar-optical: a single dominant LO mode at 38 meV; the
             ! rate scale nu_sat = alpha*omega_LO is the cited Frohlich coupling.
             mp%eph_polar = .true.
@@ -879,6 +890,53 @@ contains
         end do
     end subroutine build_vq_table
 
+    ! A4 screening: Thomas-Fermi factor S(q) = [q/(q + q_TF)]^2 for the
+    ! ACOUSTIC deformation-potential e-ph mode, tabulated over the SAME signed
+    ! index differences as build_vq_table. q = the nearest-image Cartesian
+    ! distance |dk + G| (min over the 27 images). q_TF from the INSTANTANEOUS
+    ! free-carrier density (Debye/TF crossover, same primitives as lambda^2).
+    ! q_TF <= 0 -> S = 1 (bare, the no-carrier limit). S(q=0) = 0: perfectly
+    ! screened forward scattering -- exactly the small-q cut that keeps the
+    ! large-E1 materials (CdS E1 = 14.5 eV [Rode 1970]) physical at
+    ! n >= 1e18 cm^-3. (The maintainer-specified TF form; the full Lindhard
+    ! eps_lindhard_static is available as a refinement.)
+    pure subroutine build_acscreen_table(kn, bmat, qtf, tab)
+        implicit none
+        integer, intent(in)  :: kn(3)
+        real(8), intent(in)  :: bmat(3,3), qtf
+        real(8), intent(out) :: tab((2*kn(1)-1)*(2*kn(2)-1)*(2*kn(3)-1))
+        integer :: d1, d2, d3, g1, g2, g3, idx
+        real(8) :: df(3), qc(3), q2, qmin
+        if (qtf <= 0d0) then
+            tab = 1d0
+            return
+        end if
+        idx = 0
+        do d3 = -(kn(3)-1), kn(3)-1
+            do d2 = -(kn(2)-1), kn(2)-1
+                do d1 = -(kn(1)-1), kn(1)-1
+                    idx = idx + 1
+                    df = (/ dble(d1)/dble(max(kn(1),1)), &
+                            dble(d2)/dble(max(kn(2),1)), &
+                            dble(d3)/dble(max(kn(3),1)) /)
+                    qmin = huge(1d0)
+                    do g3 = -1, 1
+                        do g2 = -1, 1
+                            do g1 = -1, 1
+                                qc(1:3) = (df(1)+g1)*bmat(1,1:3) + (df(2)+g2)*bmat(2,1:3) &
+                                        + (df(3)+g3)*bmat(3,1:3)
+                                q2 = dot_product(qc, qc)
+                                if (q2 < qmin) qmin = q2
+                            end do
+                        end do
+                    end do
+                    qmin = sqrt(qmin)
+                    tab(idx) = (qmin / (qmin + qtf))**2
+                end do
+            end do
+        end do
+    end subroutine build_acscreen_table
+
     ! =====================================================================
     ! GRAPHENE 2D Auger / carrier multiplication -- the [R07] branch
     ! (F. Rana, arXiv:0705.1204v2; wiki/07 sec.6). Gapless Dirac spectrum
@@ -1300,7 +1358,8 @@ contains
     ! order as the Coulomb all-pairs sum it rides alongside).
     subroutine eph_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, evbm, &
                                nph, hw, wrel, nb_bose, nu_sat, nu_eps0, nu_n, &
-                               sigma, tau, dpop, gout, kidx, kn, pol_tab, pol_norm, ip_polar)
+                               sigma, tau, dpop, gout, kidx, kn, pol_tab, pol_norm, ip_polar, &
+                               ac_tab, ip_ac)
         implicit none
         integer, intent(in)  :: nk, nba, nph
         real(8), intent(in)  :: eval(nba, nk), f(nba, nk), occ_max, a2half
@@ -1313,7 +1372,14 @@ contains
         ! signed-difference table; unit average preserves the nu_sat scale).
         integer, intent(in), optional :: kidx(3, nk), kn(3), ip_polar
         real(8), intent(in), optional :: pol_tab(*), pol_norm
-        integer :: ik, jq, a, b, ip, ipol
+        ! A4-CdS: Thomas-Fermi screening of the ACOUSTIC deformation mode --
+        ! multiply mode ip_ac's partial rates by S(q) = [q/(q+q_TF)]^2 from
+        ! build_acscreen_table (maintainer-critical for CdS E1 = 14.5 eV
+        ! [Rode 1970]: the bare DP channel is unphysically strong at
+        ! n >= 1e18 cm^-3; screening cuts the small-q part).
+        real(8), intent(in), optional :: ac_tab(*)
+        integer, intent(in), optional :: ip_ac
+        integer :: ik, jq, a, b, ip, ipol, ipac
         real(8) :: eps_kin, nu_a, fe, fa, dE, shp, th, blk, gam, gamtot, out_tot
         real(8) :: gpart(nba, nk)
         real(8), parameter :: occ_eps = 1d-12
@@ -1324,6 +1390,12 @@ contains
             if (present(pol_tab) .and. present(pol_norm) .and. &
                 present(kidx) .and. present(kn)) then
                 if (ip_polar >= 1 .and. pol_norm > 0d0) ipol = ip_polar
+            end if
+        end if
+        ipac = 0
+        if (present(ip_ac)) then
+            if (present(ac_tab) .and. present(kidx) .and. present(kn)) then
+                if (ip_ac >= 1) ipac = ip_ac
             end if
         end if
         if (present(gout)) gout = 0d0
@@ -1359,6 +1431,11 @@ contains
                                 + (kidx(1,ik)-kidx(1,jq)+kn(1)-1) &
                                 + (2*kn(1)-1)*((kidx(2,ik)-kidx(2,jq)+kn(2)-1) &
                                 + (2*kn(2)-1)*(kidx(3,ik)-kidx(3,jq)+kn(3)-1))) / pol_norm
+                            ! A4: TF-screened acoustic mode [q/(q+q_TF)]^2
+                            if (ip == ipac) gam = gam * ac_tab(1 &
+                                + (kidx(1,ik)-kidx(1,jq)+kn(1)-1) &
+                                + (2*kn(1)-1)*((kidx(2,ik)-kidx(2,jq)+kn(2)-1) &
+                                + (2*kn(2)-1)*(kidx(3,ik)-kidx(3,jq)+kn(3)-1)))
                             gpart(b, jq) = gpart(b, jq) + gam
                             gamtot = gamtot + gam
                         end do
