@@ -29,7 +29,7 @@ program test_eph_cptp
     call chk("trace preserved", tr1, tr0, TOL)
     call chk("rho11 -> g*0.6", real(rho(1,1)), g*0.6d0, TOL)
     call chk("rho22 -> 0.3+(1-g)*0.6", real(rho(2,2)), 0.3d0+(1d0-g)*0.6d0, TOL)
-    call chk("coherence rho13 damped e^{-g/2}", abs(rho(1,3)), gh*abs(dcmplx(0.2d0,0.1d0)), TOL)
+    call chk("coherence rho13 damped e^{-g/2}", abs(rho(1,3)), gh*abs(cmplx(0.2d0,0.1d0, 8)), TOL)
     ! Hermiticity
     if (abs(rho(1,3)-conjg(rho(3,1))) > TOL) call bad("Hermiticity broken")
 

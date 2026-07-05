@@ -250,7 +250,7 @@ module sbe_superres_ssbe
 
     ! Optional refinements bundle for the ring II/Auger kernels (all fields
     ! default to the inert value -> omitting the argument is bit-identical).
-    type, public :: t_ring_opts
+    type :: t_ring_opts   ! exported via the module `public ::` list above
         logical :: use_tab = .false.       ! B1: use the precomputed vq table
         real(8), allocatable :: vq_tab(:)  !     signed-difference table
         real(8) :: vq_floor = 0d0          ! B3: skip quadruples with vq < floor (absolute)
@@ -1405,7 +1405,7 @@ contains
         do b = 1, nlev
             do a = 1, nlev
                 if (a == b) then
-                    rho(a, a) = (1d0 - alpha) * rho(a, a) + dcmplx(alpha * occ * ftgt(a), 0d0)
+                    rho(a, a) = (1d0 - alpha) * rho(a, a) + cmplx(alpha * occ * ftgt(a), 0d0, 8)
                 else
                     rho(a, b) = (1d0 - alpha) * rho(a, b)
                 end if

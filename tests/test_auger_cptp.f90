@@ -78,7 +78,7 @@ program test_auger_cptp
     if (fc1 < 0d0 .or. fc1 > 1d0 .or. hv1 < 0d0 .or. hv1 > 1d0 .or. &
         bhot < 0d0 .or. bhot > 1d0) call bad('Pauli factors not in [0,1]')
     ! recombination rate must vanish when there is no hole (full valence)
-    rho(iv1, iv1) = dcmplx(occ, 0d0)
+    rho(iv1, iv1) = cmplx(occ, 0d0, 8)
     hv1 = min(max(1d0 - real(rho(iv1, iv1)) / occ, 0d0), 1d0)
     g_rec = gamma0 * fc1 * hv1
     if (abs(g_rec) > 1d-14) call bad('recombination rate nonzero with no hole')
@@ -96,13 +96,13 @@ contains
     subroutine set_state(r)
         complex(8), intent(out) :: r(n, n)
         r = (0d0, 0d0)
-        r(1,1) = dcmplx(occ,   0d0)     ! deep valence: full
-        r(2,2) = dcmplx(1.6d0, 0d0)     ! top valence iv1: a hole (occ-1.6 = 0.4)
-        r(3,3) = dcmplx(0.5d0, 0d0)     ! ic1: excited electrons
-        r(4,4) = dcmplx(0.2d0, 0d0)     ! ic2
-        r(5,5) = dcmplx(0.1d0, 0d0)     ! ic_hot: mostly empty
+        r(1,1) = cmplx(occ,   0d0, 8)     ! deep valence: full
+        r(2,2) = cmplx(1.6d0, 0d0, 8)     ! top valence iv1: a hole (occ-1.6 = 0.4)
+        r(3,3) = cmplx(0.5d0, 0d0, 8)     ! ic1: excited electrons
+        r(4,4) = cmplx(0.2d0, 0d0, 8)     ! ic2
+        r(5,5) = cmplx(0.1d0, 0d0, 8)     ! ic_hot: mostly empty
         ! a little coherence so the off-diagonal damping is exercised
-        r(2,3) = dcmplx(0.15d0, 0.05d0); r(3,2) = conjg(r(2,3))
+        r(2,3) = cmplx(0.15d0, 0.05d0, 8); r(3,2) = conjg(r(2,3))
     end subroutine set_state
 
     ! Replicates apply_auger_recombination's map (two amp_damp, clamped rates).
@@ -144,7 +144,7 @@ contains
             do p = 1, n-1; do q = p+1, n
                 if (abs(a(p,q)) < 1d-30) cycle
                 ph = atan2(aimag(a(p,q)), real(a(p,q)))
-                g  = dcmplx(cos(ph), -sin(ph))           ! rotate phase to real
+                g  = cmplx(cos(ph), -sin(ph), 8)           ! rotate phase to real
                 tau_ = (real(a(q,q)) - real(a(p,p))) / (2d0 * abs(a(p,q)))
                 t = sign(1d0, tau_) / (abs(tau_) + sqrt(tau_**2 + 1d0))
                 c = 1d0 / sqrt(t**2 + 1d0)
