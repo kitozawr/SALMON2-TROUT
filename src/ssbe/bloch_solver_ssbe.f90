@@ -91,6 +91,19 @@ module bloch_solver_ssbe
         real(8) :: rana_kt_au   = 0d0   ! carrier/bath temperature [Ha]
         real(8) :: rana_area_au = 0d0   ! 2D cell area [a.u.^2]
 
+        ! Approved-improvements bundle (wiki/00 2026-07-04, PR-approved):
+        real(8) :: ring_vq_floor = 0d0   ! B3: relative vq floor (0 = off)
+        logical :: flag_ii_fk    = .false. ! A5: FK-softened II threshold
+        real(8) :: ii_fk_mu      = 0d0   !     reduced mass [m_e]
+        real(8) :: ii_phassist   = 0d0   ! A1: phonon-assisted sideband strength
+        logical :: flag_ii_holes = .false. ! A2: hole-initiated II/Auger
+        real(8) :: ii_cpcn       = 0d0   !     cited Cp/Cn ratio
+        ! C1 ledger: CUMULATIVE per-channel conduction-population and energy
+        ! change (1 = e-ph, 2 = II, 3 = ring Auger, 4 = 2D Rana). Identical on
+        ! every rank (kernels are deterministic on the gathered state).
+        real(8) :: led_dn(4) = 0d0
+        real(8) :: led_de(4) = 0d0
+
         ! Nonlocal impact ionization (Part C4): the hot electron ionizes a
         ! valence partner drawn from the WHOLE BZ (momentum exchange), so the
         ! partner-population / Pauli factors use the global BZ-averaged active-
@@ -217,28 +230,51 @@ subroutine stop_forbidden_channel(name, channel)
 end subroutine stop_forbidden_channel
 
 
-subroutine init_eph_phonon_table(sbe, mp, kT_au)
+subroutine init_eph_phonon_table(sbe, mp, kT_au, ac_qtyp_au)
     use sbe_superres_ssbe, only: bose_factor, mev_to_ha, s_material_params
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_material_params),  intent(in)    :: mp
     real(8),                  intent(in)    :: kT_au
-    integer :: np, p
-    real(8) :: wsum
+    ! A4: when > 0, append a GRID-RESOLVED quasi-elastic acoustic deformation
+    ! mode: q = ac_qtyp_au (one k-grid spacing -- the smallest hop the mesh
+    ! supports), hw_ac = c_s q, effective coupling D_ac(q) = Xi_d q (the
+    ! long-wavelength deformation-potential matrix element). Constants cited
+    ! per material in the registry (Si: Jacoboni-Reggiani; GaAs: Fischetti-
+    ! Laux; graphene: Hwang-Das Sarma). Removes the sub-optical-phonon
+    ! cooling freeze-out.
+    real(8), intent(in), optional :: ac_qtyp_au
+    integer :: np, p, nadd
+    real(8) :: wsum, hw_ac_mev, wraw_ac, q_cm, cs_au
+    real(8), parameter :: BOHR_CM = 0.52917721067d-8, V_AU_CMPS = 2.18769126364d8
 
-    ! The phonon table (energies, raw D^2/hw weights, mode count, polar-LO flag)
-    ! comes entirely from the material registry; this routine only converts to
-    ! a.u., normalizes the weights and evaluates the Bose factors.
     np = mp%eph_nph
-    sbe%eph_nph = np
-    allocate(sbe%eph_hw(np), sbe%eph_nb(np), sbe%eph_wrel(np))
+    nadd = 0
+    hw_ac_mev = 0d0; wraw_ac = 0d0
+    if (present(ac_qtyp_au)) then
+        if (ac_qtyp_au > 0d0 .and. mp%eph_ac_xi_ev > 0d0) then
+            nadd = 1
+            cs_au = mp%eph_ac_cs_cmps / V_AU_CMPS
+            hw_ac_mev = cs_au * ac_qtyp_au * 27.211386245988d3   ! Ha -> meV
+            q_cm = ac_qtyp_au / BOHR_CM
+            ! raw weight in the table convention D[1e8 eV/cm]^2 / hw[meV]
+            wraw_ac = (mp%eph_ac_xi_ev * q_cm / 1d8)**2 / max(hw_ac_mev, 1d-12)
+        end if
+    end if
+    sbe%eph_nph = np + nadd
+    allocate(sbe%eph_hw(np+nadd), sbe%eph_nb(np+nadd), sbe%eph_wrel(np+nadd))
 
-    wsum = sum(mp%eph_wraw(1:np))
+    wsum = sum(mp%eph_wraw(1:np)) + wraw_ac
     do p = 1, np
         sbe%eph_hw(p)   = mev_to_ha(mp%eph_hw_mev(p))
         sbe%eph_wrel(p) = mp%eph_wraw(p) / max(wsum, 1d-300)
         sbe%eph_nb(p)   = bose_factor(sbe%eph_hw(p), kT_au)
     end do
+    if (nadd == 1) then
+        sbe%eph_hw(np+1)   = mev_to_ha(hw_ac_mev)
+        sbe%eph_wrel(np+1) = wraw_ac / max(wsum, 1d-300)
+        sbe%eph_nb(np+1)   = min(bose_factor(sbe%eph_hw(np+1), kT_au), 1d12)
+    end if
 end subroutine init_eph_phonon_table
 
 
@@ -257,7 +293,10 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
                              sbe_eph_eps0_ev, sbe_eph_n, sbe_search_sigma_e_ev, &
                              yn_sbe_bgr_threshold, sbe_bgr_n_gate, sbe_bgr_coeff, &
                              yn_sbe_superres, yn_sbe_eeh, sbe_eeh_nu_sat, epm_material, &
-                             yn_sbe_auger, sbe_auger_c_cm6s, sbe_auger_n_gate_cm3
+                             yn_sbe_auger, sbe_auger_c_cm6s, sbe_auger_n_gate_cm3, &
+                             sbe_ring_vq_floor, yn_sbe_ii_fk_soften, sbe_ii_fk_mu, &
+                             sbe_ii_phassist, yn_sbe_ii_holes, yn_sbe_eph_acoustic, &
+                             num_kgrid
     use sbe_superres_ssbe, only: bose_factor, s_material_params, &
                                  get_material_params, MAT_SUPPORTED
     use math_constants, only: pi
@@ -628,7 +667,28 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
         ! The phonon table and the nu_sat default both come from the material
         ! registry -- the channel cannot run without one.
         if (.not. mp%found) call stop_unknown_material(epm_material, 'electron-phonon (yn_sbe_eph)')
-        call init_eph_phonon_table(sbe, mp, kB_au * sbe_eph_temperature_k)
+        if (yn_sbe_eph_acoustic == 'y') then
+            ! A4: cited-constants gate + the grid-resolved acoustic q
+            if (.not. mp%found .or. mp%eph_ac_xi_ev <= 0d0) &
+                call stop_forbidden_channel(epm_material, &
+                    'acoustic e-ph (yn_sbe_eph_acoustic, no cited Xi_d/c_s; CdS: piezo pending)')
+            block
+                real(8) :: qt, bl
+                integer :: iid
+                qt = huge(1d0)
+                do iid = 1, 3
+                    bl = sqrt(dot_product(gs%b_matrix(iid,1:3), gs%b_matrix(iid,1:3)))
+                    if (num_kgrid(iid) > 1) qt = min(qt, bl / dble(num_kgrid(iid)))
+                end do
+                if (qt >= huge(1d0)) qt = 0d0
+                call init_eph_phonon_table(sbe, mp, kB_au * sbe_eph_temperature_k, ac_qtyp_au=qt)
+                if (lprint) write(*,'(a,f7.3,a)') &
+                    '#   A4 acoustic mode appended: hw_ac = ', &
+                    sbe%eph_hw(sbe%eph_nph)*au_ev*1d3, ' meV (grid-resolved q)'
+            end block
+        else
+            call init_eph_phonon_table(sbe, mp, kB_au * sbe_eph_temperature_k)
+        end if
         ! Saturation rate (overall magnitude cap): material default if not set.
         if (sbe_eph_nu_sat > 0d0) then
             sbe%eph_nusat_au = sbe_eph_nu_sat * (au_fs * 1d-15)
@@ -799,6 +859,59 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     sbe%homo_idx    = homo_idx
     sbe%au_dens_cm3 = 1d24 / (0.52917721067d0)**3     ! a.u.^-3 -> cm^-3 (Bohr in Angstrom)
     sbe%ii_eth0_au  = sbe%ii_eth_au                   ! fixed reference threshold
+    ! ---- approved-improvements parameter parsing (wiki/00 2026-07-04) ----
+    sbe%ring_vq_floor = max(sbe_ring_vq_floor, 0d0)
+    sbe%flag_ii_fk = (yn_sbe_ii_fk_soften == 'y')
+    if (sbe%flag_ii_fk) then
+        if (sbe_ii_fk_mu <= 0d0) then
+            write(*,'(a)') '# ERROR: yn_sbe_ii_fk_soften needs an explicit reduced mass'
+            write(*,'(a)') '#        sbe_ii_fk_mu > 0 (hbar*theta = (F^2/2mu)^(1/3)).'
+            error stop 'A5: sbe_ii_fk_mu required'
+        end if
+        sbe%ii_fk_mu = sbe_ii_fk_mu
+    end if
+    sbe%ii_phassist = max(sbe_ii_phassist, 0d0)
+    if (sbe%ii_phassist > 0d0 .and. sbe%eph_nph <= 0) then
+        ! A1 sidebands need the cited phonon table even when e-ph is off
+        if (.not. mp%found .or. mp%eph_nph <= 0) &
+            call stop_forbidden_channel(epm_material, &
+                'phonon-assisted II/Auger (sbe_ii_phassist, no cited phonon table)')
+        call init_eph_phonon_table(sbe, mp, kB_au * sbe_eph_temperature_k)
+    end if
+    sbe%flag_ii_holes = (yn_sbe_ii_holes == 'y')
+    if (sbe%flag_ii_holes) then
+        if (.not. mp%found .or. mp%ii_cpcn <= 0d0) &
+            call stop_forbidden_channel(epm_material, &
+                'hole-initiated II/Auger (yn_sbe_ii_holes, no cited Cp/Cn)')
+        if (.not. sbe%flag_ring .or. .not. (sbe%flag_impact .or. sbe%flag_auger)) then
+            write(*,'(a)') '# ERROR: yn_sbe_ii_holes rides the nonlocal ring II/Auger:'
+            write(*,'(a)') '#        needs yn_sbe_superres + impact_ionization (and/or auger).'
+            error stop 'A2: hole channel needs the ring II/Auger'
+        end if
+        sbe%ii_cpcn = mp%ii_cpcn
+        if (lprint) write(*,'(a,f7.3,a)') '# A2 hole-initiated II/Auger enabled: Cp/Cn = ', &
+            sbe%ii_cpcn, ' (cited, registry)'
+    end if
+    ! C3: energy-conservation broadening vs the actual grid level spacing
+    if ((sbe%flag_eph .or. sbe%flag_impact .or. sbe%flag_auger) .and. sbe%flag_ring) then
+        block
+            real(8) :: spac
+            integer :: ib2
+            spac = 0d0
+            do ib2 = 1, sbe%n_active_bands - 1
+                spac = spac + abs(gs%eigen(sbe%active_idx(ib2+1), 1) - gs%eigen(sbe%active_idx(ib2), 1))
+            end do
+            spac = spac / dble(max(sbe%n_active_bands - 1, 1))
+            if (lprint .and. sbe%eph_sigma_au > 0d0) then
+                if (sbe%eph_sigma_au < 0.1d0 * spac .or. sbe%eph_sigma_au > 5d0 * spac) &
+                    write(*,'(a,es10.2,a,es10.2,a)') &
+                        '# NOTE (C3): delta_sigma = ', sbe%eph_sigma_au, &
+                        ' Ha vs mean active level spacing ', spac, &
+                        ' Ha -- consider retuning sbe_search_sigma_e_ev to the grid.'
+            end if
+        end block
+    end if
+
     sbe%flag_bgr    = (yn_sbe_bgr_threshold == 'y') .and. sbe%flag_impact
     ! GUARD -- BGR and Sigma^HF are mutually exclusive (wiki/07 Sec 0.2b): both
     ! renormalise the gap with carrier density. With Coulomb HF on, the Houston
@@ -1233,24 +1346,15 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     !$omp end parallel
 
     ! Inter-k e-ph through the super-mode ring: once per step on the post-step
-    ! density matrix (the k-local e-ph is gated off in houston_dissipate when the
-    ! ring is on). MPI-collective (gathers the Houston spectrum), so it MUST be
-    ! outside the OpenMP region and called by every rank.
-    if (sbe%flag_eph .and. sbe%flag_ring) call apply_eph_interk_ring(sbe, gs, Ac_end, dt)
-
-    ! Momentum-conserving nonlocal impact ionization AND its time-reverse
-    ! (Auger recombination) through the ring -- one gather, two kernels (once
-    ! per step, after the unitary evolution; the k-local II and the k-local
-    ! C n^3 Auger are gated off in houston_dissipate when the ring is on).
-    ! MPI-collective -> outside the OpenMP region. The graphene 2D Rana branch
-    ! replaces the gap-threshold kernels entirely (gapless cone).
-    if ((sbe%flag_impact .or. (sbe%flag_auger .and. .not. sbe%flag_rana2d)) &
-        .and. sbe%flag_ring) call apply_ii_interk_ring(sbe, gs, Ac_end, dt)
-
-    ! Graphene 2D Rana Auger/CM through the ring: net CPTP pair relaxation
-    ! R - G of the Dirac-cone populations [R07]. Once per step, MPI-collective.
-    if (sbe%flag_rana2d .and. sbe%flag_ring) &
-        call apply_rana_auger_ring(sbe, gs, Ac_end, dt)
+    ! B2: ALL nonlocal ring channels (inter-k e-ph; nonlocal II + its Auger
+    ! time-reverse; graphene 2D Rana) through ONE shared Houston pass + gather
+    ! -- one ZHEEV per k per step instead of up to three; every channel sees
+    ! the same pre-step populations (Strang-consistent, first order in dt like
+    ! before). MPI-collective -> outside the OpenMP region, every rank calls.
+    ! |E(t)| = |Ac_end - Ac_begin|/dt feeds the A5 Franz-Keldysh threshold.
+    if (sbe%flag_ring .and. (sbe%flag_eph .or. sbe%flag_impact .or. sbe%flag_auger)) &
+        call apply_ring_channels(sbe, gs, Ac_end, &
+             sqrt(dot_product(Ac_end - Ac_begin, Ac_end - Ac_begin)) / dt, dt)
 
 end subroutine dt_evolve_bloch_cf4
 
@@ -2018,150 +2122,24 @@ subroutine apply_eph_relaxation(sbe, nba, rho_ad, evals, Ac, tau)
 end subroutine apply_eph_relaxation
 
 
-! INTER-K e-ph through the super-mode ring (Part C5/D). Enabled when
-! flag_eph.and.flag_ring; replaces the k-local apply_eph_relaxation (which is
-! gated off in houston_dissipate when flag_ring). Self-contained: gathers the
-! instantaneous Houston spectrum (eval) and adiabatic populations (f) over ALL
-! k via comm_summation, calls the pure CPTP map eph_interk_dpop, and applies the
-! net diagonal change dpop + coherence damping (rate gout) to each local rho(k).
-! Carriers thus relax to the energy-matched valley at a DIFFERENT k (true
-! intervalley scattering on the primitive cell). Exactly trace-conserving.
-subroutine apply_eph_interk_ring(sbe, gs, Ac, tau)
-    use sbe_superres_ssbe, only: eph_interk_dpop
-    use eigen_lapack, only: eigen_zheev
-    use communication, only: comm_summation
-    implicit none
-    type(s_sbe_bloch_solver), intent(inout) :: sbe
-    type(s_sbe_gs_info),      intent(in)    :: gs
-    real(8),                  intent(in)    :: Ac(3), tau
-
-    integer :: nba, nk, ik, i, j, in, im, idir, a, b, s
-    real(8) :: a2half, pcoset
-    real(8),    allocatable :: eval_loc(:,:), f_loc(:,:), eval_all(:,:), f_all(:,:)
-    real(8),    allocatable :: dpop(:,:), gout(:,:)
-    complex(8), allocatable :: U_loc(:,:,:), rad_loc(:,:,:)
-    real(8)    :: eigen_active(sbe%n_active_bands), evals(sbe%n_active_bands)
-    complex(8) :: p_active(sbe%n_active_bands, sbe%n_active_bands, 3)
-    complex(8) :: HVG(sbe%n_active_bands, sbe%n_active_bands)
-    complex(8) :: W(sbe%n_active_bands, sbe%n_active_bands)
-    complex(8) :: t1(sbe%n_active_bands, sbe%n_active_bands)
-    complex(8) :: rad(sbe%n_active_bands, sbe%n_active_bands)
-
-    nba = sbe%n_active_bands
-    if (nba <= 0 .or. sbe%eph_nph <= 0) return
-    nk = sbe%nk
-    a2half = 0.5d0 * dot_product(Ac, Ac)
-    allocate(eval_loc(nba, nk), f_loc(nba, nk), eval_all(nba, nk), f_all(nba, nk))
-    allocate(dpop(nba, nk), gout(nba, nk))
-    allocate(U_loc(nba, nba, sbe%ik_min:sbe%ik_max), &
-             rad_loc(nba, nba, sbe%ik_min:sbe%ik_max))
-    eval_loc = 0d0; f_loc = 0d0
-
-    ! Pass 1: local instantaneous Houston spectrum + adiabatic populations.
-    do ik = sbe%ik_min, sbe%ik_max
-        do idir = 1, 3
-            do j = 1, nba
-                im = sbe%active_idx(j)
-                do i = 1, nba
-                    in = sbe%active_idx(i)
-                    p_active(i, j, idir) = gs%p_tm_matrix(in, im, idir, ik)
-                    if (sbe%flag_vnl_correction) &
-                        p_active(i, j, idir) = p_active(i, j, idir) + gs%rvnl_tm_matrix(in, im, idir, ik)
-                end do
-            end do
-        end do
-        if (sbe%flag_coset_proj) then
-            do j = 1, nba
-                im = sbe%active_idx(j)
-                do i = 1, nba
-                    if (i == j) cycle
-                    in = sbe%active_idx(i)
-                    pcoset = 0d0
-                    do s = 1, 4
-                        pcoset = pcoset + gs%unfold_w(s, in, ik) * gs%unfold_w(s, im, ik)
-                    end do
-                    p_active(i, j, 1:3) = p_active(i, j, 1:3) * pcoset
-                end do
-            end do
-        end if
-        do i = 1, nba
-            eigen_active(i) = gs%eigen(sbe%active_idx(i), ik)
-        end do
-        call build_HVG(nba, eigen_active, p_active, Ac, HVG)
-        if (sbe%flag_coulomb) HVG = HVG + sbe%sigma_hf(:, :, ik)
-        call eigen_zheev(HVG, evals, W)
-        do j = 1, nba
-            im = sbe%active_idx(j)
-            do i = 1, nba
-                in = sbe%active_idx(i)
-                rad(i, j) = sbe%rho(in, im, ik)
-            end do
-        end do
-        ! adiabatic rho~ = W^dagger rho W
-        call ZGEMM('C', 'N', nba, nba, nba, dcmplx(1d0,0d0), W, nba, rad, nba, dcmplx(0d0,0d0), t1, nba)
-        call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0,0d0), t1, nba, W, nba, dcmplx(0d0,0d0), rad, nba)
-        U_loc(:, :, ik) = W
-        rad_loc(:, :, ik) = rad
-        do a = 1, nba
-            eval_loc(a, ik) = evals(a)
-            f_loc(a, ik)    = real(rad(a, a))
-        end do
-    end do
-
-    ! Gather the global Houston spectrum (each rank fills its k-slice; sum -> all).
-    call comm_summation(eval_loc, eval_all, nba * nk, sbe%icomm)
-    call comm_summation(f_loc,    f_all,    nba * nk, sbe%icomm)
-
-    ! Net CPTP inter-k population change + per-source out-rate.
-    call eph_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
-                         sbe%eph_ecbm_au, sbe%eph_evbm_au, sbe%eph_nph, &
-                         sbe%eph_hw(1:sbe%eph_nph), sbe%eph_wrel(1:sbe%eph_nph), &
-                         sbe%eph_nb(1:sbe%eph_nph), sbe%eph_nusat_au, sbe%eph_eps0_au, &
-                         sbe%eph_n, sbe%eph_sigma_au, tau, dpop, gout)
-
-    ! Pass 2: apply to each LOCAL rho(k) -- diagonal += dpop, coherences damped.
-    do ik = sbe%ik_min, sbe%ik_max
-        rad = rad_loc(:, :, ik)
-        W   = U_loc(:, :, ik)
-        do a = 1, nba
-            rad(a, a) = rad(a, a) + dcmplx(dpop(a, ik), 0d0)
-        end do
-        do b = 1, nba
-            do a = 1, nba
-                if (a /= b) rad(a, b) = rad(a, b) * exp(-0.5d0 * (gout(a, ik) + gout(b, ik)) * tau)
-            end do
-        end do
-        ! back to the fixed band basis: rho = W rho~ W^dagger
-        call ZGEMM('N', 'N', nba, nba, nba, dcmplx(1d0,0d0), W, nba, rad, nba, dcmplx(0d0,0d0), t1, nba)
-        call ZGEMM('N', 'C', nba, nba, nba, dcmplx(1d0,0d0), t1, nba, W, nba, dcmplx(0d0,0d0), rad, nba)
-        do j = 1, nba
-            im = sbe%active_idx(j)
-            do i = 1, nba
-                in = sbe%active_idx(i)
-                sbe%rho(in, im, ik) = rad(i, j)
-            end do
-        end do
-    end do
-
-    deallocate(eval_loc, f_loc, eval_all, f_all, dpop, gout, U_loc, rad_loc)
-end subroutine apply_eph_interk_ring
-
-
-! MOMENTUM-CONSERVING nonlocal impact ionization through the ring (Part C4/D).
-! Enabled when flag_impact.and.flag_ring; replaces the k-local apply_impact_
-! ionization (gated off in houston_dissipate when flag_ring). The true 2-particle
-! event hot-e(k1)+valence-e(k2) -> e(k1')+e(k2') conserves crystal momentum
-! k1+k2=k1'+k2' (mod G) via the MP index map -- so for an INDIRECT-gap material
-! (Si) the created pair lands in the correct conduction valleys, instead of the
-! old BZ-averaged k-local imitation. Self-contained: builds the MP map once
-! (gated off if the grid is not a regular MP mesh), gathers the Houston spectrum,
-! calls the pure CPTP ii_interk_dpop, and applies dpop (+ amplitude-damping
-! coherence factor) to each local rho(k). Exactly trace-conserving / carrier-
-! multiplying.
-subroutine apply_ii_interk_ring(sbe, gs, Ac, tau)
-    use sbe_superres_ssbe, only: ii_interk_dpop, auger_interk_dpop, mp_grid_triple, &
-                                 get_material_params, s_material_params, &
-                                 debye_kappa2, tf_kappa2_degenerate
+!=============================================================================
+! B2: UNIFIED nonlocal ring channels -- ONE shared Houston pass + gather for
+! inter-k e-ph, nonlocal II + its Auger time-reverse, and the graphene 2D Rana
+! Auger/CM. One ZHEEV per k per step (was up to three); every channel computes
+! its dpop from the SAME gathered pre-step populations and is applied
+! sequentially through the SHARED basis (each apply re-extracts the CURRENT
+! rho, so CPTP composition is exact). Also hosts, per the approved wiki/00
+! plan: B1 (precomputed vq table, bit-identical), B3 (vq windowing floor),
+! A1 (phonon-assisted sidebands), A2 (hole-initiated channel), A3 (screened
+! Frohlich 1/q^2 weight for the polar-LO e-ph mode), A5 (Franz-Keldysh-
+! softened II threshold from |E(t)|), A8 (carrier-temperature-aware
+! lambda^2(n, T_c)), and C1 (the per-channel ledger).
+!=============================================================================
+subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
+    use sbe_superres_ssbe, only: eph_interk_dpop, ii_interk_dpop, auger_interk_dpop, &
+                                 rana_auger_dpop, mp_grid_triple, get_material_params, &
+                                 s_material_params, build_vq_table, t_ring_opts, &
+                                 debye_kappa2, tf_kappa2_degenerate, fit_fermi_dirac
     use eigen_lapack, only: eigen_zheev
     use communication, only: comm_summation
     use salmon_global, only: num_kgrid, epm_material, sbe_eph_temperature_k
@@ -2170,15 +2148,16 @@ subroutine apply_ii_interk_ring(sbe, gs, Ac, tau)
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info),      intent(in)    :: gs
-    real(8),                  intent(in)    :: Ac(3), tau
+    real(8),                  intent(in)    :: Ac(3), efield_au, tau
 
     type(s_material_params) :: mp
-    integer :: nba, nk, ik, i, j, in, im, idir, a, b, s, m(3), iv, ic, lidx
-    real(8) :: a2half, pcoset, resid, maxresid, sig, fold, fnew, damp_a
-    real(8) :: eps_inf, qtf2, wp2, lambda2, q2reg, n_val, kf, blen2
-    real(8),    allocatable :: eval_loc(:,:), f_loc(:,:), eval_all(:,:), f_all(:,:), dpop(:,:)
-    real(8),    allocatable :: damp(:)
-    complex(8), allocatable :: U_loc(:,:,:), rad_loc(:,:,:)
+    type(t_ring_opts) :: opts
+    integer :: nba, nk, ik, i, j, in, im, idir, a, s, m(3), iv, ic, lidx, ntab
+    real(8) :: a2half, pcoset, resid, maxresid, sig, rnet
+    real(8) :: eps_inf, qtf2, wp2, lambda2, q2reg, n_val, kf, blen2, kt_au
+    real(8),    allocatable :: eval_loc(:,:), f_loc(:,:), eval_all(:,:), f_all(:,:)
+    real(8),    allocatable :: dpop(:,:), dpop2(:,:), dpop_loc(:,:), gout(:,:)
+    complex(8), allocatable :: U_loc(:,:,:)
     real(8)    :: eigen_active(sbe%n_active_bands), evals(sbe%n_active_bands)
     complex(8) :: p_active(sbe%n_active_bands, sbe%n_active_bands, 3)
     complex(8) :: HVG(sbe%n_active_bands, sbe%n_active_bands)
@@ -2191,63 +2170,14 @@ subroutine apply_ii_interk_ring(sbe, gs, Ac, tau)
     nk = sbe%nk
     iv = sbe%nv_act
     ic = sbe%nv_act + 1
-    if (iv < 1 .or. ic > nba) return
-
-    ! Build the MP momentum-conservation map once (gate off on a non-MP grid).
-    if (.not. sbe%kmap_built) then
-        allocate(sbe%kmap_idx(3, nk), sbe%kmap_lut(0:nk-1))
-        sbe%kmap_n = num_kgrid
-        sbe%kmap_lut = 0
-        maxresid = 0d0
-        do ik = 1, nk
-            call mp_grid_triple(gs%kpoint(:, ik), num_kgrid, m, resid)
-            sbe%kmap_idx(:, ik) = m
-            maxresid = max(maxresid, resid)
-            lidx = m(1) + num_kgrid(1) * (m(2) + num_kgrid(2) * m(3))
-            if (lidx >= 0 .and. lidx <= nk - 1) sbe%kmap_lut(lidx) = ik
-        end do
-        sbe%kmap_ok = (maxresid < 1d-6) .and. &
-                      (num_kgrid(1) * num_kgrid(2) * num_kgrid(3) == nk) .and. &
-                      (minval(sbe%kmap_lut) >= 1)
-        sbe%kmap_built = .true.
-        if (sbe%irank == 0 .and. .not. sbe%kmap_ok) &
-            write(*,'(a)') '# NOTE: momentum-resolved nonlocal II disabled '// &
-                           '(k-grid is not a regular MP mesh)'
-    end if
-    if (.not. sbe%kmap_ok) return
-
     a2half = 0.5d0 * dot_product(Ac, Ac)
-    sig    = max(sbe%eph_sigma_au, 2d-3)     ! energy-conservation broadening
+    sig    = max(sbe%eph_sigma_au, 2d-3)
 
-    ! CDRB eps(q) screening parameters of the VALENCE electron gas [K15 Eq. (8)]:
-    ! eps_inf from the cited material registry; q_TF and omega_p from the
-    ! valence density n = nelec/V_cell (a.u.). Free-carrier lambda^2: 0 for Si
-    ! (CORRECT by Burt's dynamical argument [L90]: the ~1 eV Auger transition
-    ! frequency >> the carrier plasma frequency, so the static free-carrier
-    ! screen does not act); for GaAs (registry dyn_lambda_ok) the density-
-    ! dependent Debye/TF lambda^2(n(t)) is evaluated on the GATHERED excited
-    ! population after the comm_summation below (Part-G primitives).
-    ! q2reg is the grid-scale q->0 regulariser of the discrete BZ sum (replaces
-    ! the old FIXED reduced-space kappa2 = 0.05; refines with the k-grid).
-    mp = get_material_params(epm_material)
-    eps_inf = merge(mp%eps_inf, 1d0, mp%found)
-    n_val   = dble(gs%ne) / max(gs%volume, 1d-30)
-    kf      = (3d0 * pi * pi * n_val) ** (1d0 / 3d0)
-    qtf2    = 4d0 * kf / pi
-    wp2     = 4d0 * pi * n_val
-    lambda2 = 0d0
-    q2reg   = huge(1d0)
-    do idir = 1, 3
-        blen2 = dot_product(gs%b_matrix(idir, 1:3), gs%b_matrix(idir, 1:3))
-        q2reg = min(q2reg, blen2 / dble(max(sbe%kmap_n(idir), 1))**2)
-    end do
-    q2reg = 0.25d0 * q2reg                   ! (half the smallest grid spacing)^2
-    allocate(eval_loc(nba,nk), f_loc(nba,nk), eval_all(nba,nk), f_all(nba,nk), dpop(nba,nk))
-    allocate(U_loc(nba,nba, sbe%ik_min:sbe%ik_max), rad_loc(nba,nba, sbe%ik_min:sbe%ik_max))
-    allocate(damp(nba))
+    allocate(eval_loc(nba,nk), f_loc(nba,nk), eval_all(nba,nk), f_all(nba,nk))
+    allocate(dpop(nba,nk), U_loc(nba,nba, sbe%ik_min:sbe%ik_max))
     eval_loc = 0d0; f_loc = 0d0
 
-    ! Pass 1: local instantaneous Houston spectrum + adiabatic populations.
+    ! ---- shared pass 1: Houston spectrum + populations, gathered over all k --
     do ik = sbe%ik_min, sbe%ik_max
         do idir = 1, 3
             do j = 1, nba
@@ -2280,6 +2210,7 @@ subroutine apply_ii_interk_ring(sbe, gs, Ac, tau)
         call build_HVG(nba, eigen_active, p_active, Ac, HVG)
         if (sbe%flag_coulomb) HVG = HVG + sbe%sigma_hf(:, :, ik)
         call eigen_zheev(HVG, evals, W)
+        U_loc(:,:,ik) = W
         do j = 1, nba
             im = sbe%active_idx(j)
             do i = 1, nba
@@ -2289,176 +2220,210 @@ subroutine apply_ii_interk_ring(sbe, gs, Ac, tau)
         end do
         call ZGEMM('C','N', nba,nba,nba, dcmplx(1d0,0d0), W,nba, rad,nba, dcmplx(0d0,0d0), t1,nba)
         call ZGEMM('N','N', nba,nba,nba, dcmplx(1d0,0d0), t1,nba, W,nba, dcmplx(0d0,0d0), rad,nba)
-        U_loc(:,:,ik) = W
-        rad_loc(:,:,ik) = rad
         do a = 1, nba
             eval_loc(a,ik) = evals(a)
             f_loc(a,ik)    = real(rad(a,a))
         end do
     end do
-
     call comm_summation(eval_loc, eval_all, nba*nk, sbe%icomm)
     call comm_summation(f_loc,    f_all,    nba*nk, sbe%icomm)
 
-    ! Dynamic free-carrier screening lambda^2(n(t)) (GaAs; registry-gated).
-    ! Excited-electron density from the GATHERED populations; the Part-G
-    ! degeneracy-aware crossover min(Debye, degenerate-TF): each formula
-    ! OVERestimates kappa^2 outside its own regime (Debye ~ n/kT diverges in
-    ! the degenerate limit, TF ~ n^(1/3) overestimates in the dilute limit),
-    ! so the smaller one is the valid branch at every n. Si keeps lambda2 = 0
-    ! (Burt [L90]; dyn_lambda_ok = .false. in the registry).
-    if (mp%found .and. mp%dyn_lambda_ok) then
-        block
-            real(8) :: n_exc_au, kt_au
-            logical, save :: lam_printed = .false.
-            n_exc_au = sum(f_all(ic:nba, :)) / (dble(nk) * max(gs%volume, 1d-30))
-            if (n_exc_au > 0d0) then
-                kt_au = kB_au * max(sbe_eph_temperature_k, 1d0)
-                lambda2 = min(debye_kappa2(n_exc_au, mp%eps0, kt_au), &
-                              tf_kappa2_degenerate(n_exc_au, mp%eps0))
-                ! one-time diagnostic at the first significant screen
-                if (.not. lam_printed .and. lambda2 > 1d-4 .and. sbe%irank == 0) then
-                    write(*, '(a,es12.4,a,es12.4,a)') &
-                        '# ring II/Auger: dynamic free-carrier screen active, '// &
-                        'lambda^2 = ', lambda2, ' a.u. at n_exc = ', &
-                        n_exc_au * sbe%au_dens_cm3, ' cm^-3 (Debye/TF crossover)'
-                    lam_printed = .true.
+    ! ---- II/Auger screening context + the B1 vq table (also reused by A3) ---
+    mp = get_material_params(epm_material)
+    if ((sbe%flag_impact .or. sbe%flag_auger) .and. .not. sbe%flag_rana2d &
+        .or. (sbe%flag_eph .and. mp%found .and. mp%eph_polar)) then
+        eps_inf = merge(mp%eps_inf, 1d0, mp%found)
+        n_val   = dble(gs%ne) / max(gs%volume, 1d-30)
+        kf      = (3d0 * pi * pi * n_val) ** (1d0 / 3d0)
+        qtf2    = 4d0 * kf / pi
+        wp2     = 4d0 * pi * n_val
+        lambda2 = 0d0
+        q2reg   = huge(1d0)
+        do idir = 1, 3
+            blen2 = dot_product(gs%b_matrix(idir, 1:3), gs%b_matrix(idir, 1:3))
+            q2reg = min(q2reg, blen2 / dble(max(num_kgrid(idir), 1))**2)
+        end do
+        q2reg = 0.25d0 * q2reg
+        ! dynamic free-carrier lambda^2(n(t)) -- GaAs registry gate; A8: use the
+        ! CARRIER temperature from an FD fit of the gathered CB distribution
+        ! when carriers exist (Debye ~ n/kT overestimates for a hot plasma).
+        if (mp%found .and. mp%dyn_lambda_ok .and. ic <= nba) then
+            block
+                real(8) :: n_exc_au, ntot, etot, beta, muf
+                real(8), allocatable :: ecb(:), fcb(:), ftgt(:)
+                logical :: okf
+                logical, save :: lam_printed = .false.
+                integer :: ncb, aa, kk, ii2
+                n_exc_au = sum(f_all(ic:nba, :)) / (dble(nk) * max(gs%volume, 1d-30))
+                if (n_exc_au > 0d0) then
+                    kt_au = kB_au * max(sbe_eph_temperature_k, 1d0)
+                    ncb = (nba - ic + 1) * nk
+                    allocate(ecb(ncb), fcb(ncb), ftgt(ncb))
+                    ii2 = 0
+                    ntot = 0d0; etot = 0d0
+                    do kk = 1, nk
+                        do aa = ic, nba
+                            ii2 = ii2 + 1
+                            ecb(ii2) = eval_all(aa, kk)
+                            fcb(ii2) = min(max(f_all(aa, kk) / sbe%occ_max, 0d0), 1d0)
+                            ntot = ntot + fcb(ii2)
+                            etot = etot + ecb(ii2) * fcb(ii2)
+                        end do
+                    end do
+                    if (ntot > 1d-9 .and. dble(ncb) - ntot > 1d-9) then
+                        call fit_fermi_dirac(ncb, ecb, ntot, etot, beta, muf, ftgt, okf)
+                        if (okf .and. beta > 1d-12) kt_au = max(kt_au, 1d0 / beta)
+                    end if
+                    lambda2 = min(debye_kappa2(n_exc_au, mp%eps0, kt_au), &
+                                  tf_kappa2_degenerate(n_exc_au, mp%eps0))
+                    if (.not. lam_printed .and. lambda2 > 1d-4 .and. sbe%irank == 0) then
+                        write(*, '(a,es12.4,a,es12.4,a,f8.1,a)') &
+                            '# ring II/Auger: dynamic free-carrier screen, lambda^2 = ', &
+                            lambda2, ' a.u. at n_exc = ', n_exc_au * sbe%au_dens_cm3, &
+                            ' cm^-3, T_c = ', kt_au / kB_au, ' K (Debye/TF crossover)'
+                        lam_printed = .true.
+                    end if
                 end if
-            end if
-        end block
+            end block
+        end if
+        ! B1: the signed-difference vq table (bit-identical to the direct call)
+        ntab = (2*num_kgrid(1)-1) * (2*num_kgrid(2)-1) * (2*num_kgrid(3)-1)
+        allocate(opts%vq_tab(ntab))
+        call build_vq_table(num_kgrid, gs%b_matrix, eps_inf, qtf2, wp2, lambda2, &
+                            q2reg, opts%vq_tab)
+        opts%use_tab  = .true.
+        opts%vq_floor = sbe%ring_vq_floor * maxval(opts%vq_tab)     ! B3 (0 = off)
     end if
 
-    ! One gather, two detailed-balance-partner kernels: impact ionization
-    ! (generation) and its exact time-reverse, Auger recombination -- same
-    ! quadruples, |V(q)|^2 and energy broadening, swapped occupation factors.
-    ! The Auger rate scale IS the cited II magnitude (shared |M|^2): no
-    ! separate coefficient. Both ride the same Houston spectrum + ring gather.
-    ! COST: the kernels are O(nk^3) but exactly additive over the outer source
-    ! k -- each rank runs only its own ik_min..ik_max subrange and the dpop is
-    ! comm_summation'ed (O(nk^3/P); serial runs are bit-identical, the rank
-    ! split only reorders float additions across ranks).
-    block
-        real(8), allocatable :: dpop_loc(:,:), dpop_a(:,:)
-        allocate(dpop_loc(nba, nk), dpop_a(nba, nk))
-        dpop_loc = 0d0
-        if (sbe%flag_impact) then
-            call ii_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
-                                sbe%ii_ecbm_au, sbe%ii_eth_au, sbe%ii_pref_au, sbe%ii_exponent, &
-                                iv, ic, sbe%kmap_idx, sbe%kmap_n, sbe%kmap_lut, &
-                                gs%b_matrix, eps_inf, qtf2, wp2, lambda2, q2reg, sig, tau, dpop_loc, &
-                                i1_lo=sbe%ik_min, i1_hi=sbe%ik_max)
+    ! ---- channel 1: inter-k e-ph (+ A3 screened Frohlich weight, polar LO) --
+    if (sbe%flag_eph .and. sbe%eph_nph > 0) then
+        allocate(gout(nba, nk))
+        if (mp%found .and. mp%eph_polar .and. allocated(opts%vq_tab)) then
+            if (.not. sbe%kmap_built) call build_kmap(sbe, gs)
         end if
-        if (sbe%flag_auger) then
-            call auger_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
-                                   sbe%ii_ecbm_au, sbe%ii_eth_au, sbe%ii_pref_au, sbe%ii_exponent, &
-                                   iv, ic, sbe%kmap_idx, sbe%kmap_n, sbe%kmap_lut, &
-                                   gs%b_matrix, eps_inf, qtf2, wp2, lambda2, q2reg, sig, tau, dpop_a, &
-                                   i1_lo=sbe%ik_min, i1_hi=sbe%ik_max)
-            dpop_loc = dpop_loc + dpop_a
+        if (mp%found .and. mp%eph_polar .and. allocated(opts%vq_tab) .and. sbe%kmap_ok) then
+            ! A3: screened Frohlich 1/q^2 weight on the polar-LO mode (mode 1),
+            ! normalized to a unit table average so the cited nu_sat total-rate
+            ! calibration is preserved (only the q-DISTRIBUTION changes).
+            call eph_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
+                     sbe%eph_ecbm_au, sbe%eph_evbm_au, sbe%eph_nph, &
+                     sbe%eph_hw(1:sbe%eph_nph), sbe%eph_wrel(1:sbe%eph_nph), &
+                     sbe%eph_nb(1:sbe%eph_nph), sbe%eph_nusat_au, sbe%eph_eps0_au, &
+                     sbe%eph_n, sbe%eph_sigma_au, tau, dpop, gout, &
+                     kidx=sbe%kmap_idx, kn=sbe%kmap_n, pol_tab=opts%vq_tab, &
+                     pol_norm=sum(opts%vq_tab)/dble(size(opts%vq_tab)), ip_polar=1)
+        else
+            call eph_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
+                     sbe%eph_ecbm_au, sbe%eph_evbm_au, sbe%eph_nph, &
+                     sbe%eph_hw(1:sbe%eph_nph), sbe%eph_wrel(1:sbe%eph_nph), &
+                     sbe%eph_nb(1:sbe%eph_nph), sbe%eph_nusat_au, sbe%eph_eps0_au, &
+                     sbe%eph_n, sbe%eph_sigma_au, tau, dpop, gout)
         end if
-        call comm_summation(dpop_loc, dpop, nba*nk, sbe%icomm)
-        deallocate(dpop_loc, dpop_a)
-    end block
+        call ring_ledger(sbe, 1, nba, nk, ic, eval_all, dpop)
+        call ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
+        deallocate(gout)
+    end if
 
-    ! Pass 2: apply to each LOCAL rho(k). Amplitude-damping coherence factor:
-    ! a level that loses population damps its coherences by sqrt(f_new/f_old).
-    do ik = sbe%ik_min, sbe%ik_max
-        rad = rad_loc(:,:,ik)
-        W   = U_loc(:,:,ik)
-        do a = 1, nba
-            fold = real(rad(a,a))
-            fnew = max(fold + dpop(a,ik), 0d0)
-            if (dpop(a,ik) < 0d0 .and. fold > 1d-12) then
-                damp(a) = sqrt(fnew / fold)
-            else
-                damp(a) = 1d0
+    ! ---- channels 2+3: nonlocal II + ring Auger (gap materials) -------------
+    if ((sbe%flag_impact .or. sbe%flag_auger) .and. .not. sbe%flag_rana2d) then
+        if (.not. sbe%kmap_built) call build_kmap(sbe, gs)
+        if (sbe%kmap_ok) then
+            ! A5: Franz-Keldysh electro-optic width from the instantaneous field
+            opts%fk_theta = 0d0
+            if (sbe%flag_ii_fk .and. efield_au > 0d0) &
+                opts%fk_theta = (efield_au**2 / (2d0 * sbe%ii_fk_mu)) ** (1d0/3d0)
+            ! A1: phonon-assisted sidebands from the cited table
+            if (sbe%ii_phassist > 0d0 .and. sbe%eph_nph > 0) then
+                opts%phassist = sbe%ii_phassist
+                opts%nph  = sbe%eph_nph
+                opts%hw   = sbe%eph_hw(1:sbe%eph_nph)
+                opts%nbb  = sbe%eph_nb(1:sbe%eph_nph)
+                opts%wrel = sbe%eph_wrel(1:sbe%eph_nph)
             end if
-            rad(a,a) = dcmplx(fnew, 0d0)
-        end do
-        do b = 1, nba
-            do a = 1, nba
-                if (a /= b) rad(a,b) = rad(a,b) * damp(a) * damp(b)
-            end do
-        end do
-        call ZGEMM('N','N', nba,nba,nba, dcmplx(1d0,0d0), W,nba, rad,nba, dcmplx(0d0,0d0), t1,nba)
-        call ZGEMM('N','C', nba,nba,nba, dcmplx(1d0,0d0), t1,nba, W,nba, dcmplx(0d0,0d0), rad,nba)
-        do j = 1, nba
-            im = sbe%active_idx(j)
-            do i = 1, nba
-                in = sbe%active_idx(i)
-                sbe%rho(in, im, ik) = rad(i, j)
-            end do
-        end do
-    end do
+            ! A2: hole-initiated channel, cited Cp/Cn scale; Houston VBM
+            if (sbe%flag_ii_holes) then
+                opts%pref_h = sbe%ii_cpcn * sbe%ii_pref_au
+                opts%evbm   = maxval(eval_all(iv, :))
+            end if
+            allocate(dpop_loc(nba, nk), dpop2(nba, nk))
+            dpop_loc = 0d0
+            if (sbe%flag_impact) then
+                call ii_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
+                        sbe%ii_ecbm_au, sbe%ii_eth_au, sbe%ii_pref_au, sbe%ii_exponent, &
+                        iv, ic, sbe%kmap_idx, sbe%kmap_n, sbe%kmap_lut, &
+                        gs%b_matrix, eps_inf, qtf2, wp2, lambda2, q2reg, sig, tau, dpop_loc, &
+                        i1_lo=sbe%ik_min, i1_hi=sbe%ik_max, opts=opts)
+                call comm_summation(dpop_loc, dpop, nba*nk, sbe%icomm)
+                call ring_ledger(sbe, 2, nba, nk, ic, eval_all, dpop)
+            else
+                dpop = 0d0
+            end if
+            if (sbe%flag_auger) then
+                dpop_loc = 0d0
+                call auger_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
+                        sbe%ii_ecbm_au, sbe%ii_eth_au, sbe%ii_pref_au, sbe%ii_exponent, &
+                        iv, ic, sbe%kmap_idx, sbe%kmap_n, sbe%kmap_lut, &
+                        gs%b_matrix, eps_inf, qtf2, wp2, lambda2, q2reg, sig, tau, dpop_loc, &
+                        i1_lo=sbe%ik_min, i1_hi=sbe%ik_max, opts=opts)
+                call comm_summation(dpop_loc, dpop2, nba*nk, sbe%icomm)
+                call ring_ledger(sbe, 3, nba, nk, ic, eval_all, dpop2)
+                dpop = dpop + dpop2
+            end if
+            call ring_apply_dpop(sbe, gs, U_loc, dpop, tau)
+            deallocate(dpop_loc, dpop2)
+        end if
+    end if
 
-    deallocate(eval_loc, f_loc, eval_all, f_all, dpop, U_loc, rad_loc, damp)
-end subroutine apply_ii_interk_ring
+    ! ---- channel 4: graphene 2D Rana Auger/CM -------------------------------
+    if (sbe%flag_rana2d .and. iv >= 1 .and. ic <= nba) then
+        call rana_auger_dpop(nk, nba, f_all, sbe%occ_max, iv, ic, sbe%rana_area_au, &
+                             sbe%rana_kt_au, sbe%rana_vf_au, sbe%rana_eps_r, tau, &
+                             dpop, rnet)
+        call ring_ledger(sbe, 4, nba, nk, ic, eval_all, dpop)
+        call ring_apply_dpop(sbe, gs, U_loc, dpop, tau)
+    end if
+
+    deallocate(eval_loc, f_loc, eval_all, f_all, dpop, U_loc)
+end subroutine apply_ring_channels
 
 
-!=============================================================================
-! Graphene 2D Rana Auger / carrier multiplication through the ring [R07;
-! wiki/07 sec.6] -- the wiring of the validated rana_* primitives into the
-! dynamics (wiki/00 TODO-1). Once per step, MPI-collective:
-!   pass 1: local instantaneous Houston spectrum + adiabatic populations
-!           (same construction as apply_ii_interk_ring);
-!   gather: populations over ALL k (comm_summation over sbe%icomm);
-!   kernel: rana_auger_dpop -- net CPTP pair relaxation R - G on the
-!           instantaneous quasi-Fermi levels (exact trace conservation, smooth
-!           saturation caps, R = G fixed point at equilibrium);
-!   pass 2: apply dpop to the local rho(k) diagonals + amplitude-damping of
-!           the coherences by sqrt(f_new/f_old) (same CPTP factor as the
-!           other ring channels), rotate back.
-!=============================================================================
-subroutine apply_rana_auger_ring(sbe, gs, Ac, tau)
-    use sbe_superres_ssbe, only: rana_auger_dpop
-    use eigen_lapack, only: eigen_zheev
-    use communication, only: comm_summation
+! C1: accumulate the per-channel ledger -- the conduction-population change
+! (pair creation > 0 / recombination < 0) and the population-weighted energy
+! change of channel ich in {1 e-ph, 2 II, 3 ring Auger, 4 Rana}. dpop is the
+! full-BZ change (identical on every rank), so the ledger needs no reduction.
+subroutine ring_ledger(sbe, ich, nba, nk, ic, eval_all, dpop)
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    integer, intent(in) :: ich, nba, nk, ic
+    real(8), intent(in) :: eval_all(nba, nk), dpop(nba, nk)
+    if (ic <= nba) sbe%led_dn(ich) = sbe%led_dn(ich) + sum(dpop(ic:nba, :)) / dble(nk)
+    sbe%led_de(ich) = sbe%led_de(ich) + sum(eval_all * dpop) / dble(nk)
+end subroutine ring_ledger
+
+
+! Shared pass 2: apply a Houston-diagonal population change dpop to the LOCAL
+! rho(k) through the SHARED basis U_loc, re-extracting the CURRENT rho (so
+! sequential channel application composes exactly). Coherence damping:
+! sqrt(f_new/f_old) for population-losing levels (the exact amplitude-damping
+! Kraus factor) and, when gout is present (e-ph), the out-rate exponential
+! exp(-(g_a+g_b) tau / 2) -- the two conventions of the pre-B2 routines.
+subroutine ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info),      intent(in)    :: gs
-    real(8),                  intent(in)    :: Ac(3), tau
-
-    integer :: nba, nk, ik, i, j, in, im, idir, a, b, iv, ic
-    real(8) :: fold, fnew, rnet
-    real(8),    allocatable :: f_loc(:,:), f_all(:,:), dpop(:,:), damp(:)
-    complex(8), allocatable :: U_loc(:,:,:), rad_loc(:,:,:)
-    real(8)    :: eigen_active(sbe%n_active_bands), evals(sbe%n_active_bands)
-    complex(8) :: p_active(sbe%n_active_bands, sbe%n_active_bands, 3)
-    complex(8) :: HVG(sbe%n_active_bands, sbe%n_active_bands)
+    complex(8), intent(in) :: U_loc(sbe%n_active_bands, sbe%n_active_bands, sbe%ik_min:sbe%ik_max)
+    real(8),    intent(in) :: dpop(sbe%n_active_bands, sbe%nk), tau
+    real(8),    intent(in), optional :: gout(sbe%n_active_bands, sbe%nk)
+    integer :: ik, i, j, in, im, a, b, nba
+    real(8) :: fold, fnew
+    real(8)    :: damp(sbe%n_active_bands)
     complex(8) :: W(sbe%n_active_bands, sbe%n_active_bands)
     complex(8) :: t1(sbe%n_active_bands, sbe%n_active_bands)
     complex(8) :: rad(sbe%n_active_bands, sbe%n_active_bands)
 
     nba = sbe%n_active_bands
-    if (nba <= 0) return
-    nk = sbe%nk
-    iv = sbe%nv_act
-    ic = sbe%nv_act + 1
-    if (iv < 1 .or. ic > nba) return
-
-    allocate(f_loc(nba,nk), f_all(nba,nk), dpop(nba,nk), damp(nba))
-    allocate(U_loc(nba,nba, sbe%ik_min:sbe%ik_max), rad_loc(nba,nba, sbe%ik_min:sbe%ik_max))
-    f_loc = 0d0
-
-    ! Pass 1: local instantaneous Houston spectrum + adiabatic populations.
     do ik = sbe%ik_min, sbe%ik_max
-        do idir = 1, 3
-            do j = 1, nba
-                im = sbe%active_idx(j)
-                do i = 1, nba
-                    in = sbe%active_idx(i)
-                    p_active(i, j, idir) = gs%p_tm_matrix(in, im, idir, ik)
-                    if (sbe%flag_vnl_correction) &
-                        p_active(i, j, idir) = p_active(i, j, idir) + gs%rvnl_tm_matrix(in, im, idir, ik)
-                end do
-            end do
-        end do
-        do i = 1, nba
-            eigen_active(i) = gs%eigen(sbe%active_idx(i), ik)
-        end do
-        call build_HVG(nba, eigen_active, p_active, Ac, HVG)
-        if (sbe%flag_coulomb) HVG = HVG + sbe%sigma_hf(:, :, ik)
-        call eigen_zheev(HVG, evals, W)
+        W = U_loc(:,:,ik)
         do j = 1, nba
             im = sbe%active_idx(j)
             do i = 1, nba
@@ -2468,24 +2433,6 @@ subroutine apply_rana_auger_ring(sbe, gs, Ac, tau)
         end do
         call ZGEMM('C','N', nba,nba,nba, dcmplx(1d0,0d0), W,nba, rad,nba, dcmplx(0d0,0d0), t1,nba)
         call ZGEMM('N','N', nba,nba,nba, dcmplx(1d0,0d0), t1,nba, W,nba, dcmplx(0d0,0d0), rad,nba)
-        U_loc(:,:,ik) = W
-        rad_loc(:,:,ik) = rad
-        do a = 1, nba
-            f_loc(a,ik) = real(rad(a,a))
-        end do
-    end do
-
-    call comm_summation(f_loc, f_all, nba*nk, sbe%icomm)
-
-    call rana_auger_dpop(nk, nba, f_all, sbe%occ_max, iv, ic, sbe%rana_area_au, &
-                         sbe%rana_kt_au, sbe%rana_vf_au, sbe%rana_eps_r, tau, &
-                         dpop, rnet)
-
-    ! Pass 2: apply to each LOCAL rho(k); amplitude-damp coherences of levels
-    ! that lose population (sqrt(f_new/f_old) -- the CPTP factor).
-    do ik = sbe%ik_min, sbe%ik_max
-        rad = rad_loc(:,:,ik)
-        W   = U_loc(:,:,ik)
         do a = 1, nba
             fold = real(rad(a,a))
             fnew = max(fold + dpop(a,ik), 0d0)
@@ -2494,6 +2441,7 @@ subroutine apply_rana_auger_ring(sbe, gs, Ac, tau)
             else
                 damp(a) = 1d0
             end if
+            if (present(gout)) damp(a) = damp(a) * exp(-0.5d0 * gout(a, ik) * tau)
             rad(a,a) = dcmplx(fnew, 0d0)
         end do
         do b = 1, nba
@@ -2511,9 +2459,38 @@ subroutine apply_rana_auger_ring(sbe, gs, Ac, tau)
             end do
         end do
     end do
+end subroutine ring_apply_dpop
 
-    deallocate(f_loc, f_all, dpop, damp, U_loc, rad_loc)
-end subroutine apply_rana_auger_ring
+
+! MP momentum-conservation index map for the ring II/Auger (built once).
+subroutine build_kmap(sbe, gs)
+    use sbe_superres_ssbe, only: mp_grid_triple
+    use salmon_global, only: num_kgrid
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info),      intent(in)    :: gs
+    integer :: ik, m(3), lidx, nk
+    real(8) :: resid, maxresid
+    nk = sbe%nk
+    allocate(sbe%kmap_idx(3, nk), sbe%kmap_lut(0:nk-1))
+    sbe%kmap_n = num_kgrid
+    sbe%kmap_lut = 0
+    maxresid = 0d0
+    do ik = 1, nk
+        call mp_grid_triple(gs%kpoint(:, ik), num_kgrid, m, resid)
+        sbe%kmap_idx(:, ik) = m
+        maxresid = max(maxresid, resid)
+        lidx = m(1) + num_kgrid(1) * (m(2) + num_kgrid(2) * m(3))
+        if (lidx >= 0 .and. lidx <= nk - 1) sbe%kmap_lut(lidx) = ik
+    end do
+    sbe%kmap_ok = (maxresid < 1d-6) .and. &
+                  (num_kgrid(1) * num_kgrid(2) * num_kgrid(3) == nk) .and. &
+                  (minval(sbe%kmap_lut) >= 1)
+    sbe%kmap_built = .true.
+    if (sbe%irank == 0 .and. .not. sbe%kmap_ok) &
+        write(*,'(a)') '# NOTE: momentum-resolved nonlocal II disabled '// &
+                       '(k-grid is not a regular MP mesh)'
+end subroutine build_kmap
 
 
 !=============================================================================

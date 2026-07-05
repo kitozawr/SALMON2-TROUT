@@ -504,6 +504,16 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_sbe_auger           ! enable Auger recombination channel
   real(8)        :: sbe_auger_c_cm6s       ! Auger coeff C [cm^6/s]; <=0: material default
   real(8)        :: sbe_auger_n_gate_cm3   ! activation density [cm^-3]; <=0: material default
+  ! ring II/Auger refinements (wiki/00 proposed block, maintainer-approved 2026-07-04)
+  real(8)        :: sbe_ring_vq_floor      ! B3: skip quadruples with vq < floor*max(vq); 0 = off
+  character(1)   :: yn_sbe_ii_fk_soften    ! A5: Franz-Keldysh field-softened II threshold
+  real(8)        :: sbe_ii_fk_mu           ! A5: reduced mass [m_e] of hbar*theta=(F^2/2mu)^(1/3); required >0 when on
+  real(8)        :: sbe_ii_phassist        ! A1: phonon-assisted II/Auger sideband strength; 0 = off
+  character(1)   :: yn_sbe_ii_holes        ! A2: hole-initiated II + its Auger reverse (Cp/Cn from registry)
+  character(1)   :: yn_sbe_eph_acoustic    ! A4: quasi-elastic acoustic deformation e-ph mode
+  ! SBE checkpoint/restart (B4)
+  integer        :: sbe_checkpoint_step    ! write rho checkpoint every N steps; 0 = off
+  character(1)   :: yn_sbe_checkpoint_restart ! resume from SYSNAME_sbe_ckpt_rank*.bin
 
   !! &epm (local empirical pseudopotential method, Cohen-Bergstresser)
   character(32)  :: epm_material

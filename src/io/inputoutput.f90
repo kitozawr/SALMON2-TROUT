@@ -623,7 +623,15 @@ contains
       & sbe_eeh_nu_sat, &
       & yn_sbe_auger, &
       & sbe_auger_c_cm6s, &
-      & sbe_auger_n_gate_cm3
+      & sbe_auger_n_gate_cm3, &
+      & sbe_ring_vq_floor, &
+      & yn_sbe_ii_fk_soften, &
+      & sbe_ii_fk_mu, &
+      & sbe_ii_phassist, &
+      & yn_sbe_ii_holes, &
+      & yn_sbe_eph_acoustic, &
+      & sbe_checkpoint_step, &
+      & yn_sbe_checkpoint_restart
 
     namelist/epm/ &
       & epm_material, &
@@ -1089,6 +1097,14 @@ contains
     yn_sbe_auger            = 'n'        ! 'y': Auger recombination (density-gated CPTP, Sec 13)
     sbe_auger_c_cm6s        = -1.0d0     ! Auger coeff C [cm^6/s]; <=0: material default
     sbe_auger_n_gate_cm3    = -1.0d0     ! activation density [cm^-3]; <=0: material default
+    sbe_ring_vq_floor       = 0.0d0      ! B3 windowing off (bit-identical default)
+    yn_sbe_ii_fk_soften     = 'n'        ! A5 Franz-Keldysh threshold softening off
+    sbe_ii_fk_mu            = -1.0d0     ! A5 reduced mass [m_e]; must be set >0 when on
+    sbe_ii_phassist         = 0.0d0      ! A1 phonon-assisted sidebands off
+    yn_sbe_ii_holes         = 'n'        ! A2 hole-initiated II/Auger off
+    yn_sbe_eph_acoustic     = 'n'        ! A4 acoustic e-ph mode off
+    sbe_checkpoint_step     = 0          ! B4 checkpoint off
+    yn_sbe_checkpoint_restart = 'n'
                                             ! (occupation 1 per spinor band, nelec valence bands instead of nelec/2)
 !! == default for &epm
     epm_material            = 'GaAs'
@@ -1756,6 +1772,14 @@ contains
     call comm_bcast(sbe_eeh_nu_sat,          nproc_group_global)
     call comm_bcast(yn_sbe_auger,            nproc_group_global)
     call comm_bcast(sbe_auger_c_cm6s,        nproc_group_global)
+    call comm_bcast(sbe_ring_vq_floor,       nproc_group_global)
+    call comm_bcast(yn_sbe_ii_fk_soften,     nproc_group_global)
+    call comm_bcast(sbe_ii_fk_mu,            nproc_group_global)
+    call comm_bcast(sbe_ii_phassist,         nproc_group_global)
+    call comm_bcast(yn_sbe_ii_holes,         nproc_group_global)
+    call comm_bcast(yn_sbe_eph_acoustic,     nproc_group_global)
+    call comm_bcast(sbe_checkpoint_step,     nproc_group_global)
+    call comm_bcast(yn_sbe_checkpoint_restart, nproc_group_global)
     call comm_bcast(sbe_auger_n_gate_cm3,    nproc_group_global)
 !! == bcast for epm
     call comm_bcast(epm_material,            nproc_group_global)
@@ -2784,6 +2808,14 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_eeh_nu_sat', sbe_eeh_nu_sat
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_auger', yn_sbe_auger
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_auger_c_cm6s', sbe_auger_c_cm6s
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_ring_vq_floor', sbe_ring_vq_floor
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_ii_fk_soften', yn_sbe_ii_fk_soften
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_ii_fk_mu', sbe_ii_fk_mu
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_ii_phassist', sbe_ii_phassist
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_ii_holes', yn_sbe_ii_holes
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_eph_acoustic', yn_sbe_eph_acoustic
+      write(fh_variables_log, '("#",4X,A,"=",I8)')     'sbe_checkpoint_step', sbe_checkpoint_step
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_checkpoint_restart', yn_sbe_checkpoint_restart
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_auger_n_gate_cm3', sbe_auger_n_gate_cm3
 
       if(inml_epm >0)ierr_nml = ierr_nml +1

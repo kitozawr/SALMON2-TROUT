@@ -36,7 +36,7 @@ module sbe_superres_ssbe
               golden_rule_prefactor, eph_thermal_split, &
               eps_thomas_fermi, tf_kappa2_degenerate, debye_kappa2, &
               lindhard_F, eps_lindhard_static, plasmon_freq2, lopc_branches, &
-              eps_cdrb, interk_vq, &
+              eps_cdrb, interk_vq, build_vq_table, t_ring_opts, &
               dirac_mu_2d, rana_qtf, rana_rcccv, rana_auger_dpop, &
               energy_partner_weights, fermi_dirac, fit_fermi_dirac, &
               carrier_carrier_relax, eph_interk_dpop, ii_interk_dpop, &
@@ -222,6 +222,13 @@ module sbe_superres_ssbe
         ! screen does not act. GaAs (polar, LOPC-prone) takes the density-
         ! dependent lambda as the cited Part-G refinement.
         logical       :: dyn_lambda_ok = .false.
+        ! A2: hole-initiated II strength relative to the electron channel,
+        ! Cp/Cn from the source-verified wiki/07 tables (0 = channel off).
+        real(8)       :: ii_cpcn = 0d0
+        ! A4: quasi-elastic acoustic deformation-potential mode constants
+        ! (0 = not cited for this material -> acoustic mode unavailable).
+        real(8)       :: eph_ac_xi_ev   = 0d0   ! deformation potential Xi_d [eV]
+        real(8)       :: eph_ac_cs_cmps = 0d0   ! LA sound velocity [cm/s]
         ! dielectric (Coulomb HF exchange / carrier screening)
         real(8)       :: eps0         = 1d0       ! static dielectric
         real(8)       :: eps_inf      = 1d0       ! high-frequency dielectric
@@ -237,6 +244,20 @@ module sbe_superres_ssbe
         real(8)       :: eph_hw_mev(MAT_MAXPH) = 0d0   ! phonon energies [meV]
         real(8)       :: eph_wraw(MAT_MAXPH)   = 0d0   ! raw (un-normalized) D^2/hw weights
     end type s_material_params
+
+    ! Optional refinements bundle for the ring II/Auger kernels (all fields
+    ! default to the inert value -> omitting the argument is bit-identical).
+    type, public :: t_ring_opts
+        logical :: use_tab = .false.       ! B1: use the precomputed vq table
+        real(8), allocatable :: vq_tab(:)  !     signed-difference table
+        real(8) :: vq_floor = 0d0          ! B3: skip quadruples with vq < floor (absolute)
+        real(8) :: fk_theta = 0d0          ! A5: FK electro-optic width [Ha]; 0 = hard threshold
+        real(8) :: phassist = 0d0          ! A1: phonon-assisted sideband strength; 0 = off
+        integer :: nph = 0                 !     phonon table for the sidebands
+        real(8), allocatable :: hw(:), nbb(:), wrel(:)
+        real(8) :: pref_h = 0d0            ! A2: hole-channel prefactor (pref*Cp/Cn); 0 = off
+        real(8) :: evbm = 0d0              !     valence-band maximum [Ha]
+    end type t_ring_opts
 
 contains
 
@@ -264,6 +285,13 @@ contains
             ! screen acts on the collision kernel (Part-G; static Lindhard is
             ! the default screen class for GaAs). Si stays lambda=0 [L90/Burt].
             mp%dyn_lambda_ok = .true.
+            ! hole-initiated II/Auger: Cp/Cn = (2.2+3.1)/1.1 ~ 4.8 -- S14's
+            ! "hhe ~ 5x eeh" at Eg=1.43 eV [S14, source-verified wiki/07 sec.7]
+            mp%ii_cpcn = 4.8d0
+            ! acoustic deformation potential Xi_d = 7.0 eV [Fischetti-Laux,
+            ! PRB 38, 9721 (1988), maintainer-supplied]; LA sound velocity
+            ! 5.24e5 cm/s [same source tables -- verify against the PDF]
+            mp%eph_ac_xi_ev = 7.0d0;  mp%eph_ac_cs_cmps = 5.24d5
             mp%eph_nu_sat_si = 1.0d14      ! [Fischetti IEEE TED 38, 634 (1991)]
             mp%eph_polar = .true.
             ! Frohlich polar-LO (mode 1) + 5 intervalley modes
@@ -283,6 +311,12 @@ contains
             mp%eps0 = SI_EPS;  mp%eps_inf = SI_EPS     ! non-polar: eps_inf = eps0
             mp%ii_form = 'keldysh_quadratic'; mp%ii_exponent = 2d0
             mp%ii_prefactor = 2d12;           mp%ii_threshold_ev = 1.1d0
+            ! hole-initiated II/Auger: Cp/Cn = 0.99/2.8 = 0.354
+            ! [Dziewior-Schmid via L90, source-verified wiki/07 sec.7]
+            mp%ii_cpcn = 0.99d0 / 2.8d0
+            ! acoustic: Xi_d = 9.0 eV, c_LA = 9.04e5 cm/s [Jacoboni-Reggiani,
+            ! Rev. Mod. Phys. 55, 645 (1983) -- the already-cited SI_XI_D_EV]
+            mp%eph_ac_xi_ev = SI_XI_D_EV;  mp%eph_ac_cs_cmps = 9.04d5
             mp%eph_nu_sat_si = 1.3d14      ! [Meng PRB 91, 075201 (2015)]
             mp%eph_polar = .false.
             mp%eph_nph = SI_N_PHONON       ! 6 intervalley g/f modes
@@ -415,6 +449,9 @@ contains
             ! carries the x2 GW enhancement and dominates (Kohn anomaly).
             mp%eph_wraw(1) = GRAPH_G2_E2G            / GRAPH_HW_E2G_MEV
             mp%eph_wraw(2) = GRAPH_G2_A1P * GRAPH_GW_K / GRAPH_HW_A1P_MEV
+            ! acoustic: D = 16 eV, v_ph = 2.0e6 cm/s [Hwang & Das Sarma,
+            ! PRB 77, 195412 (2008), maintainer-supplied]
+            mp%eph_ac_xi_ev = 16.0d0;  mp%eph_ac_cs_cmps = 2.0d6
             mp%eph_nu_sat_si = GRAPH_NU_SAT_SI
         case default
             mp%found = .false.
@@ -758,6 +795,89 @@ contains
             end do
         end do
     end function interk_vq
+
+    ! Unpack the optional t_ring_opts into inert-default locals (shared by the
+    ! ring II/Auger kernels; omitted argument -> bit-identical legacy behavior).
+    pure subroutine ring_opts_unpack(opts, havetab, vfloor, fk, pa, nphl, prefh, &
+                                     evbm, hwl, nbbl, wrell)
+        implicit none
+        type(t_ring_opts), intent(in), optional :: opts
+        logical, intent(out) :: havetab
+        real(8), intent(out) :: vfloor, fk, pa, prefh, evbm
+        integer, intent(out) :: nphl
+        real(8), allocatable, intent(out) :: hwl(:), nbbl(:), wrell(:)
+        havetab = .false.; vfloor = 0d0; fk = 0d0; pa = 0d0
+        nphl = 0; prefh = 0d0; evbm = 0d0
+        if (present(opts)) then
+            havetab = opts%use_tab .and. allocated(opts%vq_tab)
+            vfloor = opts%vq_floor;  fk = opts%fk_theta
+            prefh  = opts%pref_h;    evbm = opts%evbm
+            if (opts%phassist > 0d0 .and. opts%nph > 0 .and. allocated(opts%hw)) then
+                pa = opts%phassist;  nphl = opts%nph
+                hwl = opts%hw(1:nphl); nbbl = opts%nbb(1:nphl); wrell = opts%wrel(1:nphl)
+            end if
+        end if
+        if (nphl == 0) then
+            allocate(hwl(1), nbbl(1), wrell(1))
+            hwl = 0d0; nbbl = 0d0; wrell = 0d0
+        end if
+    end subroutine ring_opts_unpack
+
+    ! A1: energy-conservation shape with optional phonon-assisted sidebands.
+    ! Forward (II) orientation: phonon EMISSION (N+1) shifts the electronic
+    ! surplus to etgt = +hw -> delta(etgt - hw); absorption N -> delta(etgt + hw).
+    ! rev = .true. (Auger, the time-reverse) SWAPS the Bose factors, so together
+    ! with the FD occupation identity the detailed balance holds EXACTLY per
+    ! sideband: f1f2(1-f3)(1-f4)*(N+1) at etgt=+hw balances (1-f1)(1-f2)f3f4*N.
+    pure function shape_assist(etgt, sigma, pa, nph, hw, nbb, wrel, rev) result(shp)
+        implicit none
+        real(8), intent(in) :: etgt, sigma, pa
+        integer, intent(in) :: nph
+        real(8), intent(in) :: hw(*), nbb(*), wrel(*)
+        logical, intent(in) :: rev
+        real(8) :: shp, we, wa
+        integer :: ip
+        shp = gaussian_shape(etgt, sigma)
+        if (pa <= 0d0) return
+        do ip = 1, nph
+            if (rev) then
+                we = nbb(ip);        wa = nbb(ip) + 1d0
+            else
+                we = nbb(ip) + 1d0;  wa = nbb(ip)
+            end if
+            shp = shp + pa * wrel(ip) * (we * gaussian_shape(etgt - hw(ip), sigma) &
+                                       + wa * gaussian_shape(etgt + hw(ip), sigma))
+        end do
+    end function shape_assist
+
+    ! B1: precompute interk_vq over ALL SIGNED index differences
+    ! d = kidx(:,i1) - kidx(:,i1p), d(i) in [-(n_i-1), n_i-1], i.e.
+    ! (2n1-1)(2n2-1)(2n3-1) entries. SIGNED (not mod-n) indexing keeps the
+    ! truncated 27-image umklapp sum BIT-IDENTICAL to the direct call (the
+    ! image window is not translation-invariant). Lookup index (1-based):
+    !   idx = 1 + (d1+n1-1) + (2n1-1)*[(d2+n2-1) + (2n2-1)*(d3+n3-1)].
+    ! Rebuild once per step (lambda2 may be dynamic) -- O(8 nk) vs the former
+    ! O(nk^2) evaluations per hot state per pass per kernel.
+    pure subroutine build_vq_table(kn, bmat, eps_inf, qtf2, wp2, lambda2, q2reg, tab)
+        implicit none
+        integer, intent(in)  :: kn(3)
+        real(8), intent(in)  :: bmat(3,3), eps_inf, qtf2, wp2, lambda2, q2reg
+        real(8), intent(out) :: tab((2*kn(1)-1)*(2*kn(2)-1)*(2*kn(3)-1))
+        integer :: d1, d2, d3, idx
+        real(8) :: df(3)
+        idx = 0
+        do d3 = -(kn(3)-1), kn(3)-1
+            do d2 = -(kn(2)-1), kn(2)-1
+                do d1 = -(kn(1)-1), kn(1)-1
+                    idx = idx + 1
+                    df = (/ dble(d1)/dble(max(kn(1),1)), &
+                            dble(d2)/dble(max(kn(2),1)), &
+                            dble(d3)/dble(max(kn(3),1)) /)
+                    tab(idx) = interk_vq(df, bmat, eps_inf, qtf2, wp2, lambda2, q2reg)
+                end do
+            end do
+        end do
+    end subroutine build_vq_table
 
     ! =====================================================================
     ! GRAPHENE 2D Auger / carrier multiplication -- the [R07] branch
@@ -1180,7 +1300,7 @@ contains
     ! order as the Coulomb all-pairs sum it rides alongside).
     subroutine eph_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, evbm, &
                                nph, hw, wrel, nb_bose, nu_sat, nu_eps0, nu_n, &
-                               sigma, tau, dpop, gout)
+                               sigma, tau, dpop, gout, kidx, kn, pol_tab, pol_norm, ip_polar)
         implicit none
         integer, intent(in)  :: nk, nba, nph
         real(8), intent(in)  :: eval(nba, nk), f(nba, nk), occ_max, a2half
@@ -1188,12 +1308,24 @@ contains
         real(8), intent(in)  :: nu_sat, nu_eps0, nu_n, sigma, tau   ! nu_n = saturation exponent
         real(8), intent(out) :: dpop(nba, nk)
         real(8), intent(out), optional :: gout(nba, nk)  ! total out-rate Gamma_out per source (coherence damping)
-        integer :: ik, jq, a, b, ip
+        ! A3 (optional): screened Frohlich 1/q^2 weight for the POLAR-LO mode
+        ! ip_polar -- multiply its partial rates by pol_tab(q)/pol_norm (the B1
+        ! signed-difference table; unit average preserves the nu_sat scale).
+        integer, intent(in), optional :: kidx(3, nk), kn(3), ip_polar
+        real(8), intent(in), optional :: pol_tab(*), pol_norm
+        integer :: ik, jq, a, b, ip, ipol
         real(8) :: eps_kin, nu_a, fe, fa, dE, shp, th, blk, gam, gamtot, out_tot
         real(8) :: gpart(nba, nk)
         real(8), parameter :: occ_eps = 1d-12
 
         dpop = 0d0
+        ipol = 0
+        if (present(ip_polar)) then
+            if (present(pol_tab) .and. present(pol_norm) .and. &
+                present(kidx) .and. present(kn)) then
+                if (ip_polar >= 1 .and. pol_norm > 0d0) ipol = ip_polar
+            end if
+        end if
         if (present(gout)) gout = 0d0
         do ik = 1, nk
             do a = 1, nba
@@ -1222,6 +1354,11 @@ contains
                             if (shp <= 0d0) cycle
                             blk = min(max(1d0 - f(b, jq) / occ_max, 0d0), 1d0)
                             gam = nu_a * wrel(ip) * th * shp * blk
+                            ! A3: polar-LO Frohlich q-weight (screened 1/q^2)
+                            if (ip == ipol) gam = gam * pol_tab(1 &
+                                + (kidx(1,ik)-kidx(1,jq)+kn(1)-1) &
+                                + (2*kn(1)-1)*((kidx(2,ik)-kidx(2,jq)+kn(2)-1) &
+                                + (2*kn(2)-1)*(kidx(3,ik)-kidx(3,jq)+kn(3)-1))) / pol_norm
                             gpart(b, jq) = gpart(b, jq) + gam
                             gamtot = gamtot + gam
                         end do
@@ -1265,7 +1402,7 @@ contains
     subroutine ii_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
                               pref, expo, iv, ic, kidx, kn, klut, &
                               bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dpop, &
-                              i1_lo, i1_hi)
+                              i1_lo, i1_hi, opts)
         implicit none
         integer, intent(in)  :: nk, nba, iv, ic, kidx(3, nk), kn(3), klut(0:nk-1)
         real(8), intent(in)  :: eval(nba, nk), f(nba, nk), occ_max, a2half
@@ -1273,20 +1410,29 @@ contains
         real(8), intent(in)  :: bmat(3,3), eps_inf, qtf2, wp2, lambda2, q2reg
         real(8), intent(out) :: dpop(nba, nk)
         integer, intent(in), optional :: i1_lo, i1_hi
-        integer :: i1, i1p, i2, ih, ipass, jj, m2p(3), d, i1s, i1e
+        type(t_ring_opts), intent(in), optional :: opts
+        integer :: i1, i1p, i2, ih, ipass, jj, m2p(3), d, i1s, i1e, nphl
         real(8) :: ekin, dd, g0, etgt, vq, df(3), shp, pauli, gpart, gamtot, out_tot, amt
+        logical :: havetab
+        real(8) :: vfloor, fk, pa, prefh, evbm, room
+        real(8), allocatable :: hwl(:), nbbl(:), wrell(:)
         real(8), parameter :: occ_eps = 1d-12
 
         dpop = 0d0
         if (iv < 1 .or. ic > nba .or. ic <= iv) return
         i1s = 1;  if (present(i1_lo)) i1s = max(i1_lo, 1)
         i1e = nk; if (present(i1_hi)) i1e = min(i1_hi, nk)
+        call ring_opts_unpack(opts, havetab, vfloor, fk, pa, nphl, prefh, evbm, &
+                              hwl, nbbl, wrell)
 
         do i1 = i1s, i1e
             do ih = ic, nba
                 if (f(ih, i1) < occ_eps) cycle
                 ekin = eval(ih, i1) + a2half - ecbm
                 dd = ekin - eth
+                ! A5: Franz-Keldysh field softening -- softplus with the
+                ! electro-optic width (fk = hbar*theta): -> max(dd,0) as fk -> 0.
+                if (fk > 0d0) dd = fk * log(1d0 + exp(min(dd / fk, 4d1)))
                 if (dd <= 0d0) cycle
                 g0 = pref * dd ** expo            ! cited Stobbe-fit total magnitude
 
@@ -1301,16 +1447,24 @@ contains
                     do i1p = 1, nk
                         ! transferred momentum q = k1 - k1' (+G): CDRB-screened
                         ! Cartesian-metric weight with the 27-image umklapp sum
-                        do d = 1, 3
-                            df(d) = dble(kidx(d, i1) - kidx(d, i1p)) / dble(max(kn(d), 1))
-                        end do
-                        vq = interk_vq(df, bmat, eps_inf, qtf2, wp2, lambda2, q2reg)
+                        ! (B1: table lookup over the signed index difference)
+                        if (havetab) then
+                            vq = opts%vq_tab(1 + (kidx(1,i1)-kidx(1,i1p)+kn(1)-1) &
+                               + (2*kn(1)-1)*((kidx(2,i1)-kidx(2,i1p)+kn(2)-1) &
+                               + (2*kn(2)-1)*(kidx(3,i1)-kidx(3,i1p)+kn(3)-1)))
+                        else
+                            do d = 1, 3
+                                df(d) = dble(kidx(d, i1) - kidx(d, i1p)) / dble(max(kn(d), 1))
+                            end do
+                            vq = interk_vq(df, bmat, eps_inf, qtf2, wp2, lambda2, q2reg)
+                        end if
+                        if (vq < vfloor) cycle          ! B3 windowing (0 = off)
                         do i2 = 1, nk
                             call mp_partner_triple(kidx(:,i1), kidx(:,i2), kidx(:,i1p), kn, m2p)
                             jj = klut(m2p(1) + kn(1) * (m2p(2) + kn(2) * m2p(3))) ! O(1) k2'
                             if (jj < 1) cycle
                             etgt = eval(ih,i1) + eval(iv,i2) - eval(ic,i1p) - eval(ic,jj)
-                            shp = gaussian_shape(etgt, sigma)
+                            shp = shape_assist(etgt, sigma, pa, nphl, hwl, nbbl, wrell, .false.)
                             if (shp <= 0d0) cycle
                             pauli = (f(iv,i2) / occ_max) &
                                   * min(max(1d0 - f(ic,i1p)/occ_max, 0d0), 1d0) &
@@ -1330,6 +1484,69 @@ contains
                 end do
             end do
         end do
+
+        ! ================= A2: HOLE-INITIATED impact ionization (hhe) =========
+        ! A hot HOLE deep in the valence band relaxes toward the VBM and the
+        ! released energy ionizes a pair. Electron picture: an electron falls
+        ! from the top valence (iv, k1') into the deep hole (ih, k1); a valence
+        ! electron (iv, k2) is promoted to the conduction band (ic, k2').
+        ! Momentum: k1' + k2 = k1 + k2' (mod G)  ->  partner(i1p, i2, i1).
+        ! Rate scale = pref * (Cp/Cn) (registry-cited [L90]/[S14] ratio),
+        ! threshold on the HOLE kinetic energy evbm - E. Trace-exact stencil.
+        if (prefh > 0d0) then
+        do i1 = i1s, i1e
+            do ih = 1, iv
+                room = occ_max - f(ih, i1)          ! deep-hole capacity
+                if (room < occ_eps) cycle
+                ekin = evbm - (eval(ih, i1) + a2half)
+                dd = ekin - eth
+                if (fk > 0d0) dd = fk * log(1d0 + exp(min(dd / fk, 4d1)))
+                if (dd <= 0d0) cycle
+                g0 = prefh * dd ** expo
+                gamtot = 0d0
+                out_tot = 0d0
+                do ipass = 1, 2
+                    if (ipass == 2) then
+                        if (gamtot * tau < 1d-14) exit
+                        out_tot = room * (1d0 - exp(-gamtot * tau))
+                    end if
+                    do i1p = 1, nk
+                        if (havetab) then
+                            vq = opts%vq_tab(1 + (kidx(1,i1)-kidx(1,i1p)+kn(1)-1) &
+                               + (2*kn(1)-1)*((kidx(2,i1)-kidx(2,i1p)+kn(2)-1) &
+                               + (2*kn(2)-1)*(kidx(3,i1)-kidx(3,i1p)+kn(3)-1)))
+                        else
+                            do d = 1, 3
+                                df(d) = dble(kidx(d, i1) - kidx(d, i1p)) / dble(max(kn(d), 1))
+                            end do
+                            vq = interk_vq(df, bmat, eps_inf, qtf2, wp2, lambda2, q2reg)
+                        end if
+                        if (vq < vfloor) cycle
+                        do i2 = 1, nk
+                            call mp_partner_triple(kidx(:,i1p), kidx(:,i2), kidx(:,i1), kn, m2p)
+                            jj = klut(m2p(1) + kn(1) * (m2p(2) + kn(2) * m2p(3)))
+                            if (jj < 1) cycle
+                            etgt = eval(iv,i1p) + eval(iv,i2) - eval(ih,i1) - eval(ic,jj)
+                            shp = shape_assist(etgt, sigma, pa, nphl, hwl, nbbl, wrell, .false.)
+                            if (shp <= 0d0) cycle
+                            pauli = (f(iv,i1p) / occ_max) * (f(iv,i2) / occ_max) &
+                                  * min(max(1d0 - f(ic,jj)/occ_max, 0d0), 1d0)
+                            gpart = g0 * vq * shp * pauli
+                            if (ipass == 1) then
+                                gamtot = gamtot + gpart
+                            else
+                                amt = out_tot * gpart / gamtot
+                                dpop(ih, i1)  = dpop(ih, i1)  + amt   ! deep hole filled
+                                dpop(iv, i1p) = dpop(iv, i1p) - amt   ! hole surfaces at the VBM
+                                dpop(iv, i2)  = dpop(iv, i2)  - amt   ! pair: hole created
+                                dpop(ic, jj)  = dpop(ic, jj)  + amt   ! pair: electron created
+                            end if
+                        end do
+                    end do
+                end do
+            end do
+        end do
+        end if
     end subroutine ii_interk_dpop
 
     ! =====================================================================
@@ -1357,7 +1574,7 @@ contains
     subroutine auger_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
                                  pref, expo, iv, ic, kidx, kn, klut, &
                                  bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dpop, &
-                                 i1_lo, i1_hi)
+                                 i1_lo, i1_hi, opts)
         implicit none
         integer, intent(in)  :: nk, nba, iv, ic, kidx(3, nk), kn(3), klut(0:nk-1)
         real(8), intent(in)  :: eval(nba, nk), f(nba, nk), occ_max, a2half
@@ -1365,14 +1582,20 @@ contains
         real(8), intent(in)  :: bmat(3,3), eps_inf, qtf2, wp2, lambda2, q2reg
         real(8), intent(out) :: dpop(nba, nk)
         integer, intent(in), optional :: i1_lo, i1_hi
-        integer :: i1, i1p, i2, ih, ipass, jj, m2p(3), d, i1s, i1e
+        type(t_ring_opts), intent(in), optional :: opts
+        integer :: i1, i1p, i2, ih, ipass, jj, m2p(3), d, i1s, i1e, nphl
         real(8) :: ekin, dd, g0, etgt, vq, df(3), shp, pauli, gpart, gamtot, in_tot, amt, room
+        logical :: havetab
+        real(8) :: vfloor, fk, pa, prefh, evbm, out_tot
+        real(8), allocatable :: hwl(:), nbbl(:), wrell(:)
         real(8), parameter :: occ_eps = 1d-12
 
         dpop = 0d0
         if (iv < 1 .or. ic > nba .or. ic <= iv) return
         i1s = 1;  if (present(i1_lo)) i1s = max(i1_lo, 1)
         i1e = nk; if (present(i1_hi)) i1e = min(i1_hi, nk)
+        call ring_opts_unpack(opts, havetab, vfloor, fk, pa, nphl, prefh, evbm, &
+                              hwl, nbbl, wrell)
 
         do i1 = i1s, i1e
             do ih = ic, nba
@@ -1380,6 +1603,7 @@ contains
                 if (room < occ_eps) cycle
                 ekin = eval(ih, i1) + a2half - ecbm
                 dd = ekin - eth
+                if (fk > 0d0) dd = fk * log(1d0 + exp(min(dd / fk, 4d1)))
                 if (dd <= 0d0) cycle
                 g0 = pref * dd ** expo              ! same II magnitude (shared |M|^2)
 
@@ -1393,16 +1617,23 @@ contains
                     do i1p = 1, nk
                         ! SAME CDRB-screened umklapp weight as the II kernel
                         ! (shared |M|^2 -> detailed balance preserved exactly)
-                        do d = 1, 3
-                            df(d) = dble(kidx(d, i1) - kidx(d, i1p)) / dble(max(kn(d), 1))
-                        end do
-                        vq = interk_vq(df, bmat, eps_inf, qtf2, wp2, lambda2, q2reg)
+                        if (havetab) then
+                            vq = opts%vq_tab(1 + (kidx(1,i1)-kidx(1,i1p)+kn(1)-1) &
+                               + (2*kn(1)-1)*((kidx(2,i1)-kidx(2,i1p)+kn(2)-1) &
+                               + (2*kn(2)-1)*(kidx(3,i1)-kidx(3,i1p)+kn(3)-1)))
+                        else
+                            do d = 1, 3
+                                df(d) = dble(kidx(d, i1) - kidx(d, i1p)) / dble(max(kn(d), 1))
+                            end do
+                            vq = interk_vq(df, bmat, eps_inf, qtf2, wp2, lambda2, q2reg)
+                        end if
+                        if (vq < vfloor) cycle          ! B3 (0 = off)
                         do i2 = 1, nk
                             call mp_partner_triple(kidx(:,i1), kidx(:,i2), kidx(:,i1p), kn, m2p)
                             jj = klut(m2p(1) + kn(1) * (m2p(2) + kn(2) * m2p(3)))
                             if (jj < 1) cycle
                             etgt = eval(ih,i1) + eval(iv,i2) - eval(ic,i1p) - eval(ic,jj)
-                            shp = gaussian_shape(etgt, sigma)
+                            shp = shape_assist(etgt, sigma, pa, nphl, hwl, nbbl, wrell, .true.)
                             if (shp <= 0d0) cycle
                             ! REVERSED occupations: hole present at (iv,i2), both
                             ! conduction sources occupied at (ic,i1p) and (ic,jj).
@@ -1424,6 +1655,66 @@ contains
                 end do
             end do
         end do
+
+        ! ============ A2 reverse: hole-Auger (the hhe time-reverse) ===========
+        ! An electron IN the deep valence state (ih, k1) is excited to the top
+        ! valence (iv, k1') by the recombination of e(ic, k2') with h(iv, k2) --
+        ! reversed occupations, negated stencil, same quadruple/weights as the
+        ! forward hole channel (detailed balance per sideband via rev=.true.).
+        if (prefh > 0d0) then
+        do i1 = i1s, i1e
+            do ih = 1, iv
+                if (f(ih, i1) < occ_eps) cycle      ! deep electron present
+                ekin = evbm - (eval(ih, i1) + a2half)
+                dd = ekin - eth
+                if (fk > 0d0) dd = fk * log(1d0 + exp(min(dd / fk, 4d1)))
+                if (dd <= 0d0) cycle
+                g0 = prefh * dd ** expo
+                gamtot = 0d0
+                out_tot = 0d0
+                do ipass = 1, 2
+                    if (ipass == 2) then
+                        if (gamtot * tau < 1d-14) exit
+                        out_tot = f(ih, i1) * (1d0 - exp(-gamtot * tau))
+                    end if
+                    do i1p = 1, nk
+                        if (havetab) then
+                            vq = opts%vq_tab(1 + (kidx(1,i1)-kidx(1,i1p)+kn(1)-1) &
+                               + (2*kn(1)-1)*((kidx(2,i1)-kidx(2,i1p)+kn(2)-1) &
+                               + (2*kn(2)-1)*(kidx(3,i1)-kidx(3,i1p)+kn(3)-1)))
+                        else
+                            do d = 1, 3
+                                df(d) = dble(kidx(d, i1) - kidx(d, i1p)) / dble(max(kn(d), 1))
+                            end do
+                            vq = interk_vq(df, bmat, eps_inf, qtf2, wp2, lambda2, q2reg)
+                        end if
+                        if (vq < vfloor) cycle
+                        do i2 = 1, nk
+                            call mp_partner_triple(kidx(:,i1p), kidx(:,i2), kidx(:,i1), kn, m2p)
+                            jj = klut(m2p(1) + kn(1) * (m2p(2) + kn(2) * m2p(3)))
+                            if (jj < 1) cycle
+                            etgt = eval(iv,i1p) + eval(iv,i2) - eval(ih,i1) - eval(ic,jj)
+                            shp = shape_assist(etgt, sigma, pa, nphl, hwl, nbbl, wrell, .true.)
+                            if (shp <= 0d0) cycle
+                            pauli = min(max(1d0 - f(iv,i1p)/occ_max, 0d0), 1d0) &
+                                  * min(max(1d0 - f(iv,i2 )/occ_max, 0d0), 1d0) &
+                                  * (f(ic,jj) / occ_max)
+                            gpart = g0 * vq * shp * pauli
+                            if (ipass == 1) then
+                                gamtot = gamtot + gpart
+                            else
+                                amt = out_tot * gpart / gamtot
+                                dpop(ih, i1)  = dpop(ih, i1)  - amt   ! deep e- excited away
+                                dpop(iv, i1p) = dpop(iv, i1p) + amt   ! lands at the VBM
+                                dpop(iv, i2)  = dpop(iv, i2)  + amt   ! hole filled (recomb.)
+                                dpop(ic, jj)  = dpop(ic, jj)  - amt   ! recombining e- leaves
+                            end if
+                        end do
+                    end do
+                end do
+            end do
+        end do
+        end if
     end subroutine auger_interk_dpop
 
     ! =====================================================================

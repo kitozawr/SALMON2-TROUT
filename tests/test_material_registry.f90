@@ -137,6 +137,18 @@ program test_material_registry
         call bad('bulk materials must not be flagged 2D-Rana')
     if (si%dyn_lambda_ok) call bad('Si must keep lambda=0 in the ring kernels (Burt/L90)')
     if (.not. ga%dyn_lambda_ok) call bad('GaAs should take the dynamic lambda^2(n(t)) (Part-G)')
+    ! A2 Cp/Cn (cited): Si 0.99/2.8 [L90/Dziewior-Schmid], GaAs ~4.8 [S14 hhe~5x eeh]
+    call chk('Si Cp/Cn = 0.354', si%ii_cpcn, 0.99d0/2.8d0, 1d-12)
+    call chk('GaAs Cp/Cn = 4.8 (S14)', ga%ii_cpcn, 4.8d0, 1d-12)
+    if (cds%ii_cpcn > 0d0) call bad('CdS must have no cited Cp/Cn')
+    ! A4 acoustic constants: Si [Jacoboni-Reggiani], GaAs [Fischetti-Laux 7.0 eV],
+    ! graphene [Hwang-Das Sarma 16 eV]; CdS none (piezo pending)
+    call chk('Si acoustic Xi_d = 9.0 eV', si%eph_ac_xi_ev, 9.0d0)
+    call chk('GaAs acoustic Xi_d = 7.0 eV', ga%eph_ac_xi_ev, 7.0d0)
+    call chk('graphene acoustic D = 16 eV', gr%eph_ac_xi_ev, 16.0d0)
+    if (cds%eph_ac_xi_ev > 0d0) call bad('CdS acoustic must be uncited/off (piezo separate)')
+    if (si%eph_ac_cs_cmps <= 0d0 .or. ga%eph_ac_cs_cmps <= 0d0 .or. gr%eph_ac_cs_cmps <= 0d0) &
+        call bad('acoustic sound velocities missing')
 
     ! every cited phonon table's weights must be positive (normalizable)
     if (sum(ga%eph_wraw(1:ga%eph_nph)) <= 0d0) call bad('GaAs eph weights non-positive')
