@@ -842,6 +842,15 @@ def _save_bz3d(kfrac, pop, b_matrix, t_val, t_unit, output_dir, dpi,
     print(f"  saved {out.name}")
 
 
+def _cube_faces(x0, x1, y0, y1, z0, z1):
+    """The 6 quad faces of an axis-aligned box, as lists of 4 (x,y,z) corners."""
+    p = [(x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0),
+         (x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)]
+    return [[p[0], p[1], p[2], p[3]], [p[4], p[5], p[6], p[7]],   # z0, z1
+            [p[0], p[1], p[5], p[4]], [p[3], p[2], p[6], p[7]],   # y0, y1
+            [p[1], p[2], p[6], p[5]], [p[0], p[3], p[7], p[4]]]   # x1, x0
+
+
 def _save_bz3d_voxel(cpop3d, cx, cy, cz, b_matrix, t_val, t_unit, output_dir,
                      dpi, tag='nex_k', basis_label='real-carrier', vmax=None,
                      valleys=None, pop_floor=0.05, smooth_sigma=0.0):
@@ -872,13 +881,13 @@ def _save_bz3d_voxel(cpop3d, cx, cy, cz, b_matrix, t_val, t_unit, output_dir,
     # per-voxel RGBA: colormap colour, alpha ∝ population above the floor
     # (plt.get_cmap, not matplotlib.cm.get_cmap -- the latter was removed in mpl 3.9)
     rgba = plt.get_cmap(CMAP_POP)(m)
-    rgba[..., 3] = np.where(filled, 0.08 + 0.72 * (m - pop_floor) / (1 - pop_floor), 0.0)
+    rgba[..., 3] = np.where(filled, 0.12 + 0.58 * (m - pop_floor) / (1 - pop_floor), 0.0)
 
-    # voxel corner grids (cx/cy/cz are bin centres, uniform spacing)
+    # voxel corner edges per axis (cx/cy/cz are bin centres, uniform spacing)
     def _edges(c):
         d = c[1] - c[0] if len(c) > 1 else 1.0
-        return np.concatenate([c - 0.5 * d, [c[-1] + 0.5 * d]])
-    X, Y, Z = np.meshgrid(_edges(cx), _edges(cy), _edges(cz), indexing='ij')
+        return np.concatenate([c - 0.5 * d, [c[-1] + 0.5 * d]]), abs(d)
+    ex, dx = _edges(cx); ey, dy = _edges(cy); ez, dz = _edges(cz)
 
     fig = plt.figure(figsize=(8.5, 8))
     ax = fig.add_subplot(projection='3d')
@@ -887,7 +896,25 @@ def _save_bz3d_voxel(cpop3d, cx, cy, cz, b_matrix, t_val, t_unit, output_dir,
         for p0, p1 in edges:
             ax.plot([p0[0], p1[0]], [p0[1], p1[1]], [p0[2], p1[2]],
                     color='cornflowerblue', lw=0.9, alpha=0.9)
-    ax.voxels(X, Y, Z, filled, facecolors=rgba, shade=False)
+
+    # Build every filled cube as 6 explicit faces in ONE Poly3DCollection so
+    # matplotlib depth-sorts ALL faces together (correct back-to-front alpha
+    # compositing). ax.voxels() instead makes a separate collection per cube and
+    # cannot composite transparency across them -- you'd look straight through
+    # the outer shell without the inner cubes ever showing. Each cube is shrunk
+    # by `gap` so neighbours don't touch and the interior stays visible.
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+    gap = 0.16
+    faces, fcolors = [], []
+    for i, j, k in zip(*np.where(filled)):
+        x0, x1 = ex[i] + 0.5*gap*dx, ex[i+1] - 0.5*gap*dx
+        y0, y1 = ey[j] + 0.5*gap*dy, ey[j+1] - 0.5*gap*dy
+        z0, z1 = ez[k] + 0.5*gap*dz, ez[k+1] - 0.5*gap*dz
+        faces += _cube_faces(x0, x1, y0, y1, z0, z1)
+        fcolors += [rgba[i, j, k]] * 6
+    pc = Poly3DCollection(faces, facecolors=fcolors,
+                          edgecolors=(0.15, 0.15, 0.15, 0.35), linewidths=0.2)
+    ax.add_collection3d(pc)
     if valleys is not None:
         for p in valleys:
             ax.plot([p[0]], [p[1]], [p[2]], marker=p[3], color=p[4],
