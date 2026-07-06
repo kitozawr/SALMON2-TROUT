@@ -56,12 +56,21 @@ into the calculation directory (or use `-i DIR -o OUTDIR`) and run. It scans for
 * band-structure plots from `SYSNAME_k.data`+`_eigen.data` (`--band-path`,
   default `L Γ X W K`) and from `band.dat` (`theory='dft_band'`), energies
   shifted to VBM = 0 (`--band-vbm IDX` to override the half-filling default);
+* **Auto-animation (default on).** Every per-frame series — band maps, k-maps,
+  BZ snapshots (reduced + Cartesian), `--bz3d`/`--bz3d-voxel`, and the
+  `spectral_frames/` — is stitched into `<stem>_anim.mp4` (via `ffmpeg` if it is
+  on the `PATH`) or `<stem>_anim.gif` (Pillow fallback) as soon as ≥2 frames are
+  written, so the evolution is viewable without a manual `ffmpeg` step. Single
+  images (k–t maps, band structures, `*_vs_Time`) are skipped. Knobs: `--fps`
+  (default 6), `--anim-format {auto,mp4,gif,both}`, `--no-animate` to turn it off;
 * `--only-bands`, `--log-cmap`, `--subtract-baseline`, `--snapshots`,
   `--instantaneous` — see `--help`.
 
 ```sh
 python3 plot_sbe_results.py -i . -o plots --snapshots --valleys --bz3d --bz3d-voxel --spectral
-ffmpeg -framerate 4 -pattern_type glob -i 'plots/*_bz3d_t*.png' movie.mp4
+# -> plots/*_anim.mp4 (or .gif) written automatically, one per frame series.
+# Manual assembly is still possible if you want a custom frame rate/pattern:
+#   ffmpeg -framerate 4 -pattern_type glob -i 'plots/*_bz3d_t*.png' movie.mp4
 ```
 
 ### How the plotter knows which Brillouin-zone cell to draw

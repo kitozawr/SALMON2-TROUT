@@ -94,8 +94,9 @@ python3 plot_sbe_results.py -i . -o plots --snapshots
   pocket); CdS under a c-axis field is suppressed at Γ (see "selection rule").
 - `plots/spectral_frames/<sys>_spectral_*` — **one frame per time step**: the
   conduction band coloured by population (broadened by carrier kinetic energy),
-  fixed colour scale. Assemble into a movie:
-  `ffmpeg -framerate 8 -pattern_type glob -i 'plots/spectral_frames/*_path_*.png' movie.mp4`.
+  fixed colour scale. **Auto-assembled** into
+  `plots/spectral_frames/<sys>_spectral_path_anim.mp4` (or `.gif` without ffmpeg)
+  — no manual step; tune with `--fps`/`--anim-format`, skip with `--no-animate`.
 - `plots/<sys>_sbe_nex_k_real_ktmap_k{x,y,z}.png` — population vs (time, k).
 - `plots/band_structure_*` and `plots/bandpath_*` — the clean primitive bands
   (spinor runs also get `bandpath_spin_splitting_*` — zero along ⟨100⟩/⟨111⟩).
