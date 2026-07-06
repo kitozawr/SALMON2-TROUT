@@ -64,6 +64,7 @@ k-vector units
 """
 
 import re
+import os
 import itertools
 import warnings
 import numpy as np
@@ -2239,6 +2240,103 @@ def plot_bandpath(bpfile, output_dir, energy_range_ev=(-6, 12), dpi=150):
 # Entry point
 # ===========================================================================
 
+# ===========================================================================
+# Auto-assemble the frame series into animations (mp4 via ffmpeg, else gif)
+# ===========================================================================
+
+def _anim_group_key(png_path):
+    """(group_stem, sort_number) for a frame PNG, or None if it is not part of a
+    time/frame series. Strips a trailing _t<time><unit> token and any _f<index>
+    token; frames that share the remaining stem animate together. Single images
+    (k-t maps, band structures, *_vs_Time) carry neither token -> None."""
+    d, base = os.path.split(png_path)
+    stem = base[:-4] if base.lower().endswith('.png') else base
+    mt = re.search(r'_t([mp]?)(\d+(?:\.\d+)?)', stem)      # _t<time> (m=neg, p=pos)
+    mf = re.search(r'_f(\d+)', stem)                       # _f<frame index>
+    if mt is None and mf is None:
+        return None
+    if mt is not None:
+        num = float(mt.group(2)) * (-1.0 if mt.group(1) == 'm' else 1.0)
+    else:
+        num = float(mf.group(1))
+    key = re.sub(r'_t[mp]?\d+(?:\.\d+)?[a-zA-Z.]*$', '', stem)   # trailing time+unit
+    key = re.sub(r'_f\d+', '', key)                             # frame index (any pos)
+    return os.path.join(d, key.rstrip('_')), num
+
+
+def _ffmpeg_mp4(frames, out, fps):
+    """Encode an mp4 from the ordered PNG list via ffmpeg. Returns True on success."""
+    import subprocess, tempfile, shutil as _sh
+    with tempfile.TemporaryDirectory() as td:
+        for i, f in enumerate(frames):                    # sequential names for -i %05d
+            dst = os.path.join(td, f'{i:05d}.png')
+            try:
+                os.symlink(os.path.abspath(f), dst)
+            except OSError:
+                _sh.copyfile(f, dst)
+        cmd = ['ffmpeg', '-y', '-loglevel', 'error', '-framerate', str(fps),
+               '-i', os.path.join(td, '%05d.png'),
+               # pad to even dimensions (yuv420p requirement) on a white canvas
+               '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2:color=white',
+               '-pix_fmt', 'yuv420p', out]
+        try:
+            subprocess.run(cmd, check=True)
+            return os.path.exists(out)
+        except Exception:
+            return False
+
+
+def _gif_pillow(frames, out, fps):
+    """Encode an animated gif from the ordered PNG list via Pillow (a matplotlib
+    dependency, so always available). Returns True on success."""
+    try:
+        from PIL import Image
+        imgs = [Image.open(f).convert('RGB') for f in frames]
+        imgs[0].save(out, save_all=True, append_images=imgs[1:],
+                     duration=int(1000 / max(fps, 1)), loop=0, optimize=True)
+        return True
+    except Exception:
+        return False
+
+
+def _assemble_animations(output_dir, fps=6, fmt='auto', min_frames=2):
+    """Group every frame-series PNG under output_dir and write one animation per
+    series next to its frames (<stem>_anim.mp4 / .gif). mp4 when ffmpeg is on the
+    PATH (fmt='auto'), else gif; 'mp4'/'gif'/'both' force the choice. Single
+    images are skipped (they carry no _t/_f token)."""
+    import glob as _glob, shutil as _sh
+    groups = {}
+    for p in _glob.glob(os.path.join(str(output_dir), '**', '*.png'), recursive=True):
+        if p.endswith('_anim.png'):
+            continue
+        gk = _anim_group_key(p)
+        if gk is not None:
+            groups.setdefault(gk[0], []).append((gk[1], p))
+    have_ffmpeg = _sh.which('ffmpeg') is not None
+    made = []
+    for stem, items in sorted(groups.items()):
+        if len(items) < min_frames:
+            continue
+        frames = [p for _, p in sorted(items, key=lambda x: x[0])]
+        want_mp4 = fmt in ('mp4', 'both') or (fmt == 'auto' and have_ffmpeg)
+        want_gif = fmt in ('gif', 'both') or (fmt == 'auto' and not have_ffmpeg)
+        ok = False
+        if want_mp4:
+            if _ffmpeg_mp4(frames, stem + '_anim.mp4', fps):
+                made.append(stem + '_anim.mp4'); ok = True
+            elif fmt == 'auto':
+                want_gif = True                            # ffmpeg missing/failed -> gif
+        if want_gif and _gif_pillow(frames, stem + '_anim.gif', fps):
+            made.append(stem + '_anim.gif'); ok = True
+        if not ok:
+            print(f"  (warn) could not animate {os.path.basename(stem)} "
+                  f"({len(frames)} frames) -- need ffmpeg or Pillow")
+    if made:
+        print(f"  animations ({fps} fps): "
+              + ", ".join(os.path.basename(m) for m in made))
+    return made
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Plot SALMON SBE real-time data and EPM/DFT band structure.',
@@ -2249,6 +2347,19 @@ def main():
                         help='Output directory for PNG files')
     parser.add_argument('--dpi', type=int, default=150,
                         help='Image resolution (DPI)')
+    parser.add_argument('--no-animate', action='store_true',
+                        help='Do NOT auto-assemble the per-frame series (band '
+                             'maps, k-maps, BZ snapshots, bz3d/voxel, spectral '
+                             'frames) into an animation. By default every series '
+                             'of >=2 frames is stitched into <stem>_anim.mp4 '
+                             '(ffmpeg) or .gif (Pillow fallback).')
+    parser.add_argument('--fps', type=int, default=6,
+                        help='Frame rate for the auto-assembled animations '
+                             '(default 6).')
+    parser.add_argument('--anim-format', choices=['auto', 'mp4', 'gif', 'both'],
+                        default='auto',
+                        help="Animation container: 'auto' = mp4 if ffmpeg is on "
+                             "PATH else gif; or force 'mp4'/'gif'/'both'.")
     parser.add_argument('--downsample', type=int, default=1,
                         help='Keep every N-th line in RT files (1 = all lines)')
     parser.add_argument('--band-path', nargs='+', default=None,
@@ -2539,6 +2650,9 @@ def main():
         print("Expected: *_sbe_rt.data, *_sbe_rt_energy.data, *_sbe_nex.data, "
               "*_sbe_nex_k.data, *_k.data + *_eigen.data, band.dat")
         return
+
+    if not args.no_animate:
+        _assemble_animations(output_dir, fps=args.fps, fmt=args.anim_format)
 
     print(f"\nDone.  Output: {output_dir.resolve()}")
 

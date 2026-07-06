@@ -92,11 +92,12 @@ The frame set per run: `plots/*_bz3d_t*.png` (scatter, variant a),
 unsmoothed by default, `--voxel-smooth 1.0` for a soft cloud on dense grids),
 `plots/*_cart_snap_*.png` (Cartesian slices with valley markers),
 `plots/spectral_frames/*.png` (A(k,E) band map: valence depleting, valleys
-filling). `out_projection_k_step = 500` gives 12 frames per run — an animation:
-
-```bash
-ffmpeg -framerate 4 -pattern_type glob -i 'plots/*_bz3d_t*.png' si_rolling.mp4
-```
+filling). `out_projection_k_step = 500` gives 12 frames per run — and each frame
+series is **auto-assembled into an animation** (`plots/*_bz3d_anim.mp4` /
+`_bz3dvox_anim.mp4` / … via ffmpeg, or `.gif` if ffmpeg is absent). No manual
+step needed; tune with `--fps` / `--anim-format`, disable with `--no-animate`.
+(Manual assembly still works if you want a custom rate:
+`ffmpeg -framerate 4 -pattern_type glob -i 'plots/*_bz3d_t*.png' si_rolling.mp4`.)
 
 ## 4. Fine print
 
