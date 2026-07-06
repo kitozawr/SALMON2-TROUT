@@ -20,8 +20,10 @@ namelist knobs are in eV/fs/K/cm⁻³ and converted internally.
 The dynamical object is the **one-particle reduced density matrix in the fixed
 (field-free) Bloch band basis**, one matrix per crystal-momentum grid point:
 
-$$\rho_{nm}(\mathbf k, t) = \langle \hat c^\dagger_{m\mathbf k}\,\hat c_{n\mathbf k}\rangle,
-\qquad n,m = 1\ldots N_b,\quad \mathbf k \in \text{MP grid}, $$
+$$
+\rho_{nm}(\mathbf k, t) = \langle \hat c^\dagger_{m\mathbf k}\,\hat c_{n\mathbf k}\rangle,
+\qquad n,m = 1\ldots N_b,\quad \mathbf k \in \text{MP grid},
+$$
 
 with the equilibrium initial condition $\rho_{nm}(\mathbf k,0)=\delta_{nm} f^0_n$,
 $f^0_n \in \{0,\,\texttt{occ}\}$, where $\texttt{occ} = 2$ (scalar) or $1$
@@ -32,11 +34,13 @@ The **full master equation** is a Gorini–Kossakowski–Sudarshan–Lindblad (G
 quantum master equation, k-point by k-point, with the nonlocal channels coupling
 the k-points through gathered quantities:
 
-$$\boxed{\;
+$$
+\boxed{\;
 \partial_t \rho(\mathbf k) \;=\;
 \underbrace{-\,i\big[\,H_{VG}(\mathbf k,t) \;+\; \Sigma^{\rm HF}[\rho](\mathbf k,t)\,,\;\rho(\mathbf k)\big]}_{\text{coherent (unitary) part, §1–§2}}
 \;+\; \sum_{c} \mathcal D_c[\rho](\mathbf k)
-\;}$$
+\;}
+$$
 
 where the sum runs over the enabled CPTP dissipation channels $c$:
 
@@ -68,16 +72,20 @@ invariants are tabulated in §6).
 Minimal coupling with a spatially uniform vector potential $\mathbf A(t)$ (dipole
 approximation, length scale of the field ≫ cell):
 
-$$\hat H(t) = \tfrac12\big(\hat{\mathbf p} + \mathbf A(t)\big)^2 + \hat V
-= \hat H_0 + \mathbf A(t)\cdot\hat{\mathbf p} + \tfrac12 A^2(t).$$
+$$
+\hat H(t) = \tfrac12\big(\hat{\mathbf p} + \mathbf A(t)\big)^2 + \hat V
+= \hat H_0 + \mathbf A(t)\cdot\hat{\mathbf p} + \tfrac12 A^2(t).
+$$
 
 Projected onto the field-free Bloch eigenbasis $\{|n\mathbf k\rangle\}$ of
 $\hat H_0$ ($\hat H_0|n\mathbf k\rangle = \varepsilon_n(\mathbf k)|n\mathbf k\rangle$),
 and with the crystal momentum **fixed on the grid** (this is the defining property
 of the velocity gauge — no moving grid), the matrix propagated is
 
-$$\big(H_{VG}\big)_{nm}(\mathbf k,t) = \varepsilon_n(\mathbf k)\,\delta_{nm}
-\;+\; \mathbf A(t)\cdot \boldsymbol\pi_{nm}(\mathbf k),$$
+$$
+\big(H_{VG}\big)_{nm}(\mathbf k,t) = \varepsilon_n(\mathbf k)\,\delta_{nm}
+\;+\; \mathbf A(t)\cdot \boldsymbol\pi_{nm}(\mathbf k),
+$$
 
 where the scalar $\tfrac12A^2(t)$ is a global (k- and band-independent) phase and
 is dropped from the propagation — but **restored exactly** wherever an absolute
@@ -89,8 +97,10 @@ $E_n(\mathbf k + \mathbf A) \approx E_a$.
 
 ### 1.2 The velocity operator $\boldsymbol\pi$
 
-$$\boldsymbol\pi_{nm}(\mathbf k) = \mathbf p_{nm}(\mathbf k) + \big(\hat v_{\rm NL}\big)_{nm}(\mathbf k),
-\qquad \hat v_{\rm NL} = -\,i\,[\hat{\mathbf r}, \hat V_{\rm NL}].$$
+$$
+\boldsymbol\pi_{nm}(\mathbf k) = \mathbf p_{nm}(\mathbf k) + \big(\hat v_{\rm NL}\big)_{nm}(\mathbf k),
+\qquad \hat v_{\rm NL} = -\,i\,[\hat{\mathbf r}, \hat V_{\rm NL}].
+$$
 
 For a **local** EPM pseudopotential $\hat v_{\rm NL}\equiv 0$ (the `rvnl_tm` block
 of `_tm.data` is zero). Two genuinely nonlocal cases carry it:
@@ -140,12 +150,16 @@ term is (or may be) added by hand.
 Time-dependent Hartree–Fock exchange (Golde–Kira–Meier–Koch, Phys. Status Solidi
 B 248, 863 (2011), Eqs. 4–5), evaluated on the **deviation from equilibrium**:
 
-$$\Sigma^{\rm HF}_{nm}(\mathbf k)
+$$
+\Sigma^{\rm HF}_{nm}(\mathbf k)
 = -\sum_{\mathbf q\neq \mathbf k} V(\mathbf k-\mathbf q)\;\delta\rho_{nm}(\mathbf q),
-\qquad \delta\rho = \rho-\rho_0,\quad \rho_0 = \mathrm{diag}(f^0),$$
+\qquad \delta\rho = \rho-\rho_0,\quad \rho_0 = \mathrm{diag}(f^0),
+$$
 
-$$V(\mathbf p) = \frac{\texttt{sbe\_coulomb\_strength}\cdot 4\pi}
-{\varepsilon\;\Omega_{\rm cell}\,N_k\,\big(|\mathbf p|^2+\kappa^2\big)},$$
+$$
+V(\mathbf p) = \frac{\texttt{sbe\_coulomb\_strength}\cdot 4\pi}
+{\varepsilon\;\Omega_{\rm cell}\,N_k\,\big(|\mathbf p|^2+\kappa^2\big)},
+$$
 
 with $\varepsilon$ the material dielectric (registry; override
 `sbe_coulomb_epsilon`) and $\kappa$ = `sbe_coulomb_screen_au`. The $\delta\rho$
@@ -202,9 +216,11 @@ $\gamma = 1-e^{-\Gamma\tau}$: the Kraus map
 $K_0=\mathrm{diag}(\ldots,\sqrt{1-\gamma},\ldots)$, $K_1=\sqrt{\gamma}\,|b\rangle\langle a|$
 gives exactly
 
-$$\tilde\rho_{aa}\to(1-\gamma)\tilde\rho_{aa},\qquad
+$$
+\tilde\rho_{aa}\to(1-\gamma)\tilde\rho_{aa},\qquad
 \tilde\rho_{bb}\to\tilde\rho_{bb}+\gamma\tilde\rho_{aa},\qquad
-\tilde\rho_{ab'}\to\sqrt{1-\gamma}\;\tilde\rho_{ab'}\ (b'\neq a).$$
+\tilde\rho_{ab'}\to\sqrt{1-\gamma}\;\tilde\rho_{ab'}\ (b'\neq a).
+$$
 
 This is why every population-moving channel damps the coherences of a level that
 lost population by $\sqrt{f^{\rm new}_a/f^{\rm old}_a}$ — that factor **is**
@@ -222,9 +238,11 @@ product theorem this is CPTP whenever $M\succeq0$ with unit diagonal (§4.1).
 The full step over $h$ (see [`03_numerical_methods.md`](03_numerical_methods.md)
 for the integrator itself) is the Strang sandwich
 
-$$\rho(t+h) = D\!\left(\tfrac h2\right)\circ
+$$
+\rho(t+h) = D\!\left(\tfrac h2\right)\circ
 \Big[S_2(p_1h)\circ S_2(p_2h)\circ S_2(p_1h)\Big]\circ
-D\!\left(\tfrac h2\right)[\rho(t)],$$
+D\!\left(\tfrac h2\right)[\rho(t)],
+$$
 
 with $S_2$ the CF4/Magnus unitary sub-step on Gauss–Legendre nodes (exact matrix
 exponentials by eigendecomposition — unitary to machine precision) and $D$ the
@@ -250,13 +268,17 @@ $D(h/2)$ with the identical CPTP guarantees per map.
 Wave-packet decoherence by phonon-bath position monitoring. Each Houston branch
 $a$ carries a wave-packet position $X_a(t)$ advanced by its group velocity,
 
-$$V_a(\mathbf k,t) = \big(W^\dagger\boldsymbol\pi\,W\big)_{aa} + \mathbf A(t)\cdot\hat{\mathbf e},\qquad
-X_a \mathrel{+}= \tfrac12\big(V_a(t)+V_a(t+h)\big)h,$$
+$$
+V_a(\mathbf k,t) = \big(W^\dagger\boldsymbol\pi\,W\big)_{aa} + \mathbf A(t)\cdot\hat{\mathbf e},\qquad
+X_a \mathrel{+}= \tfrac12\big(V_a(t)+V_a(t+h)\big)h,
+$$
 
 and the coherences decay with the **squared branch separation**:
 
-$$\tilde\rho_{ab} \;\longleftarrow\; \exp\!\big[-\lambda\,(X_a-X_b)^2\,\tau\big]\;\tilde\rho_{ab},
-\qquad \lambda = \frac{k_B T}{\tau_m}$$
+$$
+\tilde\rho_{ab} \;\longleftarrow\; \exp\!\big[-\lambda\,(X_a-X_b)^2\,\tau\big]\;\tilde\rho_{ab},
+\qquad \lambda = \frac{k_B T}{\tau_m}
+$$
 
 (`sbe_decoh_temperature_k`, `sbe_decoh_tau_m_fs`). The kernel matrix
 $M_{ab}=e^{-\lambda(X_a-X_b)^2\tau}$ is a Gaussian RBF kernel — positive
@@ -287,25 +309,31 @@ $\{\hbar\omega_p, w_p\}$: GaAs = polar-LO + 5 intervalley deformation modes; Si 
 (or $\langle g^2\rangle/\hbar\omega$), normalized. Thermal split per mode with the
 Bose factor $N_B(\hbar\omega_p/k_BT_{\rm ph})$:
 
-$$f^{\rm em}_p = \frac{N_B+1}{2N_B+1},\qquad f^{\rm ab}_p = \frac{N_B}{2N_B+1},
-\qquad \frac{f^{\rm em}}{f^{\rm ab}} = \frac{N_B+1}{N_B}\ \text{(detailed balance)}.$$
+$$
+f^{\rm em}_p = \frac{N_B+1}{2N_B+1},\qquad f^{\rm ab}_p = \frac{N_B}{2N_B+1},
+\qquad \frac{f^{\rm em}}{f^{\rm ab}} = \frac{N_B+1}{N_B}\ \text{(detailed balance)}.
+$$
 
 **Inter-k (ring) form** — the physical one on primitive cells (intervalley final
 states live at *different* $\mathbf k$). For each source Houston state $(a,\mathbf k)$
 the partial rate to every destination $(b,\mathbf q)$ over the **whole BZ**:
 
-$$\Gamma_{(a\mathbf k)\to(b\mathbf q)} =
+$$
+\Gamma_{(a\mathbf k)\to(b\mathbf q)} =
 \nu(\varepsilon_{a\mathbf k})\sum_p w_p
 \Big[ f^{\rm em}_p\,\delta_\sigma\!\big(E_a(\mathbf k)-E_b(\mathbf q)-\hbar\omega_p\big)
     + f^{\rm ab}_p\,\delta_\sigma\!\big(E_b(\mathbf q)-E_a(\mathbf k)-\hbar\omega_p\big)\Big]
-\Big[1-\frac{f_b(\mathbf q)}{\texttt{occ}}\Big]_+ ,$$
+\Big[1-\frac{f_b(\mathbf q)}{\texttt{occ}}\Big]_+ ,
+$$
 
 with $\delta_\sigma$ a normalized Gaussian of width $\sigma$
 (`sbe_search_sigma_e_ev`, grid-matched default 0.2 eV). The total out-rate
 $\Gamma_{\rm out}=\sum_{b\mathbf q}\Gamma_{(a\mathbf k)\to(b\mathbf q)}$ moves
 
-$$\Delta f_{a\mathbf k} = -\,f_{a\mathbf k}\big(1-e^{-\Gamma_{\rm out}\tau}\big),\qquad
-\Delta f_{b\mathbf q} = +\,\big|\Delta f_{a\mathbf k}\big|\;\frac{\Gamma_{(a\mathbf k)\to(b\mathbf q)}}{\Gamma_{\rm out}},$$
+$$
+\Delta f_{a\mathbf k} = -\,f_{a\mathbf k}\big(1-e^{-\Gamma_{\rm out}\tau}\big),\qquad
+\Delta f_{b\mathbf q} = +\,\big|\Delta f_{a\mathbf k}\big|\;\frac{\Gamma_{(a\mathbf k)\to(b\mathbf q)}}{\Gamma_{\rm out}},
+$$
 
 so $\sum\Delta f = 0$ **identically** (trace exact), and the source's coherences
 damp by $e^{-\frac12(\Gamma_{{\rm out},a}+\Gamma_{{\rm out},b})\tau}$
@@ -319,9 +347,11 @@ ring is on (no double count).
 
 #### 4.3.1 The cited magnitude (both representations share it)
 
-$$\gamma(\varepsilon^{\rm kin}) = P\,\big(\varepsilon^{\rm kin} - E_{\rm th}\big)^{a}\;
+$$
+\gamma(\varepsilon^{\rm kin}) = P\,\big(\varepsilon^{\rm kin} - E_{\rm th}\big)^{a}\;
 \Theta_{\rm ramp}\big(\varepsilon^{\rm kin}-E_{\rm th}\big),\qquad
-\varepsilon^{\rm kin} = E_h(\mathbf k,t)+\tfrac12A^2 - E_{\rm CBM},$$
+\varepsilon^{\rm kin} = E_h(\mathbf k,t)+\tfrac12A^2 - E_{\rm CBM},
+$$
 
 Stobbe–Redmer–Schattke quartic for GaAs ($a=4$, $P=2\times10^{12}\,\mathrm{s^{-1}eV^{-4}}$,
 $E_{\rm th}=2.1$ eV), Keldysh quadratic for Si ($a=2$, $E_{\rm th}=1.1$ eV) and CdS
@@ -336,31 +366,39 @@ valence electron $(\mathbf k_2, v)$ → two conduction electrons
 $(\mathbf k_1', c)$, $(\mathbf k_2', c)$ + a hole, with **exact crystal-momentum
 conservation** on the MP grid,
 
-$$\mathbf k_2' = \mathbf k_1 + \mathbf k_2 - \mathbf k_1' \ (\mathrm{mod}\ \mathbf G)
+$$
+\mathbf k_2' = \mathbf k_1 + \mathbf k_2 - \mathbf k_1' \ (\mathrm{mod}\ \mathbf G)
 \quad\Longleftrightarrow\quad
-m_2' = \big(m_1 + m_2 - m_1'\big)\bmod n \ \text{per axis (integer index map)}.$$
+m_2' = \big(m_1 + m_2 - m_1'\big)\bmod n \ \text{per axis (integer index map)}.
+$$
 
 Partial rate of the quadruple:
 
-$$\Gamma_{\mathbf k_1 h}^{(\mathbf k_1' \mathbf k_2)} =
+$$
+\Gamma_{\mathbf k_1 h}^{(\mathbf k_1' \mathbf k_2)} =
 \gamma(\varepsilon^{\rm kin}_{h\mathbf k_1})\;
 \big|V(\mathbf k_1-\mathbf k_1')\big|^2\;
 \delta_\sigma\!\big(E_h(\mathbf k_1)+E_v(\mathbf k_2)-E_c(\mathbf k_1')-E_c(\mathbf k_2')\big)\;
 \frac{f_{v\mathbf k_2}}{\texttt{occ}}
 \Big[1-\frac{f_{c\mathbf k_1'}}{\texttt{occ}}\Big]_+
-\Big[1-\frac{f_{c\mathbf k_2'}}{\texttt{occ}}\Big]_+ .$$
+\Big[1-\frac{f_{c\mathbf k_2'}}{\texttt{occ}}\Big]_+ .
+$$
 
 The screened Coulomb weight carries the **umklapp G-sum in the Cartesian metric
 of the actual (possibly non-orthogonal) cell** and the **CDRB model dielectric**
 [K15 Eq. (8); CDRB PRB 47, 9892 (1993)]:
 
-$$\big|V(\mathbf q)\big|^2 \;\to\; \sum_{\mathbf G \in \{-1,0,1\}^3}
+$$
+\big|V(\mathbf q)\big|^2 \;\to\; \sum_{\mathbf G \in \{-1,0,1\}^3}
 \frac{1}{\varepsilon_{\rm CDRB}\big(|\mathbf q+\mathbf G|^2\big)\;
-\big(|\mathbf q+\mathbf G|^2 + \lambda^2 + q^2_{\rm reg}\big)},$$
+\big(|\mathbf q+\mathbf G|^2 + \lambda^2 + q^2_{\rm reg}\big)},
+$$
 
-$$\varepsilon_{\rm CDRB}(q^2) = 1 + \left[\frac{1}{\varepsilon_\infty - 1}
+$$
+\varepsilon_{\rm CDRB}(q^2) = 1 + \left[\frac{1}{\varepsilon_\infty - 1}
 + \alpha\,\frac{q^2}{q_{\rm TF}^2} + \frac{q^4}{4\,\omega_p^2}\right]^{-1},
-\qquad \alpha = 1.563,$$
+\qquad \alpha = 1.563,
+$$
 
 built from the **valence** gas ($n_v = n_{\rm elec}/\Omega_{\rm cell}$,
 $k_F=(3\pi^2 n_v)^{1/3}$, $q_{\rm TF}^2 = 4k_F/\pi$, $\omega_p^2=4\pi n_v$);
@@ -373,8 +411,10 @@ calibrated-away quantity (full argument in `00`/`07`).
 
 Each realized event applies the exactly-trace-conserving stencil
 
-$$\Delta f_{h\mathbf k_1} = -w,\quad \Delta f_{c\mathbf k_1'} = +w,\quad
-\Delta f_{v\mathbf k_2} = -w,\quad \Delta f_{c\mathbf k_2'} = +w,$$
+$$
+\Delta f_{h\mathbf k_1} = -w,\quad \Delta f_{c\mathbf k_1'} = +w,\quad
+\Delta f_{v\mathbf k_2} = -w,\quad \Delta f_{c\mathbf k_2'} = +w,
+$$
 
 with the total out capped at $f_{h\mathbf k_1}(1-e^{-\Gamma_{\rm tot}\tau})$ and
 distributed $\propto$ partial rates. **One electron promoted per event, one hole
@@ -385,8 +425,10 @@ over each rank's k-range and `comm_summation`-ed (O($N_k^3/P$)).
 
 #### 4.3.3 Dynamic free-carrier screen $\lambda^2(n(t))$ (GaAs only)
 
-$$\lambda^2(t) = \min\Big[\underbrace{\tfrac{4\pi\, n_{\rm exc}(t)}{\varepsilon_0\,k_BT}}_{\text{Debye}},\;
-\underbrace{\tfrac{4}{\varepsilon_0}\Big(\tfrac{3 n_{\rm exc}(t)}{\pi}\Big)^{1/3}}_{\text{degenerate TF}}\Big],$$
+$$
+\lambda^2(t) = \min\Big[\underbrace{\tfrac{4\pi\, n_{\rm exc}(t)}{\varepsilon_0\,k_BT}}_{\text{Debye}},\;
+\underbrace{\tfrac{4}{\varepsilon_0}\Big(\tfrac{3 n_{\rm exc}(t)}{\pi}\Big)^{1/3}}_{\text{degenerate TF}}\Big],
+$$
 
 evaluated on the gathered excited density each step — each formula
 *over*estimates $\kappa^2$ outside its own regime, so min() selects the valid
@@ -410,8 +452,10 @@ moves its $E_{\rm th}$ with density (§2.3) — only when $\Sigma^{\rm HF}$ is o
 Same quadruples, same $\gamma\,|V(\mathbf q)|^2\,\delta_\sigma$ weight, **reversed
 occupation factors**:
 
-$$P^{\rm rev} = \Big[1-\frac{f_{v\mathbf k_2}}{\texttt{occ}}\Big]_+\,
-\frac{f_{c\mathbf k_1'}}{\texttt{occ}}\,\frac{f_{c\mathbf k_2'}}{\texttt{occ}},$$
+$$
+P^{\rm rev} = \Big[1-\frac{f_{v\mathbf k_2}}{\texttt{occ}}\Big]_+\,
+\frac{f_{c\mathbf k_1'}}{\texttt{occ}}\,\frac{f_{c\mathbf k_2'}}{\texttt{occ}},
+$$
 
 and negated stencil ($+$hot, $-c_1'$, $+$valence, $-c_2'$): two conduction
 electrons meet a hole; one recombines, the released energy promotes the other to
@@ -420,8 +464,10 @@ scale *is* the cited II magnitude, because Auger and II share $|M|^2$ and differ
 only in occupations (microreversibility). **Detailed balance is exact**: for
 Fermi–Dirac occupations on an energy-conserving quadruple,
 
-$$f_1 f_2 (1-f_3)(1-f_4) = (1-f_1)(1-f_2) f_3 f_4
-\quad\Longrightarrow\quad \mathcal D_{\rm II} + \mathcal D_{\rm Aug}\big|_{\rm FD} = 0,$$
+$$
+f_1 f_2 (1-f_3)(1-f_4) = (1-f_1)(1-f_2) f_3 f_4
+\quad\Longrightarrow\quad \mathcal D_{\rm II} + \mathcal D_{\rm Aug}\big|_{\rm FD} = 0,
+$$
 
 the equilibrium-fixed-point unit test. Hot-state gain capped at
 $(\texttt{occ}-f)(1-e^{-\Gamma\tau})$ (no overfill).
@@ -441,13 +487,17 @@ $\;Q_{\rm TF} = \frac{4 k_BT}{\varepsilon_r v^2}\Big[\ln\!\big(e^{\mu_c/k_BT}+1\
 
 CCCV recombination rate per area [R07 Eq. 14, the √ in the numerator]:
 
-$$R_{\rm CCCV} = \frac{1}{v}\int_0^\infty\!\frac{dk_1}{2\pi}\int_0^\infty\!\frac{dk_2}{2\pi}\int_{k_2}^\infty\!\frac{dQ}{2\pi}\;
+$$
+R_{\rm CCCV} = \frac{1}{v}\int_0^\infty\!\frac{dk_1}{2\pi}\int_0^\infty\!\frac{dk_2}{2\pi}\int_{k_2}^\infty\!\frac{dQ}{2\pi}\;
 |M|^2\,\sqrt{(k_1{+}Q)(Q{-}k_2)\,k_1 k_2}\;
-f_c(k_1)f_c(k_2)\big[1{-}f_c(k_1{+}Q)\big]\big[1{-}f_v(Q{-}k_2)\big],$$
+f_c(k_1)f_c(k_2)\big[1{-}f_c(k_1{+}Q)\big]\big[1{-}f_v(Q{-}k_2)\big],
+$$
 
-$$|M|^2 = M_d^2 + M_e^2 + (M_d-M_e)^2,\qquad
+$$
+|M|^2 = M_d^2 + M_e^2 + (M_d-M_e)^2,\qquad
 M_d = \frac{2\pi}{\varepsilon_r\,(Q+Q_{\rm TF})},\quad
-M_e = \frac{2\pi}{\varepsilon_r\,(|Q+k_1-k_2|+Q_{\rm TF})};$$
+M_e = \frac{2\pi}{\varepsilon_r\,(|Q+k_1-k_2|+Q_{\rm TF})};
+$$
 
 CVVV = the hole mirror ($n\leftrightarrow p$); the generation partners
 $G$ [Eq. 17] have the occupations reversed. The live channel applies the **net**
@@ -474,14 +524,18 @@ Fermi–Dirac **without changing its particle number or energy** (it cannot rela
 energy to the lattice — that is e-ph's job). Implemented as the exactly-conserving
 relaxation: per $\mathbf k$, fit $(\beta,\mu)$ of
 
-$$f^{\rm FD}_a = \frac{1}{e^{\beta(E_a-\mu)}+1}\quad\text{s.t.}\quad
+$$
+f^{\rm FD}_a = \frac{1}{e^{\beta(E_a-\mu)}+1}\quad\text{s.t.}\quad
 \sum_a f^{\rm FD}_a = \sum_a \frac{f_a}{\texttt{occ}},\qquad
-\sum_a E_a f^{\rm FD}_a = \sum_a E_a \frac{f_a}{\texttt{occ}},$$
+\sum_a E_a f^{\rm FD}_a = \sum_a E_a \frac{f_a}{\texttt{occ}},
+$$
 
 then mix with $\alpha = 1-e^{-\nu_{cc}\tau}$:
 
-$$\tilde\rho_{aa} \to (1-\alpha)\,\tilde\rho_{aa} + \alpha\,\texttt{occ}\,f^{\rm FD}_a,
-\qquad \tilde\rho_{ab} \to (1-\alpha)\,\tilde\rho_{ab}\ (a\neq b),$$
+$$
+\tilde\rho_{aa} \to (1-\alpha)\,\tilde\rho_{aa} + \alpha\,\texttt{occ}\,f^{\rm FD}_a,
+\qquad \tilde\rho_{ab} \to (1-\alpha)\,\tilde\rho_{ab}\ (a\neq b),
+$$
 
 a convex combination of CPTP maps ⇒ CPTP; the off-diagonal factor is the
 excitation-induced dephasing (EID). Rate scale $\nu_{cc}$ =
@@ -491,13 +545,17 @@ from Part G (§4.6). Provenance-gated (forbidden for CdS/graphene — no cited r
 
 ### 4.6 The screening library (Part G — used by §2, §4.3, §4.4, §4.5)
 
-$$\varepsilon_{\rm TF}(q) = 1+\frac{\kappa^2}{q^2};\qquad
+$$
+\varepsilon_{\rm TF}(q) = 1+\frac{\kappa^2}{q^2};\qquad
 \kappa^2_{\rm Debye} = \frac{4\pi n}{\varepsilon_{\rm bg} k_BT};\qquad
-\kappa^2_{\rm TF,deg} = \frac{4}{\varepsilon_{\rm bg}}\Big(\frac{3n}{\pi}\Big)^{1/3};$$
+\kappa^2_{\rm TF,deg} = \frac{4}{\varepsilon_{\rm bg}}\Big(\frac{3n}{\pi}\Big)^{1/3};
+$$
 
-$$\varepsilon_{\rm Lind}(q) = 1 + \frac{\kappa^2}{q^2}\,F\!\Big(\frac{q}{2k_F}\Big),\quad
+$$
+\varepsilon_{\rm Lind}(q) = 1 + \frac{\kappa^2}{q^2}\,F\!\Big(\frac{q}{2k_F}\Big),\quad
 F(x) = \frac12 + \frac{1-x^2}{4x}\ln\Big|\frac{1+x}{1-x}\Big|
-\ \text{(static Lindhard, default e-e screen)};$$
+\ \text{(static Lindhard, default e-e screen)};
+$$
 
 $\varepsilon_{\rm CDRB}(q)$ as in §4.3.2; $\omega_p^2 = 4\pi n/(\varepsilon_\infty m^*)$;
 LOPC phonon-plasmon branches (GaAs-dynamic, material-specific). The static screen

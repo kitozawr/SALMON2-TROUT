@@ -844,7 +844,7 @@ def _save_bz3d(kfrac, pop, b_matrix, t_val, t_unit, output_dir, dpi,
 
 def _save_bz3d_voxel(cpop3d, cx, cy, cz, b_matrix, t_val, t_unit, output_dir,
                      dpi, tag='nex_k', basis_label='real-carrier', vmax=None,
-                     valleys=None, pop_floor=0.05, smooth_sigma=1.0):
+                     valleys=None, pop_floor=0.05, smooth_sigma=0.0):
     """Variant (b) of the 3D BZ population plot: a SMOOTHED SEMI-TRANSPARENT
     VOXEL CLOUD rendered from the un-sheared Cartesian grid `cpop3d` (the same
     array behind the *_cart_snap_* maps), instead of the MP-point scatter of
@@ -852,22 +852,26 @@ def _save_bz3d_voxel(cpop3d, cx, cy, cz, b_matrix, t_val, t_unit, output_dir,
     voxels below pop_floor*max are fully transparent), BZ wireframe overlaid.
     The volumetric analogue of the paper-style scatter -- shows the SHAPE of
     the populated valleys rather than the sampled points."""
-    pop = np.nan_to_num(np.asarray(cpop3d, dtype=float))
-    try:
-        from scipy.ndimage import gaussian_filter
-        if smooth_sigma > 0:
-            pop = gaussian_filter(pop, sigma=smooth_sigma)
-    except Exception:
-        pass                                            # unsmoothed fallback
-    vmax = float(vmax if vmax is not None else max(pop.max(), 1e-30))
+    pop_raw = np.nan_to_num(np.asarray(cpop3d, dtype=float))
+    # Colour scale from the TRUE (unsmoothed) peak population, so the colorbar
+    # is honest even if we smooth: on a coarse grid a sharp Gamma spike would
+    # otherwise read many times too low (Gaussian smearing rescales the peak).
+    vmax = float(vmax if vmax is not None else max(pop_raw.max(), 1e-30))
+    pop = pop_raw
+    if smooth_sigma > 0:
+        try:
+            from scipy.ndimage import gaussian_filter
+            pop = gaussian_filter(pop_raw, sigma=smooth_sigma)
+        except Exception:
+            pop = pop_raw                               # unsmoothed fallback
     m = np.clip(pop / vmax, 0.0, 1.0)
     filled = m > pop_floor
     if not np.any(filled):
         return                                           # nothing to draw yet
 
     # per-voxel RGBA: colormap colour, alpha ∝ population above the floor
-    from matplotlib import cm as _cm
-    rgba = _cm.get_cmap(CMAP_POP)(m)
+    # (plt.get_cmap, not matplotlib.cm.get_cmap -- the latter was removed in mpl 3.9)
+    rgba = plt.get_cmap(CMAP_POP)(m)
     rgba[..., 3] = np.where(filled, 0.08 + 0.72 * (m - pop_floor) / (1 - pop_floor), 0.0)
 
     # voxel corner grids (cx/cy/cz are bin centres, uniform spacing)
@@ -895,8 +899,9 @@ def _save_bz3d_voxel(cpop3d, cx, cy, cz, b_matrix, t_val, t_unit, output_dir,
     ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.set_zlim(-lim, lim)
     ax.set_box_aspect((1, 1, 1))
     ax.set_xlabel('kx [a.u.]'); ax.set_ylabel('ky [a.u.]'); ax.set_zlabel('kz [a.u.]')
+    _smtxt = f'Gaussian σ={smooth_sigma:g} bins' if smooth_sigma > 0 else 'raw k-bins (unsmoothed)'
     ax.set_title(f'{basis_label} LCB population voxel cloud,  t = {t_val:.3f} {t_unit}\n'
-                 f'(opacity ∝ population, Gaussian σ={smooth_sigma:g} bins; '
+                 f'(opacity ∝ population, {_smtxt}; '
                  f'< {pop_floor:.0%} of max transparent)')
     safe_t = f'{t_val:.6f}'.replace('-', 'm').replace('+', 'p')
     out = output_dir / f'{tag}_bz3dvox_t{safe_t}{t_unit}.png'
@@ -1050,7 +1055,7 @@ def plot_intra_current(filepath, rt_filepath, output_dir, dpi=150):
 
 def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
                unfold=False, subtract_baseline=False, real=False, b_matrix=None,
-               mark_valleys=False, bz3d=False, bz3d_voxel=False):
+               mark_valleys=False, bz3d=False, bz3d_voxel=False, voxel_smooth=0.0):
     print(f"Processing {filepath.name}  "
           f"(cmap={'log' if log_scale else 'linear'}, "
           f"snapshots={'on' if snapshots else 'off'}"
@@ -1136,7 +1141,8 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
             if bz3d_voxel:
                 _save_bz3d_voxel(cpop3d, cx, cy, cz, b_matrix, t_val, t_unit,
                                  output_dir, dpi, tag=tag, basis_label=basis_label,
-                                 valleys=_cubic_valleys(b_matrix)[0] if mark_valleys else None)
+                                 valleys=_cubic_valleys(b_matrix)[0] if mark_valleys else None,
+                                 smooth_sigma=voxel_smooth)
         times.append(t_val)
         marg_kx.append(np.nanmean(pop3d, axis=(1, 2)))
         marg_ky.append(np.nanmean(pop3d, axis=(0, 2)))
@@ -2251,12 +2257,20 @@ def main():
                              '(weak points fade/hidden). Needs the reciprocal '
                              'vectors in the k.data header (primitive datasets).')
     parser.add_argument('--bz3d-voxel', action='store_true',
-                        help='Variant (b) of --bz3d: a smoothed semi-transparent '
-                             'VOXEL CLOUD rendered from the un-sheared Cartesian '
+                        help='Variant (b) of --bz3d: a semi-transparent VOXEL '
+                             'CLOUD rendered from the un-sheared Cartesian '
                              'population grid (the *_cart_snap_* array) instead '
                              'of the MP-point scatter -- shows the SHAPE of the '
-                             'populated valleys. Needs the reciprocal vectors in '
+                             'populated valleys. By default UNSMOOTHED (one cube '
+                             'per populated k-bin, faithful to --bz3d); see '
+                             '--voxel-smooth. Needs the reciprocal vectors in '
                              'the k.data header (primitive datasets).')
+    parser.add_argument('--voxel-smooth', type=float, default=0.0, metavar='SIGMA',
+                        help='Gaussian smoothing width (in grid bins) for '
+                             '--bz3d-voxel. Default 0 = unsmoothed crisp cubes '
+                             '(recommended for coarse grids; the colorbar always '
+                             'reflects the TRUE peak population). Set e.g. 1.0 for '
+                             'a soft cloud on dense grids.')
     parser.add_argument('--spectral-excitation', action='store_true',
                         help='Colour the primitive spectral A(k,E) frames by '
                              'EXCITATION (holes in VB, electrons in CB; both 0 at '
@@ -2341,7 +2355,7 @@ def main():
                        log_scale=args.log_cmap, snapshots=args.snapshots, real=True,
                        b_matrix=_bmatrix_for(f, '_sbe_nex_k_real.data'),
                        mark_valleys=args.valleys, bz3d=args.bz3d,
-                       bz3d_voxel=args.bz3d_voxel)
+                       bz3d_voxel=args.bz3d_voxel, voxel_smooth=args.voxel_smooth)
         for f in real_uk:
             found_any = True
             plot_nex_k(f, output_dir, dpi=args.dpi,
@@ -2357,7 +2371,7 @@ def main():
                            log_scale=args.log_cmap, snapshots=args.snapshots,
                            b_matrix=_bmatrix_for(f, '_sbe_nex_k.data'),
                            mark_valleys=args.valleys, bz3d=args.bz3d,
-                       bz3d_voxel=args.bz3d_voxel)
+                       bz3d_voxel=args.bz3d_voxel, voxel_smooth=args.voxel_smooth)
                 if args.subtract_baseline:
                     plot_nex_k(f, output_dir, dpi=args.dpi,
                                log_scale=args.log_cmap, snapshots=args.snapshots,

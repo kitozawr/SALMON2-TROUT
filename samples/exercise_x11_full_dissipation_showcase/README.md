@@ -88,8 +88,9 @@ python3 ../../plot_sbe_results.py -i . -o plots --snapshots --valleys \
 | **graphene** | carriers relax onto the **six K/K′ Dirac corners**; `*_sbe_nex.data` shows the 2D Rana Auger tail — monotone nex decay after the pulse (and *gentle generation* toward the 300 K density before it: detailed balance, not a bug) |
 
 The frame set per run: `plots/*_bz3d_t*.png` (scatter, variant a),
-`plots/*_bz3dvox_t*.png` (smoothed voxel cloud, variant b — the *shape* of the
-valleys), `plots/*_cart_snap_*.png` (Cartesian slices with valley markers),
+`plots/*_bz3dvox_t*.png` (voxel cloud, variant b — the *shape* of the valleys;
+unsmoothed by default, `--voxel-smooth 1.0` for a soft cloud on dense grids),
+`plots/*_cart_snap_*.png` (Cartesian slices with valley markers),
 `plots/spectral_frames/*.png` (A(k,E) band map: valence depleting, valleys
 filling). `out_projection_k_step = 500` gives 12 frames per run — an animation:
 
