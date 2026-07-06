@@ -833,7 +833,7 @@ def _save_bz3d(kfrac, pop, b_matrix, t_val, t_unit, output_dir, dpi,
     ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.set_zlim(-lim, lim)
     ax.set_box_aspect((1, 1, 1))
     ax.set_xlabel('kx [a.u.]'); ax.set_ylabel('ky [a.u.]'); ax.set_zlabel('kz [a.u.]')
-    ax.set_title(f'{basis_label} LCB population in the 3D BZ,  t = {t_val:.3f} {t_unit}\n'
+    ax.set_title(f'{basis_label} conduction population in the 3D BZ,  t = {t_val:.3f} {t_unit}\n'
                  f'(point size & opacity ∝ population; < {pop_floor:.0%} of max hidden)')
     safe_t = f'{t_val:.6f}'.replace('-', 'm').replace('+', 'p')
     out = output_dir / f'{tag}_bz3d_t{safe_t}{t_unit}.png'
@@ -900,7 +900,7 @@ def _save_bz3d_voxel(cpop3d, cx, cy, cz, b_matrix, t_val, t_unit, output_dir,
     ax.set_box_aspect((1, 1, 1))
     ax.set_xlabel('kx [a.u.]'); ax.set_ylabel('ky [a.u.]'); ax.set_zlabel('kz [a.u.]')
     _smtxt = f'Gaussian σ={smooth_sigma:g} bins' if smooth_sigma > 0 else 'raw k-bins (unsmoothed)'
-    ax.set_title(f'{basis_label} LCB population voxel cloud,  t = {t_val:.3f} {t_unit}\n'
+    ax.set_title(f'{basis_label} conduction population voxel cloud,  t = {t_val:.3f} {t_unit}\n'
                  f'(opacity ∝ population, {_smtxt}; '
                  f'< {pop_floor:.0%} of max transparent)')
     safe_t = f'{t_val:.6f}'.replace('-', 'm').replace('+', 'p')
@@ -958,7 +958,7 @@ def _save_snapshot(pop3d, kx_u, ky_u, kz_u, t_val, t_unit, output_dir, dpi,
         _overlay_valleys(axes[2], 1, 2, valleys, b_matrix)   # ky-kz
 
     zone = 'Cartesian BZ (a.u.)' if unit != 'reduced' else 'reduced k'
-    fig.suptitle(f'{basis_label} LCB population [{zone}],  t = {t_val:.6f} {t_unit}')
+    fig.suptitle(f'{basis_label} conduction population [{zone}],  t = {t_val:.6f} {t_unit}')
     fig.tight_layout(rect=[0, 0, 1, 0.94])
     safe_t  = f'{t_val:.6f}'.replace('-', 'm').replace('+', 'p')
     out = output_dir / f'{tag}_snap_t{safe_t}{t_unit}.png'
@@ -1055,7 +1055,8 @@ def plot_intra_current(filepath, rt_filepath, output_dir, dpi=150):
 
 def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
                unfold=False, subtract_baseline=False, real=False, b_matrix=None,
-               mark_valleys=False, bz3d=False, bz3d_voxel=False, voxel_smooth=0.0):
+               mark_valleys=False, bz3d=False, bz3d_voxel=False, voxel_smooth=0.0,
+               cb_sum=False):
     print(f"Processing {filepath.name}  "
           f"(cmap={'log' if log_scale else 'linear'}, "
           f"snapshots={'on' if snapshots else 'off'}"
@@ -1076,6 +1077,24 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
     # the per-k total of the lowest conduction band (any coset count).
     ftag = 'nex_k_fold' + suff + ('_db' if subtract_baseline else '')
 
+    # Optional (--bz3d-cb-sum): use the SUM of BOTH recorded conduction bands
+    # (CB1+CB2) as the per-k population instead of the lowest-CB-only column.
+    # The two CB populations are in the sibling four-level real file
+    # SYSNAME_sbe_nex_k_lev_real.data (cols pop_cb1, pop_cb2). Keyed by time and
+    # substituted below; the k-order matches (both written in ik order).
+    cbsum_by_t = None
+    if cb_sum:
+        levfile = filepath.parent / filepath.name.replace('_sbe_nex_k', '_sbe_nex_k_lev')
+        if levfile.exists():
+            cbsum_by_t = {round(lt, 6): pop4[:, 2] + pop4[:, 3]
+                          for lt, _lu, _lk, pop4 in _iter_nex_k_lev_blocks(levfile)}
+            tag += '_cbsum'
+            basis_label += ', CB1+CB2'
+            print(f"  --bz3d-cb-sum: population = CB1+CB2 from {levfile.name}")
+        else:
+            print(f"  (warn) --bz3d-cb-sum: {levfile.name} not found "
+                  f"-- falling back to lowest-CB only")
+
     kx_u = ky_u = kz_u = ix = iy = iz = None
     pop3d = None
     fkx_u = fky_u = fkz_u = fix = fiy = fiz = None
@@ -1090,6 +1109,10 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
 
     for t_val, t_unit, kpoints, pop, _levels, sub in _iter_nex_k_blocks(filepath, unfold=unfold):
         t_unit_last = t_unit
+        if cbsum_by_t is not None:                       # --bz3d-cb-sum override
+            cs = cbsum_by_t.get(round(t_val, 6))
+            if cs is not None and len(cs) == len(pop):
+                pop = cs
         n_blocks   += 1
         kpoints_prim = kpoints
         if unfold:
@@ -2271,6 +2294,13 @@ def main():
                              '(recommended for coarse grids; the colorbar always '
                              'reflects the TRUE peak population). Set e.g. 1.0 for '
                              'a soft cloud on dense grids.')
+    parser.add_argument('--bz3d-cb-sum', action='store_true',
+                        help='For --bz3d/--bz3d-voxel and the k-maps, use the SUM '
+                             'of BOTH recorded conduction bands (CB1+CB2) as the '
+                             'per-k population instead of the lowest CB only. '
+                             'Reads the four-level file SYSNAME_sbe_nex_k_lev_real'
+                             '.data (REAL carriers, primitive cell); outputs get a '
+                             '_cbsum tag. Falls back to lowest-CB if absent.')
     parser.add_argument('--spectral-excitation', action='store_true',
                         help='Colour the primitive spectral A(k,E) frames by '
                              'EXCITATION (holes in VB, electrons in CB; both 0 at '
@@ -2355,7 +2385,8 @@ def main():
                        log_scale=args.log_cmap, snapshots=args.snapshots, real=True,
                        b_matrix=_bmatrix_for(f, '_sbe_nex_k_real.data'),
                        mark_valleys=args.valleys, bz3d=args.bz3d,
-                       bz3d_voxel=args.bz3d_voxel, voxel_smooth=args.voxel_smooth)
+                       bz3d_voxel=args.bz3d_voxel, voxel_smooth=args.voxel_smooth,
+                       cb_sum=args.bz3d_cb_sum)
         for f in real_uk:
             found_any = True
             plot_nex_k(f, output_dir, dpi=args.dpi,

@@ -40,6 +40,15 @@ into the calculation directory (or use `-i DIR -o OUTDIR`) and run. It scans for
   **unsmoothed** — one cube per populated k-bin, faithful to `--bz3d`, with the
   colorbar on the true peak population. `--voxel-smooth SIGMA` (e.g. `1.0`) adds
   a Gaussian blur for a softer cloud on dense grids;
+* `--bz3d-cb-sum`: by default the 3D/BZ views (and the k-maps) show the **lowest**
+  conduction band only. This flag instead uses the **sum of BOTH recorded
+  conduction bands, CB1 + CB2**, read from the four-level real file
+  `SYSNAME_sbe_nex_k_lev_real.data` (the same file that colours the `--spectral`
+  band movie — cols `pop_cb1`, `pop_cb2`). Use it when the drive fills the second
+  conduction band (strong or high-photon-energy pulses): e.g. on a CdS resonant-Γ
+  run at 2×10¹³ W/cm² CB2 already holds ~⅓ of the conduction carriers, invisible
+  in the LCB-only view. Outputs get a `_cbsum` tag; falls back to lowest-CB if the
+  four-level file is absent;
 * `--spectral`: per-frame **A(k,E) band-structure movies** (`spectral_frames/`)
   coloured by occupation (valence full=1 at t=0, depleting; conduction
   filling); `--spectral-excitation` colours by excitation instead. Needs
