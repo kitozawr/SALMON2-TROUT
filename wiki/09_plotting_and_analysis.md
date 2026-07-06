@@ -34,10 +34,12 @@ into the calculation directory (or use `-i DIR -o OUTDIR`) and run. It scans for
   the Wigner–Seitz BZ wireframe (Voronoi cell of the reciprocal lattice: FCC →
   truncated octahedron, hexagonal → prism) + the MP k-points coloured & sized by
   population (weak points fade/hidden);
-* `--bz3d-voxel`: variant (b) — a Gaussian-smoothed **semi-transparent voxel
-  cloud** rendered from the un-sheared Cartesian grid (opacity ∝ population):
-  the volumetric *shape* of the populated valleys rather than the sampled
-  points;
+* `--bz3d-voxel`: variant (b) — a **semi-transparent voxel cloud** rendered
+  from the un-sheared Cartesian grid (opacity ∝ population): the volumetric
+  *shape* of the populated valleys rather than the sampled points. By default
+  **unsmoothed** — one cube per populated k-bin, faithful to `--bz3d`, with the
+  colorbar on the true peak population. `--voxel-smooth SIGMA` (e.g. `1.0`) adds
+  a Gaussian blur for a softer cloud on dense grids;
 * `--spectral`: per-frame **A(k,E) band-structure movies** (`spectral_frames/`)
   coloured by occupation (valence full=1 at t=0, depleting; conduction
   filling); `--spectral-excitation` colours by excitation instead. Needs
