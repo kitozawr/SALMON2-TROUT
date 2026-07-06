@@ -55,6 +55,57 @@ python3 plot_sbe_results.py -i . -o plots --snapshots --valleys --bz3d --bz3d-vo
 ffmpeg -framerate 4 -pattern_type glob -i 'plots/*_bz3d_t*.png' movie.mp4
 ```
 
+### How the plotter knows which Brillouin-zone cell to draw
+
+The drawn cell is **not chosen by material name** — it is the **Wigner–Seitz
+cell of the reciprocal lattice**, reconstructed from three numbers written into
+the data itself:
+
+1. **Source of truth — the `_k.data` header.** The non-orthogonal EPM (and the
+   DFT export) write the primitive reciprocal vectors into the ground-state
+   `SYSNAME_k.data` header as three comment lines
+
+   ```
+   # b1 =   <b1x>  <b1y>  <b1z>   [a.u.]
+   # b2 =   ...
+   # b3 =   ...
+   ```
+
+   The plotter reads them with `_read_bmatrix()` (regex on `# b{1,2,3} =`) into a
+   3×3 matrix `b_matrix` (rows `b1,b2,b3`). Each `*_sbe_nex_k*.data` frame is
+   paired to its sibling `SYSNAME_k.data` by `_bmatrix_for()`, so the cell always
+   matches the run that produced the populations.
+
+2. **The cell is the Voronoi cell of the origin.** From `b_matrix` alone:
+   * **3D wireframe** (`_bz_wireframe_3d`): take the 27 nearest reciprocal-lattice
+     points $\{i\,\mathbf b_1 + j\,\mathbf b_2 + k\,\mathbf b_3 : i,j,k\in\{-1,0,1\}\}$,
+     build their Voronoi diagram, and keep the ridges that bound the origin's
+     cell — those polygons are the BZ faces, their edges the wireframe.
+   * **2D silhouette** (`_bz_outline_2d`): the Bragg planes
+     $\mathbf k\cdot\mathbf G = |\mathbf G|^2/2$ of the same lattice, projected
+     onto each Cartesian pair.
+   * **k-point placement** (`_cartesian_bz_grid`): every k is mapped to its
+     nearest reciprocal-lattice image (the same WS wrap) before being binned
+     onto the Cartesian voxel/heatmap grid.
+
+   Because it is a pure Voronoi construction, the **shape follows the vectors
+   automatically**: an FCC dataset (GaAs, Si) draws a **truncated octahedron**, a
+   hexagonal dataset (CdS, graphene) draws a **hexagonal prism** — with nothing
+   hardcoded per material. This is the same cell for `--bz3d`, `--bz3d-voxel`,
+   the `*_cart_snap_*` slices, and the Cartesian k–t maps.
+
+3. **Fallback when the header is absent.** Legacy cubic/orthogonal datasets do
+   not carry `# b1/b2/b3`, so `b_matrix` is `None`: the true-BZ views are skipped
+   and the plotter shows the **reduced-coordinate** (fractional-axis) heatmaps
+   instead. `--bz3d`/`--bz3d-voxel` therefore require a primitive dataset with
+   the header.
+
+4. **Caveat — `--valleys` markers are cubic.** The Γ / X / Δ (0.85·X) / L overlay
+   points come from `_cubic_valleys()`, which assumes an **FCC/diamond** cell.
+   They are meaningful on GaAs/Si; do **not** trust them on the hexagonal
+   CdS/graphene cells (the BZ wireframe there is still correct — only the valley
+   markers assume cubic symmetry).
+
 ### Spinor (spin-orbit split) datasets
 
 Detected automatically from the occupation column (1 per band). The plotter
