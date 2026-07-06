@@ -919,8 +919,7 @@ def _save_bz3d_voxel(cpop3d, cx, cy, cz, b_matrix, t_val, t_unit, output_dir,
         z0, z1 = ez[k] + 0.5*gap*dz, ez[k+1] - 0.5*gap*dz
         faces += _cube_faces(x0, x1, y0, y1, z0, z1)
         fcolors += [rgba[i, j, k]] * 6
-    pc = Poly3DCollection(faces, facecolors=fcolors,
-                          edgecolors=(0.15, 0.15, 0.15, 0.35), linewidths=0.2)
+    pc = Poly3DCollection(faces, facecolors=fcolors, edgecolors='none')
     ax.add_collection3d(pc)
     if valleys is not None:
         for p in valleys:
