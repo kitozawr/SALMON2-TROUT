@@ -2380,9 +2380,10 @@ def main():
                         help='Frame rate for the auto-assembled animations '
                              '(default 6).')
     parser.add_argument('--anim-format', choices=['auto', 'mp4', 'gif', 'both'],
-                        default='auto',
-                        help="Animation container: 'auto' = mp4 if ffmpeg is on "
-                             "PATH else gif; or force 'mp4'/'gif'/'both'.")
+                        default='gif',
+                        help="Animation container (default 'gif'): 'gif' (Pillow, "
+                             "no external tool), 'mp4' (ffmpeg), 'both', or 'auto' "
+                             "= mp4 if ffmpeg is on PATH else gif.")
     parser.add_argument('--downsample', type=int, default=1,
                         help='Keep every N-th line in RT files (1 = all lines)')
     parser.add_argument('--band-path', nargs='+', default=None,
