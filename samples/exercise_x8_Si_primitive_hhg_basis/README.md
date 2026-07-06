@@ -79,7 +79,8 @@ That contrast **is** the lesson: strengthen the field only as far as the basis
 ## 3. Read the output
 
 ```bash
-python3 ../../plot_sbe_results.py -i . -o plots --spectral --snapshots --valleys
+python3 ../../plot_sbe_results.py -i . -o plots --spectral --snapshots --valleys \
+        --bz3d --bz3d-voxel
 python3 hhg_spectrum.py Si_prim_sbe_rt.data --out plots/hhg_spectrum.png
 ```
 
@@ -94,6 +95,18 @@ What each shows:
   **kx-ky / kx-kz / ky-kz** heatmaps. With `--valleys` the Si high-symmetry points
   are overlaid (Γ, the six X faces, and the Δ-valley minima at 0.85·X along ⟨100⟩),
   so you can check the excitation **hot spots land in the correct Δ-valleys**.
+* **`plots/*_bz3d_t*` / `*_bz3dvox_t*` (3D Brillouin zone)** — the same real-carrier
+  conduction population in **3D**: `--bz3d` is the paper-style scatter (MP points
+  coloured & sized by population inside the Wigner–Seitz wireframe), `--bz3d-voxel`
+  the semi-transparent **voxel cloud** (one cube per populated k-bin; every cube
+  face is z-sorted into one collection so the localized maxima show *through* the
+  fainter cells instead of being hidden behind an outer shell). Tuning knobs:
+  `--voxel-gamma` (opacity non-linearity, default 2.5 — keeps weak overlapping
+  cells transparent so the born-carrier **maxima** stand out), `--voxel-gap` (cube
+  shrink, small by default — raise on coarse grids), `--voxel-smooth` (Gaussian
+  blur for dense grids), and `--bz3d-cb-sum` (sum **both** conduction bands
+  CB1+CB2 from the four-level file, not just the lowest). Same Γ–L diagonal weight
+  as the slices — see the note below.
 * **`Si_prim_sbe_rt.data` (total current) / `Si_prim_sbe_intra_current.data`** —
   the gauge-invariant matter current `Jm` and its intra-band part (plotted by
   `plot_sbe_results.py` as `Jm_*` / `J_intra`).
