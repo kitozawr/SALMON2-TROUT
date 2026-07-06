@@ -853,7 +853,8 @@ def _cube_faces(x0, x1, y0, y1, z0, z1):
 
 def _save_bz3d_voxel(cpop3d, cx, cy, cz, b_matrix, t_val, t_unit, output_dir,
                      dpi, tag='nex_k', basis_label='real-carrier', vmax=None,
-                     valleys=None, pop_floor=0.05, smooth_sigma=0.0):
+                     valleys=None, pop_floor=0.05, smooth_sigma=0.0,
+                     gap=0.05, alpha_gamma=2.5):
     """Variant (b) of the 3D BZ population plot: a SMOOTHED SEMI-TRANSPARENT
     VOXEL CLOUD rendered from the un-sheared Cartesian grid `cpop3d` (the same
     array behind the *_cart_snap_* maps), instead of the MP-point scatter of
@@ -878,10 +879,16 @@ def _save_bz3d_voxel(cpop3d, cx, cy, cz, b_matrix, t_val, t_unit, output_dir,
     if not np.any(filled):
         return                                           # nothing to draw yet
 
-    # per-voxel RGBA: colormap colour, alpha ∝ population above the floor
+    # per-voxel RGBA: colormap colour, NON-LINEAR opacity in population.
     # (plt.get_cmap, not matplotlib.cm.get_cmap -- the latter was removed in mpl 3.9)
+    # alpha = amin + (amax-amin) * t**gamma, t = (m-floor)/(1-floor) in [0,1].
+    # gamma > 1 keeps faint cells nearly transparent so that many overlapping
+    # weak voxels don't accumulate into an opaque fog, while the LOCALIZED
+    # maxima (the interesting part) stay bright and pop out. gamma=1 -> linear.
     rgba = plt.get_cmap(CMAP_POP)(m)
-    rgba[..., 3] = np.where(filled, 0.12 + 0.58 * (m - pop_floor) / (1 - pop_floor), 0.0)
+    _amin, _amax = 0.035, 0.90
+    _t = np.clip((m - pop_floor) / (1.0 - pop_floor), 0.0, 1.0)
+    rgba[..., 3] = np.where(filled, _amin + (_amax - _amin) * _t ** max(alpha_gamma, 0.01), 0.0)
 
     # voxel corner edges per axis (cx/cy/cz are bin centres, uniform spacing)
     def _edges(c):
@@ -904,7 +911,7 @@ def _save_bz3d_voxel(cpop3d, cx, cy, cz, b_matrix, t_val, t_unit, output_dir,
     # the outer shell without the inner cubes ever showing. Each cube is shrunk
     # by `gap` so neighbours don't touch and the interior stays visible.
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-    gap = 0.16
+    gap = float(np.clip(gap, 0.0, 0.9))
     faces, fcolors = [], []
     for i, j, k in zip(*np.where(filled)):
         x0, x1 = ex[i] + 0.5*gap*dx, ex[i+1] - 0.5*gap*dx
@@ -928,7 +935,7 @@ def _save_bz3d_voxel(cpop3d, cx, cy, cz, b_matrix, t_val, t_unit, output_dir,
     ax.set_xlabel('kx [a.u.]'); ax.set_ylabel('ky [a.u.]'); ax.set_zlabel('kz [a.u.]')
     _smtxt = f'Gaussian σ={smooth_sigma:g} bins' if smooth_sigma > 0 else 'raw k-bins (unsmoothed)'
     ax.set_title(f'{basis_label} conduction population voxel cloud,  t = {t_val:.3f} {t_unit}\n'
-                 f'(opacity ∝ population, {_smtxt}; '
+                 f'(opacity ∝ population^{alpha_gamma:g}, {_smtxt}; '
                  f'< {pop_floor:.0%} of max transparent)')
     safe_t = f'{t_val:.6f}'.replace('-', 'm').replace('+', 'p')
     out = output_dir / f'{tag}_bz3dvox_t{safe_t}{t_unit}.png'
@@ -1083,7 +1090,7 @@ def plot_intra_current(filepath, rt_filepath, output_dir, dpi=150):
 def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
                unfold=False, subtract_baseline=False, real=False, b_matrix=None,
                mark_valleys=False, bz3d=False, bz3d_voxel=False, voxel_smooth=0.0,
-               cb_sum=False):
+               cb_sum=False, voxel_gap=0.05, voxel_gamma=2.5):
     print(f"Processing {filepath.name}  "
           f"(cmap={'log' if log_scale else 'linear'}, "
           f"snapshots={'on' if snapshots else 'off'}"
@@ -1192,7 +1199,8 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
                 _save_bz3d_voxel(cpop3d, cx, cy, cz, b_matrix, t_val, t_unit,
                                  output_dir, dpi, tag=tag, basis_label=basis_label,
                                  valleys=_cubic_valleys(b_matrix)[0] if mark_valleys else None,
-                                 smooth_sigma=voxel_smooth)
+                                 smooth_sigma=voxel_smooth, gap=voxel_gap,
+                                 alpha_gamma=voxel_gamma)
         times.append(t_val)
         marg_kx.append(np.nanmean(pop3d, axis=(1, 2)))
         marg_ky.append(np.nanmean(pop3d, axis=(0, 2)))
@@ -2321,6 +2329,16 @@ def main():
                              '(recommended for coarse grids; the colorbar always '
                              'reflects the TRUE peak population). Set e.g. 1.0 for '
                              'a soft cloud on dense grids.')
+    parser.add_argument('--voxel-gamma', type=float, default=2.5, metavar='G',
+                        help='Opacity non-linearity exponent for --bz3d-voxel: '
+                             'alpha ∝ (population)^G. Default 2.5 keeps faint '
+                             'overlapping cells transparent so the localized '
+                             'maxima stand out. G=1 = linear opacity.')
+    parser.add_argument('--voxel-gap', type=float, default=0.05, metavar='FRAC',
+                        help='Fractional shrink of each --bz3d-voxel cube (0..0.9) '
+                             'so neighbours separate and the interior stays '
+                             'visible. Default 0.05 (small, good for dense grids); '
+                             'raise for coarse grids.')
     parser.add_argument('--bz3d-cb-sum', action='store_true',
                         help='For --bz3d/--bz3d-voxel and the k-maps, use the SUM '
                              'of BOTH recorded conduction bands (CB1+CB2) as the '
@@ -2413,7 +2431,8 @@ def main():
                        b_matrix=_bmatrix_for(f, '_sbe_nex_k_real.data'),
                        mark_valleys=args.valleys, bz3d=args.bz3d,
                        bz3d_voxel=args.bz3d_voxel, voxel_smooth=args.voxel_smooth,
-                       cb_sum=args.bz3d_cb_sum)
+                       cb_sum=args.bz3d_cb_sum, voxel_gap=args.voxel_gap,
+                       voxel_gamma=args.voxel_gamma)
         for f in real_uk:
             found_any = True
             plot_nex_k(f, output_dir, dpi=args.dpi,
