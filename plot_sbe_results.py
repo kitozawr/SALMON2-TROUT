@@ -866,8 +866,8 @@ def _save_bz3d_voxel(cpop3d, cx, cy, cz, b_matrix, t_val, t_unit, output_dir,
         return                                           # nothing to draw yet
 
     # per-voxel RGBA: colormap colour, alpha ∝ population above the floor
-    from matplotlib import cm as _cm
-    rgba = _cm.get_cmap(CMAP_POP)(m)
+    # (plt.get_cmap, not matplotlib.cm.get_cmap -- the latter was removed in mpl 3.9)
+    rgba = plt.get_cmap(CMAP_POP)(m)
     rgba[..., 3] = np.where(filled, 0.08 + 0.72 * (m - pop_floor) / (1 - pop_floor), 0.0)
 
     # voxel corner grids (cx/cy/cz are bin centres, uniform spacing)
