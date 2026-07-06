@@ -53,9 +53,16 @@ into the calculation directory (or use `-i DIR -o OUTDIR`) and run. It scans for
   coloured by occupation (valence full=1 at t=0, depleting; conduction
   filling); `--spectral-excitation` colours by excitation instead. Needs
   `SYSNAME_bandpath.data` (the EPM/`dft_band` emit it);
-* band-structure plots from `SYSNAME_k.data`+`_eigen.data` (`--band-path`,
-  default `L Γ X W K`) and from `band.dat` (`theory='dft_band'`), energies
-  shifted to VBM = 0 (`--band-vbm IDX` to override the half-filling default);
+* band-structure plots from `SYSNAME_k.data`+`_eigen.data` and from `band.dat`
+  (`theory='dft_band'`), energies shifted to VBM = 0 (`--band-vbm IDX` to
+  override the half-filling default). **The high-symmetry path is auto-selected
+  per material** (`--lattice auto`, default): the plotter reads `# material =`
+  from the `_k.data` header and picks **fcc** for cubic GaAs/Si (`L-Γ-X-W-K`) or
+  **wurtzite** for CdS (`A-Γ-M-K-Γ` — the hexagonal path, leading with the
+  **Γ-A** c-axis segment, matching the `_bandpath.data` populations plot). Force
+  it with `--lattice fcc|wurtzite`, or set `--band-path` explicitly. (The
+  with-population `--spectral` plot always follows the exact path nodes the EPM
+  wrote into `_bandpath.data`, so it needs no material knowledge.);
 * **Auto-animation (default on).** Every per-frame series — band maps, k-maps,
   BZ snapshots (reduced + Cartesian), `--bz3d`/`--bz3d-voxel`, and the
   `spectral_frames/` — is stitched into `<stem>_anim.mp4` (via `ffmpeg` if it is

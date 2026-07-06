@@ -125,14 +125,16 @@ HS_POINTS = HS_POINTS_FCC          # back-compat alias (cubic GaAs/Si default)
 #   Z == A  (zone top along the c-axis [0001]: the inversion-breaking direction
 #            where the wurtzite even harmonics live); X,Y,S relate to M/K.
 HS_POINTS_WZ = {
-    'Gamma': [0.0, 0.0, 0.0],
-    'X':     [0.5, 0.0, 0.0],   # along a* (the sqrt3-short direction)
-    'Y':     [0.0, 0.5, 0.0],   # along b*
-    'A':     [0.0, 0.0, 0.5],   # == hexagonal A (Gamma-A along c)
-    'S':     [0.5, 0.5, 0.0],   # in-plane corner
-    'U':     [0.5, 0.0, 0.5],
-    'T':     [0.0, 0.5, 0.5],
-    'R':     [0.5, 0.5, 0.5],
+    'Gamma': [0.0,       0.0,       0.0],
+    'A':     [0.0,       0.0,       0.5],   # hexagonal A: Gamma-A along c* (the c-axis)
+    'M':     [0.5,       0.0,       0.0],   # hexagonal M: b1/2 (in-plane zone-edge midpoint)
+    'K':     [1.0 / 3.0, 1.0 / 3.0, 0.0],   # hexagonal K: Dirac-type corner (b1+b2)/3
+    'H':     [1.0 / 3.0, 1.0 / 3.0, 0.5],   # K + c* (zone-top corner)
+    'L':     [0.5,       0.0,       0.5],   # M + c* (zone-top edge)
+    # orthorhombic-supercell aliases kept for back-compat with older CdS datasets:
+    'X':     [0.5,       0.0,       0.0],
+    'Y':     [0.0,       0.5,       0.0],
+    'S':     [0.5,       0.5,       0.0],
 }
 # Rows of the FCC primitive reciprocal basis in 2pi/a (= sc-reduced) units.
 _B_FCC_RED = np.array([[-1.0, 1.0, 1.0],
@@ -154,7 +156,10 @@ def _wz_orth_to_cart(q):
     return np.asarray(q, dtype=float) * _WZ_RECIP_W
 
 DEFAULT_BAND_PATH_FCC = ['L', 'Gamma', 'X', 'W', 'K']
-DEFAULT_BAND_PATH_WZ  = ['A', 'Gamma', 'X', 'S', 'Y', 'Gamma']
+# Hexagonal wurtzite path: matches the EPM-emitted *_bandpath.data nodes
+# (A-Gamma-M-K-Gamma) so the with- and without-population CdS plots agree, and
+# the Gamma-A c-axis segment leads.
+DEFAULT_BAND_PATH_WZ  = ['A', 'Gamma', 'M', 'K', 'Gamma']
 DEFAULT_BAND_PATH = DEFAULT_BAND_PATH_FCC
 
 # Per-lattice plotting context: symmetry points, default path, reduced->Cartesian
@@ -167,6 +172,24 @@ def _lattice_context(lattice):
                     to_cart=_wz_orth_to_cart, permute=False)
     return dict(hs=HS_POINTS_FCC, path=DEFAULT_BAND_PATH_FCC,
                 to_cart=_fcc_prim_to_sc_reduced, permute=True)
+
+
+def _detect_lattice(kfile):
+    """Auto-pick the band-path symmetry set from the '# material = X' header of a
+    _k.data file: wurtzite for CdS (hexagonal -> the Gamma-A c-axis segment is in
+    the default path), fcc otherwise (cubic GaAs/Si). 'fcc' if unreadable."""
+    try:
+        with open(kfile) as f:
+            for line in f:
+                if not line.startswith('#'):
+                    break
+                m = re.search(r'#\s*material\s*=\s*([A-Za-z0-9_]+)', line)
+                if m:
+                    mat = m.group(1).lower()
+                    return 'wurtzite' if ('cds' in mat or 'wurtz' in mat) else 'fcc'
+    except OSError:
+        pass
+    return 'fcc'
 
 
 # ===========================================================================
@@ -2379,11 +2402,15 @@ def main():
                         help='1-based band index taken as the valence-band '
                              'maximum (energy zero) when plotting band.dat from '
                              'a dft_band run. Default: nb//2 (half filling).')
-    parser.add_argument('--lattice', choices=['fcc', 'wurtzite'], default='fcc',
+    parser.add_argument('--lattice', choices=['auto', 'fcc', 'wurtzite'],
+                        default='auto',
                         help='Lattice/symmetry-point set for the band-structure '
-                             'plot: "fcc" (cubic GaAs/Si, default) or "wurtzite" '
-                             '(orthorhombic CdS supercell: Gamma/X/Y/A/S high-'
-                             'symmetry points, default path A-Gamma-X-S-Y-Gamma).')
+                             'plot. "auto" (default) reads "# material =" from the '
+                             '_k.data header: CdS -> wurtzite (Gamma/X/Y/A/S '
+                             'points, default path A-Gamma-X-S-Y-Gamma, so the '
+                             'Gamma-A c-axis segment is included), everything else '
+                             '-> fcc (cubic GaAs/Si: L-Gamma-X-W-K). Force with '
+                             '"fcc"/"wurtzite".')
 
     # Mode shortcuts (each implies the complementary --no-* flag)
     mode = parser.add_mutually_exclusive_group()
@@ -2613,13 +2640,18 @@ def main():
                 print(f"  (skip bands) {ef.name} not found alongside {kf.name}")
                 continue
             found_any = True
+            lat = _detect_lattice(kf) if args.lattice == 'auto' else args.lattice
+            if args.lattice == 'auto':
+                print(f"  band path: lattice='{lat}' auto-detected from "
+                      f"{kf.name} header"
+                      + ("  (Gamma-A c-axis included)" if lat == 'wurtzite' else ""))
             try:
                 plot_band_structure(
                     kf, ef, output_dir,
                     path_labels=args.band_path,
                     energy_range_ev=tuple(args.energy_range),
                     dpi=args.dpi, spin_sum=args.spin_sum,
-                    lattice=args.lattice)
+                    lattice=lat)
             except Exception as exc:
                 print(f"  ERROR in band structure for {kf.name}: {exc}")
 
