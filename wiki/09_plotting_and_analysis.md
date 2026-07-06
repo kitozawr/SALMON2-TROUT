@@ -65,11 +65,12 @@ into the calculation directory (or use `-i DIR -o OUTDIR`) and run. It scans for
   wrote into `_bandpath.data`, so it needs no material knowledge.);
 * **Auto-animation (default on).** Every per-frame series — band maps, k-maps,
   BZ snapshots (reduced + Cartesian), `--bz3d`/`--bz3d-voxel`, and the
-  `spectral_frames/` — is stitched into `<stem>_anim.mp4` (via `ffmpeg` if it is
-  on the `PATH`) or `<stem>_anim.gif` (Pillow fallback) as soon as ≥2 frames are
-  written, so the evolution is viewable without a manual `ffmpeg` step. Single
-  images (k–t maps, band structures, `*_vs_Time`) are skipped. Knobs: `--fps`
-  (default 6), `--anim-format {auto,mp4,gif,both}`, `--no-animate` to turn it off;
+  `spectral_frames/` — is stitched into `<stem>_anim.gif` (Pillow, the default,
+  no external tool) as soon as ≥2 frames are written, so the evolution is
+  viewable without a manual `ffmpeg` step. Single images (k–t maps, band
+  structures, `*_vs_Time`) are skipped. Knobs: `--anim-format {gif,mp4,both,auto}`
+  (default `gif`; `mp4` needs `ffmpeg`, `auto` = mp4-if-ffmpeg-else-gif), `--fps`
+  (default 6), `--no-animate` to turn it off;
 * `--only-bands`, `--log-cmap`, `--subtract-baseline`, `--snapshots`,
   `--instantaneous` — see `--help`.
 

@@ -47,6 +47,16 @@ cp band/Si_bandpath.data .          # co-locate with the SBE outputs for plottin
 python3 ../../plot_sbe_results.py -i . -o plots --spectral --valleys
 ```
 
+> **DFT runs carry no `# material =` header.** That header (and the band-path
+> auto-detection it drives, `--lattice auto`) is written only by the EPM. A DFT
+> `_k.data` has none, so `--lattice auto` falls back to **fcc** — which is
+> correct here (bulk Si is diamond/fcc, path `L-Γ-X-W-K`) and for any cubic
+> material. You do **not** add `&epm epm_material=…` for a DFT run (that block is
+> not read in `theory='dft'`). For a *non-cubic* DFT material, just pass the path
+> to the plotter explicitly, e.g. `--lattice wurtzite` (or `--band-path A Γ M K
+> Γ`). The `--spectral` band path above is unaffected either way: it reads the
+> exact nodes the DFT `theory='dft_band'` step wrote into `Si_bandpath.data`.
+
 ## What to check
 
 * **SBE startup diagnostics** (`sbe_rt.out`):
