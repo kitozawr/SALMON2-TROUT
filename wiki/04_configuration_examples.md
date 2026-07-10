@@ -452,6 +452,35 @@ These `&sbe` parameters add Silicon support and the optional nonlocal CPTP dissi
 | `yn_sbe_hf_sublattice_proj` | — | `'y'` | Project $\Sigma^{\rm HF}$ block-diagonally onto the 4 FCC sublattices (folding fix). Inert unless Coulomb is on **and** unfold weights are present. |
 | `sbe_search_sigma_e_ev` | eV | grid-matched | Energy-bin width $\sigma_E$ for the final-state partner search (C3). |
 
+### 2026-07 approved refinements (A1–A9 / B3–B4; all default OFF/inert)
+
+The physics of each item is specified in `wiki/00_implementation_status.md`
+(the ✅-marked A/B/C entries) and `wiki/08_master_equation.md`; this table is
+the input-parameter contract. All of these act **inside the ring channels**
+(`yn_sbe_superres='y'` + the corresponding channel flag).
+
+| Parameter | Units | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `sbe_ii_phassist` | — | `0.0d0` | **A1 phonon-assisted II/Auger sidebands.** `> 0`: the energy-match $\delta_\sigma(\Delta E)$ of the ring II *and* Auger kernels gains emission/absorption sidebands at $\Delta E = \pm\hbar\omega_p$ for every mode of the cited per-material phonon table, weighted by $(N_B{+}1)/N_B$ (Bose factors **swapped** in the Auger kernel ⇒ detailed balance holds exactly per sideband). The value is the overall sideband strength (K15-style knob, `1.0` = the natural scale); `0` = off. Needs `yn_sbe_eph` material constants (the phonon table). |
+| `yn_sbe_ii_holes` | — | `'n'` | **A2 hole-initiated impact ionization (hhe) + its Auger reverse.** Mirrors the electron quadruple with the valence-side stencil; rate scale = `sbe_ii_prefactor` × the **cited** $C_p/C_n$ ratio from the registry (Si `0.354` [L90/Dziewior-Schmid], GaAs `4.8` [S14]; CdS has none ⇒ forbidden). Hole kinetic energy is measured from the instantaneous Houston VBM. |
+| `yn_sbe_ii_fk_soften` | — | `'n'` | **A5 Franz–Keldysh-softened II threshold.** Replaces the hard $(\varepsilon-E_{\rm th})_+$ with the softplus $s = \hbar\theta\,\ln(1+e^{(\varepsilon-E_{\rm th})/\hbar\theta})$, where $\hbar\theta(t) = (F(t)^2/2\mu)^{1/3}$ from the **instantaneous field** — the Quade–Schöll–Rossi "no fixed threshold at MV/cm" physics. → hard threshold as $F\to 0$. |
+| `sbe_ii_fk_mu` | mₑ | `0.06d0` | Reduced pair mass $\mu$ in the electro-optic energy $\hbar\theta=(F^2/2\mu)^{1/3}$ (A5). |
+| `sbe_ring_vq_floor` | — | `0.0d0` | **B3 relative floor** on the screened Coulomb weight $\lvert V(q)\rvert^2$ in the ring II/Auger: quadruples with $v_q <$ `floor`·max$(v_q)$ are skipped (speed knob). `0` = off = bit-identical to the full sum; `1` kills the channel. |
+| `yn_sbe_eph_acoustic` | — | `'n'` | **A4 quasi-elastic acoustic deformation-potential cooling.** Appends a grid-resolved acoustic mode ($\hbar\omega_{\rm ac} = c_s\,q_{\rm grid}$, $D_{\rm ac}=\Xi_d\,q$) to the cited phonon table — continues the cooling below the optical $\hbar\omega$ (removes the freeze-out). Constants per material (all cited): Si $\Xi_d=9.0$ eV, GaAs $7.0$ eV [Fischetti-Laux], CdS $E_1=14.5$ eV [Rode 1970], graphene $D=16$ eV [Hwang–Das Sarma]. **Always applied with the Thomas–Fermi screen** $S(q)=[q/(q+q_{\rm TF})]^2$ built from the instantaneous carrier density (mandatory: the bare CdS $E_1$ would be unphysical at $n\gtrsim10^{18}$ cm⁻³; $S\to1$ at low $n$). |
+| `sbe_eph_ac_xi_ev` | eV | `-1.0d0` | Override of the acoustic deformation potential (A4). `≤ 0` ⇒ the registry default above. The graphene $D$ is **substrate-dependent** (H&DS 16 eV is the upper literature scale) — set it here per substrate. |
+| `sbe_checkpoint_step` | steps | `0` | **B4 crash-safe checkpoints:** every N steps each rank streams its ρ slab (+ Houston branch, step index, energy, channel ledger) to a per-rank `.bin` file. `0` = off. |
+| `yn_sbe_checkpoint_restart` | — | `'n'` | `'y'`: resume from the newest checkpoint set (same-nproc restart; the field is recomputed deterministically). |
+
+**CPTP limiter (automatic, not a flag).** The per-step population transfer of
+every ring channel is applied through a **global CPTP limiter**: if the summed
+`dpop` of a step would overdraw any state (below 0 or above `occ`), the whole
+field is scaled by the largest $s\in[0,1]$ that keeps all states in bounds —
+the trace stays *exactly* conserved (a per-state clip would silently create
+particles). When the limiter engages it prints
+`# ring CPTP limiter engaged: dpop scaled by s = ...` **once** — that message
+means the time step is too large for the instantaneous collision flux
+(reduce `dt`, or accept the rate-limited dynamics).
+
 The EPM material is chosen in `&epm` (`epm_material = 'GaAs'` | `'Si'` | `'Si_cb'` | `'CdS'` | `'graphene'`); see [EPM ground-state solver](#epm-ground-state-solver-epm). `'CdS'` is wurtzite — its cell is the orthorhombic vector `al(1:3) = (a, a√3, c)`, not a single cubic constant — with three cited, enabled dissipation channels (e-ph, Coulomb, impact ionization); carrier-carrier (e-e) and Auger are **forbidden** for CdS (no cited e-e rate; and no verified CdS Auger coefficient — the previously-cited "Haury 1998" value was a fabricated reference and was removed — see the matrix above and `wiki/02`). **The `&epm` block must also appear in the SBE-step input** whenever a channel auto-selects per-material constants (electron-phonon, or impact ionization / Coulomb left at their `'auto'`/sentinel defaults): the solver reads `epm_material` from the registry and **`epm_material` itself defaults to `'GaAs'` if the block is absent**, so a Si run without it would silently use GaAs constants.
 
 ### Baseline (clean) run and how to disable each effect
