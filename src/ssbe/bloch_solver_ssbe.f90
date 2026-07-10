@@ -2500,6 +2500,7 @@ end subroutine ring_ledger
 ! Kraus factor) and, when gout is present (e-ph), the out-rate exponential
 ! exp(-(g_a+g_b) tau / 2) -- the two conventions of the pre-B2 routines.
 subroutine ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
+    use communication, only: comm_get_min
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info),      intent(in)    :: gs
@@ -2507,13 +2508,29 @@ subroutine ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
     real(8),    intent(in) :: dpop(sbe%n_active_bands, sbe%nk), tau
     real(8),    intent(in), optional :: gout(sbe%n_active_bands, sbe%nk)
     integer :: ik, i, j, in, im, a, b, nba
-    real(8) :: fold, fnew
+    real(8) :: fold, fnew, scal
     real(8)    :: damp(sbe%n_active_bands)
     complex(8) :: W(sbe%n_active_bands, sbe%n_active_bands)
     complex(8) :: t1(sbe%n_active_bands, sbe%n_active_bands)
     complex(8) :: rad(sbe%n_active_bands, sbe%n_active_bands)
+    real(8), allocatable :: fold_loc(:,:)
+    logical, save :: limiter_printed = .false.
+    real(8), parameter :: dtol = 1d-14
 
     nba = sbe%n_active_bands
+
+    ! ---- CPTP LIMITER (pass A): the per-state dpop of a nonlocal channel is a
+    ! SUM over many independent quadruples computed against the step-START
+    ! populations; within one (large) step several sources can pile onto the
+    ! same sink and overdraw it (f + dpop < 0 or > occ_max). Truncating that
+    ! overdraw per-state (the old max(...,0)) silently DESTROYS the trace: the
+    ! clipped loss keeps its paired gains => net particle creation (the
+    ! runaway "electrons 8 -> 16" seen with all channels + large dt). The CPTP
+    ! repair: scale the WHOLE dpop field by the largest s in [0,1] that keeps
+    ! every state inside [0, occ_max]. s*dpop still sums to 0 exactly (trace
+    ! preserved), all bounds hold, and s -> 1 for a properly resolved dt.
+    allocate(fold_loc(nba, sbe%ik_min:sbe%ik_max))
+    scal = 1d0
     do ik = sbe%ik_min, sbe%ik_max
         W = U_loc(:,:,ik)
         do j = 1, nba
@@ -2526,14 +2543,43 @@ subroutine ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
         call ZGEMM('C','N', nba,nba,nba, cmplx(1d0,0d0, 8), W,nba, rad,nba, cmplx(0d0,0d0, 8), t1,nba)
         call ZGEMM('N','N', nba,nba,nba, cmplx(1d0,0d0, 8), t1,nba, W,nba, cmplx(0d0,0d0, 8), rad,nba)
         do a = 1, nba
-            fold = real(rad(a,a))
-            fnew = max(fold + dpop(a,ik), 0d0)
+            fold = min(max(real(rad(a,a)), 0d0), sbe%occ_max)
+            fold_loc(a, ik) = real(rad(a,a))
+            if (dpop(a,ik) < -dtol) scal = min(scal, fold / (-dpop(a,ik)))
+            if (dpop(a,ik) >  dtol) scal = min(scal, (sbe%occ_max - fold) / dpop(a,ik))
+        end do
+    end do
+    scal = max(scal, 0d0)
+    if (sbe%nproc > 1) call comm_get_min(scal, sbe%icomm)
+    if (scal < 0.999d0 .and. .not. limiter_printed .and. sbe%irank == 0) then
+        write(*,'(a,es10.3,a)') '# ring CPTP limiter engaged: dpop scaled by s = ', &
+            scal, ' (population flux exceeds one-step capacity -- consider a smaller dt)'
+        limiter_printed = .true.
+    end if
+
+    ! ---- pass B: apply the (scaled) transfer in the same Houston basis ------
+    do ik = sbe%ik_min, sbe%ik_max
+        W = U_loc(:,:,ik)
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                rad(i, j) = sbe%rho(in, im, ik)
+            end do
+        end do
+        call ZGEMM('C','N', nba,nba,nba, cmplx(1d0,0d0, 8), W,nba, rad,nba, cmplx(0d0,0d0, 8), t1,nba)
+        call ZGEMM('N','N', nba,nba,nba, cmplx(1d0,0d0, 8), t1,nba, W,nba, cmplx(0d0,0d0, 8), rad,nba)
+        do a = 1, nba
+            fold = fold_loc(a, ik)
+            fnew = max(fold + scal * dpop(a,ik), 0d0)
             if (dpop(a,ik) < 0d0 .and. fold > 1d-12) then
                 damp(a) = sqrt(fnew / fold)
             else
                 damp(a) = 1d0
             end if
-            if (present(gout)) damp(a) = damp(a) * exp(-0.5d0 * gout(a, ik) * tau)
+            ! gout is the coherence out-rate paired with the population loss;
+            ! scale it consistently with the limited population transfer.
+            if (present(gout)) damp(a) = damp(a) * exp(-0.5d0 * scal * gout(a, ik) * tau)
             rad(a,a) = cmplx(fnew, 0d0, 8)
         end do
         do b = 1, nba
@@ -2551,6 +2597,7 @@ subroutine ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
             end do
         end do
     end do
+    deallocate(fold_loc)
 end subroutine ring_apply_dpop
 
 

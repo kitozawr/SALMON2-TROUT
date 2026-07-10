@@ -1476,6 +1476,12 @@ contains
             end if
         end if
         if (present(gout)) gout = 0d0
+        ! Each (a, ik) source is independent: partial rates target shared sinks
+        ! dpop(b, jq), hence the array reduction; gout(:, ik) is owner-written.
+        !$omp parallel do default(shared) schedule(dynamic) &
+        !$omp   private(ik, a, ip, jq, b, eps_kin, nu_a, fe, fa, dE, shp, th, blk, &
+        !$omp           gam, gamtot, out_tot, gpart) &
+        !$omp   reduction(+:dpop)
         do ik = 1, nk
             do a = 1, nba
                 if (f(a, ik) < occ_eps) cycle
@@ -1531,6 +1537,7 @@ contains
                 end do
             end do
         end do
+        !$omp end parallel do
     end subroutine eph_interk_dpop
 
     ! =====================================================================
@@ -1579,6 +1586,11 @@ contains
         call ring_opts_unpack(opts, havetab, vfloor, fk, pa, nphl, prefh, evbm, &
                               hwl, nbbl, wrell)
 
+        ! Independent (i1, ih) hot sources; shared sinks -> array reduction.
+        !$omp parallel do default(shared) schedule(dynamic) &
+        !$omp   private(i1, ih, ipass, i1p, i2, jj, m2p, d, ekin, dd, g0, etgt, &
+        !$omp           vq, df, shp, pauli, gpart, gamtot, out_tot, amt) &
+        !$omp   reduction(+:dpop)
         do i1 = i1s, i1e
             do ih = ic, nba
                 if (f(ih, i1) < occ_eps) cycle
@@ -1638,6 +1650,7 @@ contains
                 end do
             end do
         end do
+        !$omp end parallel do
 
         ! ================= A2: HOLE-INITIATED impact ionization (hhe) =========
         ! A hot HOLE deep in the valence band relaxes toward the VBM and the
@@ -1648,6 +1661,10 @@ contains
         ! Rate scale = pref * (Cp/Cn) (registry-cited [L90]/[S14] ratio),
         ! threshold on the HOLE kinetic energy evbm - E. Trace-exact stencil.
         if (prefh > 0d0) then
+        !$omp parallel do default(shared) schedule(dynamic) &
+        !$omp   private(i1, ih, ipass, i1p, i2, jj, m2p, d, room, ekin, dd, g0, &
+        !$omp           etgt, vq, df, shp, pauli, gpart, gamtot, out_tot, amt) &
+        !$omp   reduction(+:dpop)
         do i1 = i1s, i1e
             do ih = 1, iv
                 room = occ_max - f(ih, i1)          ! deep-hole capacity
@@ -1700,6 +1717,7 @@ contains
                 end do
             end do
         end do
+        !$omp end parallel do
         end if
     end subroutine ii_interk_dpop
 
@@ -1753,6 +1771,10 @@ contains
         call ring_opts_unpack(opts, havetab, vfloor, fk, pa, nphl, prefh, evbm, &
                               hwl, nbbl, wrell)
 
+        !$omp parallel do default(shared) schedule(dynamic) &
+        !$omp   private(i1, ih, ipass, i1p, i2, jj, m2p, d, room, ekin, dd, g0, &
+        !$omp           etgt, vq, df, shp, pauli, gpart, gamtot, in_tot, amt) &
+        !$omp   reduction(+:dpop)
         do i1 = i1s, i1e
             do ih = ic, nba
                 room = occ_max - f(ih, i1)          ! empty hot-state phase space
@@ -1811,6 +1833,7 @@ contains
                 end do
             end do
         end do
+        !$omp end parallel do
 
         ! ============ A2 reverse: hole-Auger (the hhe time-reverse) ===========
         ! An electron IN the deep valence state (ih, k1) is excited to the top
@@ -1818,6 +1841,10 @@ contains
         ! reversed occupations, negated stencil, same quadruple/weights as the
         ! forward hole channel (detailed balance per sideband via rev=.true.).
         if (prefh > 0d0) then
+        !$omp parallel do default(shared) schedule(dynamic) &
+        !$omp   private(i1, ih, ipass, i1p, i2, jj, m2p, d, ekin, dd, g0, etgt, &
+        !$omp           vq, df, shp, pauli, gpart, gamtot, out_tot, amt) &
+        !$omp   reduction(+:dpop)
         do i1 = i1s, i1e
             do ih = 1, iv
                 if (f(ih, i1) < occ_eps) cycle      ! deep electron present
@@ -1870,6 +1897,7 @@ contains
                 end do
             end do
         end do
+        !$omp end parallel do
         end if
     end subroutine auger_interk_dpop
 
