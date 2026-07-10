@@ -113,7 +113,9 @@ step needed; tune with `--fps` / `--anim-format`, disable with `--no-animate`.
   n ≥ 1e18 cm⁻³; screened, it is the fallback cooling below ħω_LO.
 - **Graphene ε_r**: the Rana rates default to the R07 benchmark substrate
   (ε_r = 10); on SiO₂ set `sbe_coulomb_epsilon = 4.0d0` (≈2× the Auger rate).
-- dt = 0.4 a.u. is fine for the population movie; for converged currents/HHG on
+- **Inputs are in `A_eV_fs` units** (lengths Å, energies eV, times fs; `&epm`
+  constants stay in a.u. by definition). dt ≈ 0.0097 fs (= 0.4 a.u.) is fine
+  for the population movie; for converged currents/HHG on
   top of full dissipation drop to 0.05–0.1 (x8 §2 note).
 - Physics spec of every channel, with the full master equation: `wiki/08_master_equation.md`
   (and per-channel details in `wiki/01`, `wiki/07`).
