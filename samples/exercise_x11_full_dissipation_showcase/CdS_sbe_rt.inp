@@ -41,14 +41,14 @@
 /
 
 &units
-  unit_system = 'au'
+  unit_system = 'A_eV_fs'
 /
 
 &system
   yn_periodic  = 'y'
-  al_vec1(1:3) =  7.81591d0,  0.0d0,     0.0d0      ! hexagonal 4-atom primitive
-  al_vec2(1:3) = -3.90795d0,  6.76877d0, 0.0d0      ! (a1,a2 at 120 deg)
-  al_vec3(1:3) =  0.0d0,      0.0d0,    12.68522d0  ! c axis
+  al_vec1(1:3) =  4.13600145d0,  0.00000000d0,     0.00000000d0      ! hexagonal 4-atom primitive
+  al_vec2(1:3) = -2.06799808d0,  3.58187883d0, 0.00000000d0      ! (a1,a2 at 120 deg)
+  al_vec3(1:3) =  0.00000000d0,      0.00000000d0,    6.71272934d0  ! c axis
   nelec  = 16
   nstate = 16
 /
@@ -58,7 +58,7 @@
 /
 
 &tgrid
-  dt = 0.4d0
+  dt = 0.00967554d0
   nt = 6000
 /
 
@@ -67,8 +67,8 @@
   ae_shape1      = 'Acos2'
   epdir_re1(1:3) = 1.0d0, 0.0d0, 0.0d0
   I_wcm2_1       = 1.0d+12
-  tw1            = 800.0d0
-  omega1         = 0.0046d0
+  tw1            = 19.35107461d0
+  omega1         = 0.12517238d0
 /
 
 &analysis

@@ -1396,7 +1396,7 @@ def _iter_nex_k_lev_blocks(filepath):
 
 
 def plot_primitive_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=150,
-                            occupation_mode=True):
+                            occupation_mode=True, autoscale=False):
     """A(k,E) spectral movie for a PRIMITIVE (unfolded) cell -- ONE FRAME PER STEP.
 
     Skeleton: the clean primitive bands from *_bandpath.data (thin grey lines).
@@ -1458,7 +1458,12 @@ def plot_primitive_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=15
                 yield t, tu, kpts, pop[:, None]
 
     # Pass 1: global colour scale over the carrier populations + grid spacing.
-    peak, n_frames, gridk = 0.0, 0, None
+    # peak_e / peak_h separately: on a fine grid + long runs the thermalized
+    # ELECTRONS spread over the whole zone (per-k f ~ 1e-3..1e-4) while the
+    # HOLES stay concentrated (per-k ~ 0.1..1) -- on one absolute scale the CB
+    # then renders black ("electrons don't change"). --spectral-autoscale
+    # normalizes each carrier branch by its own run-peak (annotated below).
+    peak, peak_e, peak_h, n_frames, gridk = 0.0, 0.0, 0.0, 0, None
     for _t, _tu, kpts, pcols in frames():
         if gridk is None:
             gridk = kpts
@@ -1466,12 +1471,21 @@ def plot_primitive_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=15
         for name, col, sign in col_levels:
             p = pcols[:, col] if col is not None else pcols[:, 0]
             carrier = colour_value(p, sign)
-            peak = max(peak, float(np.nanmax(carrier)) if carrier.size else 0.0)
+            pk = float(np.nanmax(carrier)) if carrier.size else 0.0
+            peak = max(peak, pk)
+            if sign == 'elec':
+                # electron-branch peak is the CARRIER content even in
+                # occupation mode (f itself, CB starts empty)
+                peak_e = max(peak_e, float(np.nanmax(p / occ_full)) if p.size else 0.0)
+            else:
+                peak_h = max(peak_h, float(np.nanmax((occ_full - p) / occ_full)) if p.size else 0.0)
     if n_frames == 0:
         print("  (skip) no data blocks found"); return
     spacing = _grid_spacing(gridk)
     # occupation: fixed [0,1] scale (full valence = 1); excitation: data peak.
     norm = mcolors.Normalize(vmin=0.0, vmax=(1.0 if occupation_mode else max(peak, 1e-12)))
+    if autoscale:
+        norm = mcolors.Normalize(vmin=0.0, vmax=1.0)
     stride = max(1, n_frames // max_frames)
     frame_dir = output_dir / 'spectral_frames'
     frame_dir.mkdir(parents=True, exist_ok=True)
@@ -1481,6 +1495,26 @@ def plot_primitive_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=15
         clabel = 'occupation  f = pop/occ  (VB full = 1, CB empty = 0)'
     else:
         clabel = 'carrier / excitation (e in CB, h in VB)'
+    if autoscale:
+        if occupation_mode:
+            # VB stays absolute (f in [0,1]); only the CB carrier colour gains
+            clabel = (f'occupation; CB autoscaled: colour = f/{max(peak_e,1e-30):.2e} '
+                      f'(true CB peak f = {peak_e:.2e})')
+        else:
+            clabel = (f'per-branch autoscale: h/{max(peak_h,1e-30):.2e}, '
+                      f'e/{max(peak_e,1e-30):.2e} (true peaks)')
+
+    # frame-loop colour: per-branch autoscaled when requested (VB stays
+    # absolute in occupation mode -- only the CB carrier colour gains).
+    def colour_scaled(p, sign):
+        v = colour_value(p, sign)
+        if not autoscale:
+            return v
+        if occupation_mode:
+            if sign == 'elec':
+                return (p / occ_full) / max(peak_e, 1e-30)
+            return v
+        return v / max(peak_h if sign == 'hole' else peak_e, 1e-30)
 
     n_written = 0
     for iframe, (t_val, t_unit, kpts, pcols) in enumerate(frames()):
@@ -1492,7 +1526,7 @@ def plot_primitive_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=15
         mapped = {}
         for name, col, sign in col_levels:
             p = pcols[:, col] if col is not None else pcols[:, 0]
-            mapped[name] = _map_primitive_population(qred, kpts, colour_value(p, sign), spacing)
+            mapped[name] = _map_primitive_population(qred, kpts, colour_scaled(p, sign), spacing)
 
         # view 1: along the high-symmetry path (thin skeleton + coloured bands)
         fig, ax = plt.subplots(figsize=(8, 6))
@@ -2484,6 +2518,16 @@ def main():
                              'Reads the four-level file SYSNAME_sbe_nex_k_lev_real'
                              '.data (REAL carriers, primitive cell); outputs get a '
                              '_cbsum tag. Falls back to lowest-CB if absent.')
+    parser.add_argument('--spectral-autoscale', action='store_true',
+                        help='Normalize each carrier branch of the --spectral '
+                             'colouring by its OWN run-peak (annotated in the '
+                             'colorbar). Cures the "electrons look empty" view '
+                             'on fine grids/long runs, where thermalized '
+                             'electrons spread to per-k f ~ 1e-3..1e-4 while '
+                             'holes stay concentrated (~0.1..1): on one '
+                             'absolute 0..1 scale the CB renders black even '
+                             'though the totals match. In occupation mode the '
+                             'VB stays absolute; only the CB colour gains.')
     parser.add_argument('--spectral-excitation', action='store_true',
                         help='Colour the primitive spectral A(k,E) frames by '
                              'EXCITATION (holes in VB, electrons in CB; both 0 at '
@@ -2628,7 +2672,8 @@ def main():
                 bpfile = f.parent / f'{stem}_bandpath.data'
                 if bpfile.exists():
                     plot_primitive_spectral(f, bpfile, output_dir, dpi=args.dpi,
-                                            occupation_mode=not args.spectral_excitation)
+                                            occupation_mode=not args.spectral_excitation,
+                                            autoscale=args.spectral_autoscale)
                 else:
                     print(f"  (skip spectral) {bpfile.name} not found")
 
