@@ -106,21 +106,29 @@ Electrons live in every band; only the *exchange/scattering* is near-gap. So:
   bands' reversible field-breathing is virtual and must NOT enter Σ^HF (it is
   the field, already in `H_VG`).
 
-**Validity condition + runtime guard.** Freezing is exact only for bands that are
-dynamically **inert** — no real carriers, no role as an II final state or a hole
-channel. If real population (or strong field-dressing) reaches a frozen band, the
-dissipators and Σ^HF cannot see it. The solver **detects this automatically**:
-when any frozen band's occupation deviates by > 5 % of `occ`, it prints once
+**Validity condition.** Freezing is exact only for bands whose *exchange and
+scattering* are negligible — deep semicore or high-lying spectators that carry
+no real photo-excited carriers and act as neither an II final state nor a hole
+channel. A frozen band may still **hold population**: the full-basis unitary lets
+carriers tunnel and field-couple from the active window up into a frozen band and
+back, and that reversible field-dressed occupation is exactly the basis
+sufficiency the scheme preserves. It is captured by the current and correctly
+does **not** enter the active-window Σ^HF / dissipators (it is the field, already
+in `H_VG`). So a nonzero deviation of a frozen band from its ground occupation is
+**expected and is not an error** — the solver raises no diagnostic for it.
+(Freezing pays off for large `nstate` with genuine spectator bands; on the
+8-band Si gap-edge quartet there is *no* inert band, so freeze nothing there.)
 
-```
-# WARNING: a FROZEN band holds population = ... of occ -- the active window is
-  too small ... Widen frozen_core_threshold_ev / frozen_free_threshold_ev.
-```
-
-(For reference, freezing the deep valence + top conduction of the 8-band Si
-gap-edge set at 10¹² W/cm² already trips this at 0.05 and shifts the current
-~10 % — that set has *no* inert band; frozen core pays off for large `nstate`
-with genuine semicore/high-lying spectators.)
+**Threshold energies drop the A²/2 too.** The band-uniform ponderomotive scalar
+`A²/2` is dropped from `H_VG` as a global phase, so the Houston eigenvalues
+`ε_n(k,t)` exclude it. Every scattering **kinetic-energy threshold** (impact
+ionization, e-ph, Auger) is measured as `ε_carrier − ε_edge` against the
+*field-free* band edge, so it must exclude `A²/2` on **both** sides — the scalar
+cancels in the difference, exactly as it does in the energy *matching* `etgt`.
+Adding it back to only the carrier level (an earlier bug) double-counted the
+field: at 10¹² W/cm², ω = 0.0046 Ha the term is tens of eV and swamped the real
+band energy, marking every carrier "hot" and firing spurious II/e-ph/Auger.
+Fixed 2026-07-12 — the thresholds now use the bare `ε_n` consistently.
 
 *(Historical note: earlier builds truncated U to the active block and reset the
 frozen bands to ground occupation every step — that WAS a VG cutoff and broke
