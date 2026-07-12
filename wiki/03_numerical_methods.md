@@ -94,6 +94,34 @@ a 5×10¹² V/cm Si run with 3/8 bands frozen reproduces the all-active current 
 regardless of how many are active — so freeze everything except the gap edge,
 keep `nstate` large for the basis, and pay only for the window you dissipate.
 
+**What still sees the whole electron cloud (nothing was "just dropped").**
+Electrons live in every band; only the *exchange/scattering* is near-gap. So:
+* the **current** `J = Tr[(π+A)ρ]` sums the **full** basis — the frozen bands'
+  field-driven current is included (correctly, now that they evolve instead of
+  being reset);
+* **Σ^HF** is the GKMK *dynamic* exchange `−Σ_q V(k−q) δρ(q)` with `δρ = ρ − ρ0`;
+  the **static** full-valence exchange is already inside the EPM band energies
+  `ε_n`, and `δρ` (the real photo-excited carriers) lives in the active window,
+  so the active-block Σ^HF is the complete dynamic renormalization. The frozen
+  bands' reversible field-breathing is virtual and must NOT enter Σ^HF (it is
+  the field, already in `H_VG`).
+
+**Validity condition + runtime guard.** Freezing is exact only for bands that are
+dynamically **inert** — no real carriers, no role as an II final state or a hole
+channel. If real population (or strong field-dressing) reaches a frozen band, the
+dissipators and Σ^HF cannot see it. The solver **detects this automatically**:
+when any frozen band's occupation deviates by > 5 % of `occ`, it prints once
+
+```
+# WARNING: a FROZEN band holds population = ... of occ -- the active window is
+  too small ... Widen frozen_core_threshold_ev / frozen_free_threshold_ev.
+```
+
+(For reference, freezing the deep valence + top conduction of the 8-band Si
+gap-edge set at 10¹² W/cm² already trips this at 0.05 and shifts the current
+~10 % — that set has *no* inert band; frozen core pays off for large `nstate`
+with genuine semicore/high-lying spectators.)
+
 *(Historical note: earlier builds truncated U to the active block and reset the
 frozen bands to ground occupation every step — that WAS a VG cutoff and broke
 basis sufficiency at strong fields; fixed 2026-07-12.)*
