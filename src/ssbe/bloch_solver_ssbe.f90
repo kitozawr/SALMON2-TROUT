@@ -1163,7 +1163,7 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
 
     complex(8), allocatable :: p_active(:, :, :)
     complex(8), allocatable :: rho_a(:, :)
-    complex(8), allocatable :: H1(:, :), H2(:, :), HVG(:, :)
+    complex(8), allocatable :: H1f(:, :), H2f(:, :), HVG(:, :)   ! H1f/H2f: FULL-basis VG unitary
     real(8),    allocatable :: eigen_active(:)
     real(8),    allocatable :: V_begin(:), V_end(:), X_a(:)
     real(8),    allocatable :: w_act_sub(:, :)   ! (4, nba) field-free sublattice weights of active bands
@@ -1229,26 +1229,51 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
 
     !$omp parallel default(shared) &
     !$omp    private(ik, i, j, idir, in, im, isub, s, pcoset) &
-    !$omp    private(p_active, rho_a, H1, H2, HVG, eigen_active, V_begin, V_end, X_a, w_act_sub) &
+    !$omp    private(p_active, rho_a, H1f, H2f, HVG, eigen_active, V_begin, V_end, X_a, w_act_sub) &
     !$omp    private(p_k_full, rho_n_full)
 
     if (nba > 0) then
-        allocate(p_active(nba, nba, 3), rho_a(nba, nba))
-        allocate(H1(nba, nba), H2(nba, nba), HVG(nba, nba))
+        allocate(p_active(nba, nba, 3), rho_a(nba, nba), HVG(nba, nba))
         allocate(eigen_active(nba), V_begin(nba), V_end(nba), X_a(nba))
         allocate(w_act_sub(4, nba))
     end if
     allocate(p_k_full(nb, nb, 1:3), rho_n_full(nb, nb))
+    allocate(H1f(nb, nb), H2f(nb, nb))   ! FULL-basis velocity-gauge unitary
 
     !$omp do
     do ik = sbe%ik_min, sbe%ik_max
 
-        if (nba > 0) then
-            p_k_full(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
-            if (sbe%flag_vnl_correction) p_k_full(:, :, :) = p_k_full(:, :, :) + gs%rvnl_tm_matrix(:, :, :, ik)
-            rho_n_full(:, :) = sbe%rho(:, :, ik)
+        ! ---- FULL-basis field coupling + density matrix (the VG unitary basis)
+        p_k_full(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
+        if (sbe%flag_vnl_correction) &
+            p_k_full(:, :, :) = p_k_full(:, :, :) + gs%rvnl_tm_matrix(:, :, :, ik)
+        rho_n_full(:, :) = sbe%rho(:, :, ik)
 
-            ! Restrict to the active subspace (frozen core/free bands excluded)
+        ! Coset block-diagonal projection of the field coupling (folding fix):
+        ! suppress the spurious inter-coset momentum matrix elements. Off-diagonal
+        ! only; intra-band (i=j) velocity untouched. On the FULL basis.
+        if (sbe%flag_coset_proj) then
+            do idir = 1, 3
+                do j = 1, nb
+                    do i = 1, nb
+                        if (i == j) cycle
+                        pcoset = 0d0
+                        do s = 1, 4
+                            pcoset = pcoset + gs%unfold_w(s, i, ik) * gs%unfold_w(s, j, ik)
+                        end do
+                        p_k_full(i, j, idir) = p_k_full(i, j, idir) * pcoset
+                    end do
+                end do
+            end do
+        end if
+
+        ! ---- active Houston window: quantities the dissipator needs ----------
+        ! FROZEN CORE is a Houston/dissipator-cost reduction (fewer ZHEEV + a
+        ! smaller ring O(nk^3 x nba)), NOT a velocity-gauge cutoff: the reversible
+        ! VG unitary below runs on the FULL band basis so a large A(t) can push
+        ! population up/down through the frozen bands and bring it back (VG basis
+        ! sufficiency). The dissipators act only in this active window.
+        if (nba > 0) then
             do idir = 1, 3
                 do j = 1, nba
                     im = sbe%active_idx(j)
@@ -1258,39 +1283,10 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
                     end do
                 end do
             end do
-            ! Coset block-diagonal projection of the field coupling: suppress the
-            ! spurious inter-coset momentum matrix elements (folding artifact).
-            ! Off-diagonal only; intra-band (i=j) velocity untouched. Same soft
-            ! projector sum_s w_s(i)w_s(j) as apply_hf_sublattice_projection.
-            if (sbe%flag_coset_proj) then
-                do j = 1, nba
-                    im = sbe%active_idx(j)
-                    do i = 1, nba
-                        if (i == j) cycle
-                        in = sbe%active_idx(i)
-                        pcoset = 0d0
-                        do s = 1, 4
-                            pcoset = pcoset + gs%unfold_w(s, in, ik) * gs%unfold_w(s, im, ik)
-                        end do
-                        p_active(i, j, 1:3) = p_active(i, j, 1:3) * pcoset
-                    end do
-                end do
-            end if
             do i = 1, nba
                 eigen_active(i) = gs%eigen(sbe%active_idx(i), ik)
-            end do
-            do j = 1, nba; do i = 1, nba
-                in = sbe%active_idx(i); im = sbe%active_idx(j)
-                rho_a(i, j) = rho_n_full(in, im)
-            end do; end do
-            do i = 1, nba
                 X_a(i) = sbe%X_branch(sbe%active_idx(i), ik)
             end do
-
-            ! Field-free sublattice weights of the active bands at this k
-            ! (projected onto the instantaneous Houston branches inside
-            ! houston_dissipate). Only consumed by the unfolding-aware
-            ! impact-ionization channel.
             if (sbe%flag_impact .and. sbe%flag_unfold_ii) then
                 do i = 1, nba
                     do s = 1, 4
@@ -1300,94 +1296,91 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
             else if (sbe%flag_impact) then
                 w_act_sub = 0d0
             end if
+        end if
+        V_begin = 0d0; V_end = 0d0
 
-            !-----------------------------------------------------------------
-            ! Step 1: D(h/2) -- Strang dissipative half-step: Hadamard
-            ! Kuhn-Zurek dephasing and/or impact-ionization channels, both in
-            ! the same Houston basis (one shared ZHEEV), tau = +h/2 > 0
-            !-----------------------------------------------------------------
-            if (sbe%flag_decoh .or. sbe%flag_impact .or. sbe%flag_eph .or. sbe%flag_eeh .or. sbe%flag_auger) then
-                call build_HVG(nba, eigen_active, p_active, Ac_begin, HVG)
-                if (sbe%flag_coulomb) HVG = HVG + sbe%sigma_hf(:, :, ik)
-                call houston_dissipate(sbe, nba, rho_a, HVG, p_active, Ac_begin, X_a, &
-                                       0.5d0 * dt, V_begin, w_act_sub)
-            else
-                V_begin = 0d0
-            end if
+        ! ================= Strang split:  D(h/2) U(h) D(h/2) =================
 
-            !-----------------------------------------------------------------
-            ! Step 2: S4_unitary = S2(p1 h) o S2(p2 h) o S2(p1 h)
-            ! Each S2(tau) is a CF4 (two-exponential) commutator-free Magnus
-            ! step on the two Gauss-Legendre nodes spanning that sub-interval.
-            ! A negative tau (the middle Yoshida jump) is just a backward-time
-            ! unitary rotation -- exact and unconditionally safe.
-            !-----------------------------------------------------------------
-            do isub = 1, 3
-                call build_HVG(nba, eigen_active, p_active, Ac_node(:, 1, isub), H1)
-                call build_HVG(nba, eigen_active, p_active, Ac_node(:, 2, isub), H2)
-                if (sbe%flag_coulomb) then
-                    H1 = H1 + sbe%sigma_hf(:, :, ik)
-                    H2 = H2 + sbe%sigma_hf(:, :, ik)
-                end if
-                call cf4_unitary_step(nba, rho_a, H1, H2, tau_sub(isub))
-            end do
-
-            !-----------------------------------------------------------------
-            ! Step 3: D(h/2) -- Strang dissipative half-step (see Step 1)
-            !-----------------------------------------------------------------
-            if (sbe%flag_decoh .or. sbe%flag_impact .or. sbe%flag_eph .or. sbe%flag_eeh .or. sbe%flag_auger) then
-                call build_HVG(nba, eigen_active, p_active, Ac_end, HVG)
-                if (sbe%flag_coulomb) HVG = HVG + sbe%sigma_hf(:, :, ik)
-                call houston_dissipate(sbe, nba, rho_a, HVG, p_active, Ac_end, X_a, &
-                                       0.5d0 * dt, V_end, w_act_sub)
-            else
-                V_end = 0d0
-            end if
-
-            ! Branch-position update via the midpoint (average of endpoint)
-            ! velocities -- consistent with the overall 4th-order accuracy of
-            ! CF4 (a forward-Euler X_a += V_a(t_start)*h would degrade the
-            ! scheme to 1st order in the branch coordinates).
-            do i = 1, nba
-                sbe%X_branch(sbe%active_idx(i), ik) = X_a(i) + 0.5d0 * (V_begin(i) + V_end(i)) * dt
-            end do
-
-            ! Scatter the evolved active block back into the full matrix
-            do j = 1, nba; do i = 1, nba
-                in = sbe%active_idx(i); im = sbe%active_idx(j)
-                rho_n_full(in, im) = rho_a(i, j)
-            end do; end do
-            sbe%rho(:, :, ik) = rho_n_full(:, :)
+        ! Step 1: D(h/2) -- dissipative half-step, ACTIVE Houston window only.
+        ! Truncate rho to the active block, transform+dissipate inside
+        ! houston_dissipate, glue the evolved block back into the full matrix.
+        if (nba > 0 .and. (sbe%flag_decoh .or. sbe%flag_impact .or. &
+                           sbe%flag_eph .or. sbe%flag_eeh .or. sbe%flag_auger)) then
+            do j = 1, nba; im = sbe%active_idx(j)
+                do i = 1, nba; in = sbe%active_idx(i)
+                    rho_a(i, j) = rho_n_full(in, im)
+                end do; end do
+            call build_HVG(nba, eigen_active, p_active, Ac_begin, HVG)
+            if (sbe%flag_coulomb) HVG = HVG + sbe%sigma_hf(:, :, ik)
+            call houston_dissipate(sbe, nba, rho_a, HVG, p_active, Ac_begin, X_a, &
+                                   0.5d0 * dt, V_begin, w_act_sub)
+            do j = 1, nba; im = sbe%active_idx(j)
+                do i = 1, nba; in = sbe%active_idx(i)
+                    rho_n_full(in, im) = rho_a(i, j)
+                end do; end do
         end if
 
-        ! Hermiticity (numerical safeguard)
+        ! Step 2: S4 unitary = S2(p1 h) o S2(p2 h) o S2(p1 h) on the FULL basis.
+        ! Each S2(tau) is a CF4 (two-exponential) commutator-free Magnus step on
+        ! the two Gauss-Legendre nodes; the middle negative-tau Yoshida jump is an
+        ! exact backward-time rotation. Sigma^HF (active block) is embedded into
+        ! the full H_VG at the active positions.
+        do isub = 1, 3
+            call build_HVG(nb, gs%eigen(:, ik), p_k_full, Ac_node(:, 1, isub), H1f)
+            call build_HVG(nb, gs%eigen(:, ik), p_k_full, Ac_node(:, 2, isub), H2f)
+            if (sbe%flag_coulomb .and. nba > 0) then
+                do j = 1, nba; im = sbe%active_idx(j)
+                    do i = 1, nba; in = sbe%active_idx(i)
+                        H1f(in, im) = H1f(in, im) + sbe%sigma_hf(i, j, ik)
+                        H2f(in, im) = H2f(in, im) + sbe%sigma_hf(i, j, ik)
+                    end do; end do
+            end if
+            call cf4_unitary_step(nb, rho_n_full, H1f, H2f, tau_sub(isub))
+        end do
+
+        ! Step 3: D(h/2) -- dissipative half-step (post-field), same window.
+        if (nba > 0 .and. (sbe%flag_decoh .or. sbe%flag_impact .or. &
+                           sbe%flag_eph .or. sbe%flag_eeh .or. sbe%flag_auger)) then
+            do j = 1, nba; im = sbe%active_idx(j)
+                do i = 1, nba; in = sbe%active_idx(i)
+                    rho_a(i, j) = rho_n_full(in, im)
+                end do; end do
+            call build_HVG(nba, eigen_active, p_active, Ac_end, HVG)
+            if (sbe%flag_coulomb) HVG = HVG + sbe%sigma_hf(:, :, ik)
+            call houston_dissipate(sbe, nba, rho_a, HVG, p_active, Ac_end, X_a, &
+                                   0.5d0 * dt, V_end, w_act_sub)
+            do j = 1, nba; im = sbe%active_idx(j)
+                do i = 1, nba; in = sbe%active_idx(i)
+                    rho_n_full(in, im) = rho_a(i, j)
+                end do; end do
+        end if
+
+        ! Branch-position update via the midpoint (average endpoint) velocity --
+        ! 4th-order-consistent with CF4 (both D steps read the pre-step X_a).
+        if (nba > 0) then
+            do i = 1, nba
+                sbe%X_branch(sbe%active_idx(i), ik) = &
+                    X_a(i) + 0.5d0 * (V_begin(i) + V_end(i)) * dt
+            end do
+        end if
+
+        sbe%rho(:, :, ik) = rho_n_full(:, :)
+
+        ! Hermiticity (numerical safeguard). NO freeze-reset of the inactive
+        ! bands: they now evolve reversibly under the full-basis VG unitary (they
+        ! hold the field-dressed virtual population and give it back); only the
+        ! dissipators skip them. Population output still reads the gap-edge bands.
         do j = 1, nb; do i = 1, nb
             sbe%rho(i, j, ik) = 0.5d0 * (sbe%rho(i, j, ik) + conjg(sbe%rho(j, i, ik)))
-        end do; end do
-
-        ! Freeze deep core/high-energy zones
-        do j = 1, nb; do i = 1, nb
-            if (.not. (sbe%is_active(i) .and. sbe%is_active(j))) then
-                if (i == j) then
-                    if (gs%occup(i, ik) > 0.5d0) then
-                        ! Ground-state occupation: 2 (scalar bands) or 1 (spinor bands)
-                        sbe%rho(i, j, ik) = cmplx(gs%occup(i, ik), 0.0d0, 8)
-                    else
-                        sbe%rho(i, j, ik) = cmplx(0.0d0, 0.0d0, 8)
-                    end if
-                else
-                    sbe%rho(i, j, ik) = cmplx(0.0d0, 0.0d0, 8)
-                end if
-            end if
         end do; end do
 
     end do
     !$omp end do
 
     if (nba > 0) then
-        deallocate(p_active, rho_a, H1, H2, HVG, eigen_active, V_begin, V_end, X_a, w_act_sub)
+        deallocate(p_active, rho_a, HVG, eigen_active, V_begin, V_end, X_a, w_act_sub)
     end if
-    deallocate(p_k_full, rho_n_full)
+    deallocate(p_k_full, rho_n_full, H1f, H2f)
     !$omp end parallel
 
     ! Inter-k e-ph through the super-mode ring: once per step on the post-step

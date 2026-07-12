@@ -65,17 +65,38 @@ In the 8-atom cubic cell, bands fold 4-fold. An unrestricted Σ^HF spuriously co
 j(t) = −Σ_k Tr[(π + A(t)) ρ^k] (a.u.), with the SAME π (incl. v_SO for spinor) used in the dynamics — no perturbative expansion. Hermiticity (ρ=ρ†) enforced each step. Spectrum S(ω) ∝ ω²|j(ω)|².
 
 ## 12. Frozen-core / active-subspace optimization ✅
-Deep core and high-energy free bands are frozen (exact linear operator only); nonlinear interaction computed in the active subspace (e.g. 20×20 instead of 80×80). ~30× speedup, no physical loss. Also compresses ring-pipeline transit blocks (§9).
 
-## 10. Frozen core / active subspace + the exact current (moved from the README, 2026-07-04)
+**Frozen core reduces the Houston/dissipator work — it is NOT a velocity-gauge
+cutoff.** The Strang step `D(h/2) U(h) D(h/2)` splits into two subspaces:
 
-**Active subspace.** For many deep bands (e.g. 80 bands with 60 below −20 eV) the
-nonlinear commutator [V, ρ] is wasteful: bands outside
-`frozen_core_threshold_ev`/`frozen_free_threshold_ev` are frozen and evolve only
-under the exact linear phase, while the light-matter nonlinearity runs in the
-active window (e.g. 20×20 instead of 80×80 ZGEMMs) — ~30× speedup of the
-nonlinear step with no physics loss in the window. The Coulomb Σ^HF cost/traffic
-scale as n_act², so ALWAYS pair `yn_sbe_coulomb` with a frozen-core window.
+* **U(h) — the reversible velocity-gauge unitary — runs on the FULL band
+  basis** (`dt_evolve_bloch_cf4`: `build_HVG(nb, …)` + `cf4_unitary_step(nb, …)`
+  on all `nb` bands). This is the whole point of the frozen scheme: a strong
+  field with a large `A(t)` pushes population **up/down through the "frozen"
+  high/deep bands and brings it back** — the frozen bands hold the field-dressed
+  virtual population, so **VG basis sufficiency is preserved**. The pure-SBE
+  unitary is cheap (O(nk·nb³), linear in nk), and the EPM already lets you pick
+  `nstate` large enough for any `A`.
+* **D(h/2) — the CPTP dissipators — act only in the active Houston window**
+  (bands inside `frozen_core_threshold_ev`/`frozen_free_threshold_ev`). Each half
+  step truncates ρ to the active block, transforms to the instantaneous Houston
+  basis, applies the channels, and glues the block back into the full matrix.
+  This is where the saving lives: fewer ZHEEV, a smaller Σ^HF (its cost/traffic
+  scale as n_act², so ALWAYS pair `yn_sbe_coulomb` with a frozen window), and —
+  the big one **in super mode** — a smaller ring, whose O(nk³·n_act) collision
+  sum shrinks directly with the active-band count.
+
+There is **no freeze-reset**: inactive bands evolve reversibly under U and are
+simply skipped by the dissipators. Consequently, with **clean dynamics** the
+frozen-core flag has *zero* effect on the current (verified to machine precision:
+a 5×10¹² V/cm Si run with 3/8 bands frozen reproduces the all-active current to
+1.7×10⁻¹⁵ relative). Population output still reads the four gap-edge bands
+regardless of how many are active — so freeze everything except the gap edge,
+keep `nstate` large for the basis, and pay only for the window you dissipate.
+
+*(Historical note: earlier builds truncated U to the active block and reset the
+frozen bands to ground occupation every step — that WAS a VG cutoff and broke
+basis sufficiency at strong fields; fixed 2026-07-12.)*
 
 **Exact current.** J = Tr[(π + A)ρ] (a.u.) — no perturbative splitting; the
 velocity-gauge inter/intra-band compensation is exact. Hermiticity stabilization
