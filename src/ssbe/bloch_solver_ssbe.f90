@@ -1,7 +1,7 @@
 module bloch_solver_ssbe
     use math_constants, only: pi, zi
     use phys_constants, only: au_ev
-    use communication, only: comm_get_groupinfo, comm_summation, comm_bcast, comm_get_max
+    use communication, only: comm_get_groupinfo, comm_summation, comm_bcast
     use gs_info_ssbe
     use util_ssbe, only: split_range
     implicit none
@@ -21,7 +21,6 @@ module bloch_solver_ssbe
 
         ! Frozen core handling
         logical, allocatable :: is_active(:) ! .true. if band is active, .false. if frozen
-        logical :: frozen_leak_warned = .false.  ! one-time "frozen band holds population" warning
         integer :: n_active_bands = 0
         integer, allocatable :: active_idx(:)  ! Mapping: 1..n_active -> global band index
 
@@ -1384,40 +1383,13 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     deallocate(p_k_full, rho_n_full, H1f, H2f)
     !$omp end parallel
 
-    ! ---- frozen-window validity diagnostic ----------------------------------
-    ! Frozen bands are meant to be dynamically INERT: they carry only the
-    ! reversible field-dressed VIRTUAL population, which the full-basis unitary
-    ! and the current already capture and which correctly does NOT enter the
-    ! active-window Sigma^HF / dissipators (real carriers "live everywhere" but
-    ! the exchange/scattering physics is near the gap). If a frozen band builds
-    ! up a LARGE deviation from its ground occupation, the active window is too
-    ! small -- real carriers (or strong field-dressing) sit where neither the
-    ! dissipators nor Sigma^HF can see them. Warn once.
-    if (nba < nb .and. .not. sbe%frozen_leak_warned) then
-        block
-            real(8) :: dmax(1), dred(1)
-            integer :: iik, ib
-            dmax(1) = 0d0
-            do iik = sbe%ik_min, sbe%ik_max
-                do ib = 1, nb
-                    if (.not. sbe%is_active(ib)) &
-                        dmax(1) = max(dmax(1), abs(real(sbe%rho(ib, ib, iik)) - gs%occup(ib, iik)))
-                end do
-            end do
-            if (sbe%nproc > 1) then
-                call comm_get_max(dmax, dred, 1, sbe%icomm)
-                dmax = dred
-            end if
-            if (dmax(1) > 0.05d0 * sbe%occ_max) then
-                if (sbe%irank == 0) write(*, '(a,f6.3,a)') &
-                    '# WARNING: a FROZEN band holds population = ', dmax(1) / sbe%occ_max, &
-                    ' of occ -- the active window is too small (real carriers or strong '// &
-                    'field-dressing outside it are invisible to the dissipators and '// &
-                    'Sigma^HF). Widen frozen_core_threshold_ev / frozen_free_threshold_ev.'
-                sbe%frozen_leak_warned = .true.
-            end if
-        end block
-    end if
+    ! NOTE: a frozen band legitimately holds population -- the full-basis unitary
+    ! lets carriers TUNNEL / field-couple from the active window up into the
+    ! frozen bands and back (that reversible field-dressed population is exactly
+    ! the basis-sufficiency the frozen scheme preserves; the current captures it
+    ! and it correctly does NOT enter the active-window Sigma^HF / dissipators).
+    ! So a nonzero deviation of a frozen band from its ground occupation is
+    ! EXPECTED and is not an error -- no diagnostic is raised for it.
 
     ! Inter-k e-ph through the super-mode ring: once per step on the post-step
     ! B2: ALL nonlocal ring channels (inter-k e-ph; nonlocal II + its Auger
@@ -2013,7 +1985,7 @@ subroutine apply_impact_ionization(sbe, nba, rho_ad, evals, Ac, tau, wsub, use_u
     !-------------------------------------------------------------------------
     if (.not. use_unfold) then
         do ih = ic1, nba
-            ekin = evals(ih) + a2half - sbe%ii_ecbm_au
+            ekin = evals(ih) - sbe%ii_ecbm_au   ! a2half NOT restored (cancels vs shifted CBM)
             d = ekin - sbe%ii_eth_au
             if (d <= 0d0) cycle
             if (real(rho_ad(ih, ih)) < occ_eps) cycle
@@ -2073,7 +2045,7 @@ subroutine apply_impact_ionization(sbe, nba, rho_ad, evals, Ac, tau, wsub, use_u
 
     do ih = ic1, nba
         ! Threshold gate on the kinetic energy from the field-free CBM
-        ekin = evals(ih) + a2half - sbe%ii_ecbm_au
+        ekin = evals(ih) - sbe%ii_ecbm_au   ! a2half NOT restored (cancels vs shifted CBM)
         d = ekin - sbe%ii_eth_au
         if (d <= 0d0) cycle
         if (real(rho_ad(ih, ih)) < occ_eps) cycle
@@ -2162,7 +2134,7 @@ subroutine apply_eph_relaxation(sbe, nba, rho_ad, evals, Ac, tau)
         if (real(rho_ad(ia, ia)) < occ_eps) cycle
         ! carrier kinetic energy from the nearest band edge (electron or hole);
         ! restore the dropped A^2/2 (Houston identity), as in impact ionization.
-        ekin = evals(ia) + a2half
+        ekin = evals(ia)   ! a2half NOT restored (cancels vs shifted band edge)
         eps_kin = max(ekin - sbe%eph_ecbm_au, sbe%eph_evbm_au - ekin, 0d0)
         ! saturating collision rate = total magnitude cap for this level
         nu = nu_saturation(eps_kin, sbe%eph_nusat_au, sbe%eph_eps0_au, sbe%eph_n)

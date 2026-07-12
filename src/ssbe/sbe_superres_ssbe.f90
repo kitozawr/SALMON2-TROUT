@@ -1487,8 +1487,14 @@ contains
                 if (f(a, ik) < occ_eps) cycle
                 ! carrier kinetic energy from the nearest band edge (restore A^2/2,
                 ! the k-independent Houston offset; it cancels in energy MATCHING).
-                eps_kin = max(eval(a, ik) + a2half - ecbm, &
-                              evbm - (eval(a, ik) + a2half), 0d0)
+                ! kinetic energy from the nearest band edge. a2half (the dropped
+                ! Houston A^2/2) is NOT restored here: it is a GLOBAL scalar that
+                ! cancels against the equally-shifted band edge (ecbm/evbm), and
+                ! the field-heating is ALREADY carried by the Houston eigenvalue
+                ! eval. Restoring it double-counted the field -> at strong drive
+                ! a2half (tens of eV) swamped the real band energy and made every
+                ! carrier "hot" (spurious e-ph/II/Auger). Fixed 2026-07-12.
+                eps_kin = max(eval(a, ik) - ecbm, evbm - eval(a, ik), 0d0)
                 nu_a = nu_saturation(eps_kin, nu_sat, nu_eps0, nu_n)
                 if (nu_a * tau < 1d-14) cycle
 
@@ -1594,7 +1600,7 @@ contains
         do i1 = i1s, i1e
             do ih = ic, nba
                 if (f(ih, i1) < occ_eps) cycle
-                ekin = eval(ih, i1) + a2half - ecbm
+                ekin = eval(ih, i1) - ecbm   ! a2half NOT restored (cancels vs shifted CBM; see e-ph note)
                 dd = ekin - eth
                 ! A5: Franz-Keldysh field softening -- softplus with the
                 ! electro-optic width (fk = hbar*theta): -> max(dd,0) as fk -> 0.
@@ -1669,7 +1675,7 @@ contains
             do ih = 1, iv
                 room = occ_max - f(ih, i1)          ! deep-hole capacity
                 if (room < occ_eps) cycle
-                ekin = evbm - (eval(ih, i1) + a2half)
+                ekin = evbm - eval(ih, i1)   ! a2half NOT restored (cancels vs shifted VBM)
                 dd = ekin - eth
                 if (fk > 0d0) dd = fk * log(1d0 + exp(min(dd / fk, 4d1)))
                 if (dd <= 0d0) cycle
@@ -1779,7 +1785,7 @@ contains
             do ih = ic, nba
                 room = occ_max - f(ih, i1)          ! empty hot-state phase space
                 if (room < occ_eps) cycle
-                ekin = eval(ih, i1) + a2half - ecbm
+                ekin = eval(ih, i1) - ecbm   ! a2half NOT restored (cancels vs shifted CBM; see e-ph note)
                 dd = ekin - eth
                 if (fk > 0d0) dd = fk * log(1d0 + exp(min(dd / fk, 4d1)))
                 if (dd <= 0d0) cycle
@@ -1848,7 +1854,7 @@ contains
         do i1 = i1s, i1e
             do ih = 1, iv
                 if (f(ih, i1) < occ_eps) cycle      ! deep electron present
-                ekin = evbm - (eval(ih, i1) + a2half)
+                ekin = evbm - eval(ih, i1)   ! a2half NOT restored (cancels vs shifted VBM)
                 dd = ekin - eth
                 if (fk > 0d0) dd = fk * log(1d0 + exp(min(dd / fk, 4d1)))
                 if (dd <= 0d0) cycle
