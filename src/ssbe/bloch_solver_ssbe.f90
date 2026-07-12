@@ -1,7 +1,7 @@
 module bloch_solver_ssbe
     use math_constants, only: pi, zi
     use phys_constants, only: au_ev
-    use communication, only: comm_get_groupinfo, comm_summation, comm_bcast
+    use communication, only: comm_get_groupinfo, comm_summation, comm_bcast, comm_get_max
     use gs_info_ssbe
     use util_ssbe, only: split_range
     implicit none
@@ -21,6 +21,7 @@ module bloch_solver_ssbe
 
         ! Frozen core handling
         logical, allocatable :: is_active(:) ! .true. if band is active, .false. if frozen
+        logical :: frozen_leak_warned = .false.  ! one-time "frozen band holds population" warning
         integer :: n_active_bands = 0
         integer, allocatable :: active_idx(:)  ! Mapping: 1..n_active -> global band index
 
@@ -1382,6 +1383,41 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     end if
     deallocate(p_k_full, rho_n_full, H1f, H2f)
     !$omp end parallel
+
+    ! ---- frozen-window validity diagnostic ----------------------------------
+    ! Frozen bands are meant to be dynamically INERT: they carry only the
+    ! reversible field-dressed VIRTUAL population, which the full-basis unitary
+    ! and the current already capture and which correctly does NOT enter the
+    ! active-window Sigma^HF / dissipators (real carriers "live everywhere" but
+    ! the exchange/scattering physics is near the gap). If a frozen band builds
+    ! up a LARGE deviation from its ground occupation, the active window is too
+    ! small -- real carriers (or strong field-dressing) sit where neither the
+    ! dissipators nor Sigma^HF can see them. Warn once.
+    if (nba < nb .and. .not. sbe%frozen_leak_warned) then
+        block
+            real(8) :: dmax(1), dred(1)
+            integer :: iik, ib
+            dmax(1) = 0d0
+            do iik = sbe%ik_min, sbe%ik_max
+                do ib = 1, nb
+                    if (.not. sbe%is_active(ib)) &
+                        dmax(1) = max(dmax(1), abs(real(sbe%rho(ib, ib, iik)) - gs%occup(ib, iik)))
+                end do
+            end do
+            if (sbe%nproc > 1) then
+                call comm_get_max(dmax, dred, 1, sbe%icomm)
+                dmax = dred
+            end if
+            if (dmax(1) > 0.05d0 * sbe%occ_max) then
+                if (sbe%irank == 0) write(*, '(a,f6.3,a)') &
+                    '# WARNING: a FROZEN band holds population = ', dmax(1) / sbe%occ_max, &
+                    ' of occ -- the active window is too small (real carriers or strong '// &
+                    'field-dressing outside it are invisible to the dissipators and '// &
+                    'Sigma^HF). Widen frozen_core_threshold_ev / frozen_free_threshold_ev.'
+                sbe%frozen_leak_warned = .true.
+            end if
+        end block
+    end if
 
     ! Inter-k e-ph through the super-mode ring: once per step on the post-step
     ! B2: ALL nonlocal ring channels (inter-k e-ph; nonlocal II + its Auger
