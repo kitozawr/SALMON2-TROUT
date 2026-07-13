@@ -1,0 +1,85 @@
+!########################################################################################!
+! Si SBE (step 2/2) -- FROZEN-CORE 2V+2C Houston window + phonon-assisted INDIRECT          !
+! (top-valence -> bottom-conduction, Gamma -> X) carrier generation.                        !
+!----------------------------------------------------------------------------------------!
+! Physics: Si is an INDIRECT-gap semiconductor, so its band-edge absorption is entirely     !
+! PHONON-ASSISTED -- the field supplies the energy (near-tunneling, Keldysh gamma ~ 1) and  !
+! a phonon supplies the crystal momentum for the Gamma(VBM) -> X(CBM) transition. Turn the  !
+! e-ph ring OFF (yn_sbe_eph='n') and the indirect channel closes: the residual real-carrier !
+! density drops ~25x. Turn it ON and carriers are generated in the LOWEST conduction band   !
+! at the indirect X-valley and cooled toward the band minimum by phonon emission.           !
+!                                                                                          !
+! FROZEN CORE: the dissipators (e-ph, II, Auger) act only on the active Houston window --   !
+! here the gap edge: 2 valence (the VBM Gamma25' doublet) + 2 conduction (the CBM Gamma2'   !
+! singlet + the next Gamma15 doublet). Deep valence and the high conduction bands are        !
+! FROZEN from dissipation but STILL evolve under the full-basis VG unitary (basis           !
+! sufficiency). See wiki/03 sec.12.                                                          !
+!                                                                                          !
+! Set yn_sbe_eph = 'n' for the OFF reference; keep everything else identical.               !
+!----------------------------------------------------------------------------------------!
+! Validated: electrons = 8.000 conserved every step (frozen window + ring is trace-exact,   !
+! wiki/00). Basis converged at this field (nex changes < 4% from nstate 12 -> 16).          !
+!########################################################################################!
+
+&calculation
+  theory = 'sbe'
+/
+
+&control
+  sysname = 'Si_prim'
+/
+
+&units
+  unit_system = 'au'
+/
+
+&system
+  yn_periodic  = 'y'
+  al(1:3) = 10.26d0, 10.26d0, 10.26d0
+  nelec  = 8
+  nstate = 16
+/
+
+&kgrid
+  num_kgrid(1:3) = 4, 4, 4
+/
+
+&analysis
+  out_projection_step   = 20      ! nex(t) cadence
+  out_projection_k_step = 20      ! k-resolved real-carrier cadence (for the X-valley map)
+/
+
+&tgrid
+  dt = 8.0d0
+  nt = 400
+/
+
+&emfield
+  ae_shape1      = 'Acos2'
+  epdir_re1(1:3) = 0.0d0, 0.0d0, 1.0d0
+  I_wcm2_1       = 1.0d+11        ! near-tunneling (Keldysh gamma ~ 1); basis-converged
+  tw1            = 800.0d0
+  omega1         = 0.0046d0       ! deep-IR (0.125 eV)
+/
+
+&epm
+  epm_material = 'Si'
+/
+
+&sbe
+  ! ---- FROZEN-CORE active window: 2 valence + 2 conduction at the gap edge ----
+  frozen_core_threshold_ev = -3.0d0   ! keep the VBM doublet; freeze deeper valence
+  frozen_free_threshold_ev =  6.0d0   ! keep CBM + next CB level; freeze higher conduction
+  ! ---- dissipation: phonon-assisted indirect channel (+ momentum-resolved ring) ----
+  yn_sbe_superres          = 'y'      ! ring: makes e-ph / II momentum-resolved (inter-k)
+  yn_sbe_eph               = 'y'      ! <- set 'n' for the OFF reference
+  yn_sbe_eph_acoustic      = 'y'
+  sbe_eph_temperature_k    = 300.0d0
+  ! ---- optional: impact ionization + phonon-assisted II (verified trace-exact here) ----
+  yn_sbe_impact_ionization = 'n'      ! set 'y' (with yn_sbe_ii_holes='y') to add II; electrons stay 8.000
+  yn_sbe_ii_holes          = 'n'      ! set 'y' ONLY together with impact_ionization='y' (rides the ring)
+  sbe_ii_phassist          = 1.0d0    ! phonon-assisted II weight (only used if II is on)
+  yn_sbe_auger             = 'n'
+  yn_sbe_eeh               = 'n'
+  yn_sbe_coulomb           = 'n'
+/

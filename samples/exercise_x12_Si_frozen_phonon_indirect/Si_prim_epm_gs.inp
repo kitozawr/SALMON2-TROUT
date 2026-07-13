@@ -1,0 +1,44 @@
+!########################################################################################!
+! Si PRIMITIVE-CELL EPM ground state (step 1/2) -- in-SALMON Fortran EPM, theory='epm'.     !
+!----------------------------------------------------------------------------------------!
+! Diamond (V^A=0), Kunikiyo form factors, FCC 2-atom primitive cell, NO folding.           !
+! Writes Si_prim_k/_eigen/_tm.data read by the SBE step.                                    !
+!                                                                                          !
+! NSTATE = 16 (4 valence + 12 conduction): velocity-gauge headroom. The FROZEN-CORE step   !
+! below dissipates only a small gap-edge window (2 valence + 2 conduction) but the          !
+! reversible VG unitary still runs on ALL 16 bands, so a near-tunneling field can push      !
+! virtual population up through the frozen bands and back (basis sufficiency). Cheap:       !
+! frozen core costs O(n_active) in the ring/dissipators, not O(nstate).                     !
+!----------------------------------------------------------------------------------------!
+! Units a.u.:  Length 1 = 0.52917721067 Angstrom;  Energy 1 = 27.2114 eV.                   !
+!########################################################################################!
+
+&calculation
+    theory = 'epm'
+/
+
+&control
+    sysname = 'Si_prim'
+/
+
+&units
+    unit_system = 'au'
+/
+
+&system
+    yn_periodic = 'y'
+    al(1:3) = 10.26d0, 10.26d0, 10.26d0        ! Si a = 5.431 Angstrom
+    nelec  = 8                                  ! 2 atoms x 4 valence e- -> 4 filled bands
+    nstate = 16                                 ! 4 valence + 12 conduction (VG headroom for the frozen unitary)
+/
+
+&kgrid
+    num_kgrid(1:3) = 4, 4, 4                    ! ring channels are O(nk^3): 4^3 is the fast default
+/
+
+&epm
+    epm_material            = 'Si'
+    epm_lattice_constant_au = 10.26d0
+    epm_pw_cutoff_ry        = 27.0d0
+    epm_cell                = 'primitive'
+/
