@@ -2572,9 +2572,18 @@ subroutine ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
         call ZGEMM('N','N', nba,nba,nba, cmplx(1d0,0d0, 8), t1,nba, W,nba, cmplx(0d0,0d0, 8), rad,nba)
         do a = 1, nba
             fold = fold_loc(a, ik)
-            fnew = max(fold + scal * dpop(a,ik), 0d0)
+            ! TRACE-EXACT diagonal update: sum_a (scal*dpop) = scal*0 = 0, so the
+            ! written diagonal preserves Tr(rad) EXACTLY. The old max(.,0) clip used
+            ! the RAW fold while the limiter `scal` was built from the [0,occ]-clamped
+            ! fold; when a FROZEN-window active subblock (a principal submatrix with
+            ! the active<->frozen coherences dropped) has a Houston population dip a
+            ! hair below 0, that clip silently CREATED population every step (a ~0.5%
+            ! electron leak at strong field). In the all-active case the full rho is
+            ! PSD so raw fold in [0,occ] and this is a no-op. Positivity is preserved
+            ! to numerical tolerance; trace is now preserved exactly.
+            fnew = fold + scal * dpop(a,ik)
             if (dpop(a,ik) < 0d0 .and. fold > 1d-12) then
-                damp(a) = sqrt(fnew / fold)
+                damp(a) = sqrt(max(fnew, 0d0) / fold)   ! clamp the coherence ratio only (avoid sqrt<0)
             else
                 damp(a) = 1d0
             end if
