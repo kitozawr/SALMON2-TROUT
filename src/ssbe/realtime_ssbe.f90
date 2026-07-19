@@ -67,7 +67,29 @@ subroutine main_realtime_ssbe(icomm)
     ! uninitialized (a dA/dt spike in the last step). i=-1 (t=-dt) fills as 0.
     allocate(Ac_ext_t(1:3, -1:nt+1))
     call calc_Ac_ext_t(0.0d0, dt, -1, nt+1, Ac_ext_t)
-    
+
+    ! Field-scale audit line (one-time): the peak |A|, the peak |E| = -dA/dt,
+    ! and the peak crystal-momentum excursion. file_input1 pulses MUST be in the
+    ! run's unit_system (A_eV_fs: A in fs*V/Angstrom, 1 a.u. = 1.2442 fs*V/A) --
+    ! a file generated in the wrong units drives a silently wrong field; this
+    ! line makes the actually-driven field visible for any pulse source.
+    if (comm_is_root(irank)) then
+        block
+            real(8) :: amx, emx, an, en
+            integer :: itf
+            amx = 0d0; emx = 0d0
+            do itf = 0, nt
+                an = sqrt(sum(Ac_ext_t(:, itf)**2))
+                en = sqrt(sum(((Ac_ext_t(:, itf+1) - Ac_ext_t(:, itf-1)) / (2d0*dt))**2))
+                if (an > amx) amx = an
+                if (en > emx) emx = en
+            end do
+            write(*, '(a,es11.4,a,es11.4,a,f10.3,a)') &
+                '# field audit: peak |A| = ', amx, ' a.u. (= peak dk excursion), '// &
+                'peak |E| = ', emx, ' a.u. = ', emx * 5.14220675d3, ' MV/cm'
+        end block
+    end if
+
     ! Initial energy and fields
     energy = 0.0d0
     E(:) = 0.0d0
