@@ -6,6 +6,35 @@ Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #
 
 ---
 
+## 🎯 OPEN TASK — universal virtual/real carrier separation (dressed-basis dissipation)
+**Priority open item (2026-07-19).** The Markovian ring dissipators scatter the
+field-induced **virtual polarization** (reversible "dressing") as if it were real
+population → unphysical near-linear generation `G ∝ I^0.94` instead of the
+non-perturbative Keldysh/Hurkx law (x12 coarse scan: `G_SBE/n_Keldysh` drifts
+`2×10⁷ → 68` across `3×10¹⁰ → 10¹² W/cm²`, so **no constant rescale fixes the shape**).
+Diagnostics established this session: the Houston CB population follows `A²(t)` at
+corr 0.99 and **99.9 % returns** to the VB at switch-off → a lifetime gate cannot
+separate them in sub-cycle fields.
+
+- **What is DONE / shipped as fallbacks** (all on trunk): virtual-transient gate
+  `sbe_ring_gate_fs` (default **OFF** — proven insufficient); calibration knob
+  `sbe_eph_interband_scale` (per-working-point, not universal); field audit line;
+  `rate_benchmark.py` + `calibration_scan.py` in exercise x12.
+- **The universal fix (recommended, NOT yet implemented): dissipate in the
+  instantaneous field-DRESSED (adiabatic) basis** — the non-periodic limit of
+  Floquet–Born–Markov; parameter-free; valid for sub-cycle THz. See the ranked
+  options and the verified literature in **`wiki/10_open_quantum_systems_literature.md`**.
+- **Blocking sub-task:** the ring-basis audit (which basis `U_loc`/`f_all` and
+  `houston_dissipate` currently use, and whether the dressed basis can be reused
+  cheaply or needs a new per-k-per-step eigendecomposition + kmap rework). In
+  progress.
+- **Literature-review page (`wiki/10`) = Fable task** — extend/maintain it, and
+  transcribe the Boroumand et al. 2025 (Rep. Prog. Phys. 88, 070501) dissipation
+  prescription directly from the in-session PDF before citing specific equations
+  (WebFetch is blocked by the publishers).
+
+---
+
 ## ✅ MERGED — inter-k e-ph + momentum-conserving nonlocal II (through the ring)
 Branch `claude/inter-k-ring-eph-ii` **merged into `develop-2.0.0`** (merge commit `b3e006c`). Maintainer decision: **"if the ring (`yn_sbe_superres`) is on, inter-k goes through it."** Both channels tested (17/17) + verified live on primitive Si; the k-local versions are gated OFF when the ring is on (ring-off byte-unchanged).
 - **inter-k e-ph** (`apply_eph_interk_ring` + pure `eph_interk_dpop`, `test_eph_interk_cptp`): gathers the Houston spectrum, CPTP net-`dpop` to the energy-matched valley at a DIFFERENT k. Verified Si 8³ `eph+superres` → electrons=8.000.
