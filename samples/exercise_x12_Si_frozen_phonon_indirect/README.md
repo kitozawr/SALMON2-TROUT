@@ -58,25 +58,35 @@ python3 phonon_analysis.py         # -> phonon_assisted_demo.png
 
 | | eph OFF (field only) | eph ON (phonon) |
 |---|---|---|
-| final `nex` | 5.9×10¹⁸ cm⁻³ | 6.3×10²⁰ cm⁻³ (**≈106×**) |
-| ⟨E−E_CBM⟩ (lowest CB) | 1.0 eV (hot) | 0.56 eV (cooled toward the valley) |
+| final `nex` | 5.9×10¹⁸ cm⁻³ | 1.1×10²¹ cm⁻³ (**≈180×**) |
+| ⟨E−E_CBM⟩ (lowest CB) | 1.0 eV (hot) | 0.42 eV (cooled toward the valley) |
 | electrons (every step) | **8.000** | **8.000** |
 
-The phonon opens the indirect Γ→X channel (≈106× more real carriers — most of
+The phonon opens the indirect Γ→X channel (≈180× more real carriers — most of
 Si's band-edge absorption is phonon-assisted), lands them in the **lowest**
-conduction band (band-5 / band-6 population ratio ≈ 14×), and cools them from
-~1.2 → 0.56 eV above the CBM by phonon emission.
+conduction band (band-5 / band-6 population ratio ≈ 33×), and cools them from
+~1.2 → 0.42 eV above the CBM by phonon emission.
 
-> Reference numbers regenerated **2026-07-19** after two model corrections
-> (`wiki/00`): (1) the **CP extension** — active↔frozen coherences now carry
-> the same loss-Kraus factors as the active block (a real scattering event
-> decoheres the reversible frozen-band dressing instead of leaving ρ
-> non-positive); (2) the **virtual-transient gate** — the ring population
-> kernels read the *persistent* Houston floor (rise time 2π/E_gap ≈ 2.5 fs),
-> so sub-lifetime virtual transients only dephase (the e-ph T2 role) and are
-> never population-scattered as if they were real carriers
-> (`sbe_ring_gate_fs`: −1 auto, 0 off). The eph-OFF column is bit-identical
-> to the pre-fix build.
+> Reference numbers regenerated **2026-07-19** after the **CP extension**
+> (`wiki/00`): active↔frozen coherences now carry the same loss-Kraus factors
+> as the active block, so a real scattering event decoheres the reversible
+> frozen-band dressing instead of leaving ρ non-positive. The eph-OFF column
+> is bit-identical to the pre-fix build.
+
+### What the phonon actually scatters here (real vs virtual)
+
+This pulse is **sub-cycle** (envelope 19 fs < period 2π/ω = 33 fs): the
+coherent run shows the Houston conduction population *adiabatically follows
+the field envelope* (corr(n_H, A²) = 0.99, peak 0.56 e⁻/supercell) and 99.9 %
+of it returns to the valence band at switch-off. The e-ph conversion of this
+long-lived **virtual** dressing is golden-rule phonon-assisted tunneling
+(Hurkx/Kane BTBT physics — real for indirect Si), but its scale here is set
+by ν_sat, the *real-carrier* intervalley rate: treat the absolute yield as an
+**upper estimate** (BTBT parametrizations sit orders below it at this field).
+A lifetime gate cannot separate this dressing (`sbe_ring_gate_fs`, default
+**off**, is kept as an experimental knob: at τ = 2π/E_gap it still passes
+~60 % of the envelope-following dressing and only trims sub-cycle fringes,
+−41 % here).
 
 ## Absolute-rate benchmark (`rate_benchmark.py`)
 

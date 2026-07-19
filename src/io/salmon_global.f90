@@ -494,7 +494,7 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: sbe_bgr_n_gate         ! apply BGR shift only above n [cm^-3]
   real(8)        :: sbe_bgr_coeff          ! BGR coefficient K [eV cm] (cube-root law)
   real(8)        :: sbe_search_sigma_e_ev  ! energy-bin width sigma_E [eV] (<=0: grid-matched)
-  real(8)        :: sbe_ring_gate_fs       ! ring virtual-transient gate time [fs] (<0: auto 2*pi/Egap; 0: off)
+  real(8)        :: sbe_ring_gate_fs       ! ring virtual-transient gate time [fs] (0: off = default; <0: auto 2*pi/Egap; >0 manual). EXPERIMENTAL: in sub-cycle fields the dressing follows the envelope and outlives any lifetime gate.
   ! Carrier-carrier (e-e/e-h) scattering (Part F): CPTP relaxation of the
   ! adiabatic populations toward a Fermi-Dirac with the same number AND energy
   ! (intraband thermalization + EID), at a screened-Coulomb rate.

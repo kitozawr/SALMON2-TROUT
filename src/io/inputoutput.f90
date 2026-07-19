@@ -1094,7 +1094,9 @@ contains
     sbe_bgr_n_gate          = 5.0d18     ! apply BGR shift only above this density [cm^-3]
     sbe_bgr_coeff           = 1.9d-8     ! BGR coefficient K [eV cm] (tunable [1.9,3.8]e-8)
     sbe_search_sigma_e_ev   = -1.0d0     ! energy-bin width sigma_E [eV]; <=0: grid-matched
-    sbe_ring_gate_fs        = -1.0d0     ! ring virtual gate [fs]; <0: auto 2*pi/Egap, 0: off
+    sbe_ring_gate_fs        = 0.0d0      ! ring virtual gate [fs]; 0: OFF (default -- a lifetime
+                                         ! gate cannot separate envelope-following dressing in
+                                         ! sub-cycle fields); <0: auto 2*pi/Egap; >0: manual
     yn_sbe_eeh              = 'n'        ! 'y': carrier-carrier (e-e/e-h) thermalization channel
     sbe_eeh_nu_sat          = -1.0d0     ! carrier-carrier rate scale [s^-1]; <=0: 1e14 default
     yn_sbe_auger            = 'n'        ! 'y': Auger recombination (density-gated CPTP, Sec 13)
