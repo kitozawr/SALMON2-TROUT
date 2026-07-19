@@ -88,6 +88,29 @@ A lifetime gate cannot separate this dressing (`sbe_ring_gate_fs`, default
 ~60 % of the envelope-following dressing and only trims sub-cycle fringes,
 −41 % here).
 
+## Calibration scan (`calibration_scan.py`) — 4³ worked example, redo on your grid
+
+Field scan at 4³ (this pulse, eph-ON minus eph-OFF vs the Keldysh
+1.7-eV-as-direct upper bound):
+
+| I [W/cm²] | G_SBE [cm⁻³] | n_Keldysh(1.7) | ratio |
+|---|---|---|---|
+| 3×10¹⁰ | 2.9×10²⁰ | 1.3×10¹³ | 2.2×10⁷ |
+| 1×10¹¹ | 1.1×10²¹ | 2.7×10¹⁶ | 4.0×10⁴ |
+| 3×10¹¹ | 3.1×10²¹ | 2.9×10¹⁸ | 1.1×10³ |
+| 1×10¹² | 7.9×10²¹ | 1.2×10²⁰ | 68 |
+
+**The ratio is NOT flat**: G_SBE ∝ I^0.94 (conversion of the *first-order*
+virtual polarization, ∝A², through Houston anticrossings within σ_E), while
+the bracket is strongly nonlinear (tunneling exponent). So
+`sbe_eph_interband_scale` is a **per-working-point** calibration, not a
+universal constant: pick it from the ratio at YOUR field on YOUR grid
+(9³ production runs), or leave 1.0 and read the yield as an upper estimate.
+The σ_E matching width (`sbe_search_sigma_e_ev`) is a *moderate* lever
+(4³, I=10¹¹: σ = 0.05/0.10/0.20 eV → nex = 0.44/0.68/1.07×10²¹, G ∝ σ^0.6) —
+the conversion at Houston anticrossings survives small σ, so σ alone does not
+close the gap to the bracket.
+
 ## Absolute-rate benchmark (`rate_benchmark.py`)
 
 `python3 rate_benchmark.py` (after the on/off workflow) integrates the

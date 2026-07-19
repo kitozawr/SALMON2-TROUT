@@ -1453,7 +1453,7 @@ contains
     subroutine eph_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, evbm, &
                                nph, hw, wrel, nb_bose, nu_sat, nu_eps0, nu_n, &
                                sigma, tau, dpop, gout, kidx, kn, pol_tab, pol_norm, ip_polar, &
-                               ac_tab, ip_ac)
+                               ac_tab, ip_ac, ib_scale)
         implicit none
         integer, intent(in)  :: nk, nba, nph
         real(8), intent(in)  :: eval(nba, nk), f(nba, nk), occ_max, a2half
@@ -1473,11 +1473,25 @@ contains
         ! n >= 1e18 cm^-3; screening cuts the small-q part).
         real(8), intent(in), optional :: ac_tab(*)
         integer, intent(in), optional :: ip_ac
+        ! Calibration knob (default 1): multiplies the partial rates of the
+        ! INTERBAND pairs -- source and destination Houston branches on opposite
+        ! sides of mid-gap. Those pairs carry the phonon-assisted band-to-band
+        ! (BTBT / dressing-conversion) channel, whose model scale nu_sat is the
+        ! cited REAL-carrier intervalley rate; the off-shell suppression of the
+        ! eph matrix element between virtual states is not in the model, so the
+        ! channel's ABSOLUTE rate is an upper estimate. Calibrated against the
+        ! Keldysh/Hurkx brackets (samples/x12 rate_benchmark). Intraband pairs
+        ! (real-carrier cooling / heating) are untouched.
+        real(8), intent(in), optional :: ib_scale
         integer :: ik, jq, a, b, ip, ipol, ipac
         real(8) :: eps_kin, nu_a, fe, fa, dE, shp, th, blk, gam, gamtot, out_tot
-        real(8) :: gpart(nba, nk)
+        real(8) :: gpart(nba, nk), emid, ibs
+        logical :: src_cb
         real(8), parameter :: occ_eps = 1d-12
 
+        ibs = 1d0
+        if (present(ib_scale)) ibs = ib_scale
+        emid = 0.5d0 * (ecbm + evbm)
         dpop = 0d0
         ipol = 0
         if (present(ip_polar)) then
@@ -1497,7 +1511,7 @@ contains
         ! dpop(b, jq), hence the array reduction; gout(:, ik) is owner-written.
         !$omp parallel do default(shared) schedule(dynamic) &
         !$omp   private(ik, a, ip, jq, b, eps_kin, nu_a, fe, fa, dE, shp, th, blk, &
-        !$omp           gam, gamtot, out_tot, gpart) &
+        !$omp           gam, gamtot, out_tot, gpart, src_cb) &
         !$omp   reduction(+:dpop)
         do ik = 1, nk
             do a = 1, nba
@@ -1514,6 +1528,7 @@ contains
                 eps_kin = max(eval(a, ik) - ecbm, evbm - eval(a, ik), 0d0)
                 nu_a = nu_saturation(eps_kin, nu_sat, nu_eps0, nu_n)
                 if (nu_a * tau < 1d-14) cycle
+                src_cb = (eval(a, ik) > emid)
 
                 gpart = 0d0
                 gamtot = 0d0
@@ -1532,6 +1547,9 @@ contains
                             if (shp <= 0d0) cycle
                             blk = min(max(1d0 - f(b, jq) / occ_max, 0d0), 1d0)
                             gam = nu_a * wrel(ip) * th * shp * blk
+                            ! gap-straddling pair: the phonon-assisted BTBT /
+                            ! dressing-conversion channel (see ib_scale above)
+                            if (src_cb .neqv. (eval(b, jq) > emid)) gam = gam * ibs
                             ! A3: polar-LO Frohlich q-weight (screened 1/q^2)
                             if (ip == ipol) gam = gam * pol_tab(1 &
                                 + (kidx(1,ik)-kidx(1,jq)+kn(1)-1) &

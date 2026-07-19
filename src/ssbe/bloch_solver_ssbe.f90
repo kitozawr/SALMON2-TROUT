@@ -147,6 +147,7 @@ module bloch_solver_ssbe
         real(8) :: eph_nusat_au = 0d0   ! saturation rate nu_sat [1/a.u.time]
         real(8) :: eph_eps0_au  = 0d0   ! nu(eps) onset eps_0 [Ha]
         real(8) :: eph_n        = 2d0   ! nu(eps) shape exponent
+        real(8) :: eph_ib_scale = 1d0   ! gap-straddling (BTBT) rate calibration factor
         real(8) :: eph_sigma_au = 0d0   ! energy-bin width sigma_E [Ha]
         real(8) :: eph_ecbm_au  = 0d0   ! field-free CBM [Ha]
         real(8) :: eph_evbm_au  = 0d0   ! field-free VBM [Ha]
@@ -310,7 +311,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
                              yn_sbe_hf_sublattice_proj, yn_sbe_coset_proj, &
                              yn_sbe_eph, sbe_eph_temperature_k, sbe_eph_nu_sat, &
                              sbe_eph_eps0_ev, sbe_eph_n, sbe_search_sigma_e_ev, &
-                             sbe_ring_gate_fs, &
+                             sbe_ring_gate_fs, sbe_eph_interband_scale, &
                              yn_sbe_bgr_threshold, sbe_bgr_n_gate, sbe_bgr_coeff, &
                              yn_sbe_superres, yn_sbe_eeh, sbe_eeh_nu_sat, epm_material, &
                              yn_sbe_auger, sbe_auger_c_cm6s, sbe_auger_n_gate_cm3, &
@@ -751,6 +752,10 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
         end if
         sbe%eph_eps0_au = sbe_eph_eps0_ev / au_ev
         sbe%eph_n       = sbe_eph_n
+        sbe%eph_ib_scale = sbe_eph_interband_scale
+        if (abs(sbe%eph_ib_scale - 1d0) > 1d-12 .and. lprint) &
+            write(*, '(a,es10.3,a)') '#   interband (BTBT) rate scale = ', &
+                sbe%eph_ib_scale, ' (calibration, sbe_eph_interband_scale)'
         if (sbe_search_sigma_e_ev > 0d0) then
             sbe%eph_sigma_au = sbe_search_sigma_e_ev / au_ev
         else
@@ -2487,7 +2492,8 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
                          sbe%eph_nb(1:sbe%eph_nph), sbe%eph_nusat_au, sbe%eph_eps0_au, &
                          sbe%eph_n, sbe%eph_sigma_au, tau, dpop, gout, &
                          kidx=sbe%kmap_idx, kn=sbe%kmap_n, pol_tab=opts%vq_tab, &
-                         pol_norm=pnorm, ip_polar=1, ac_tab=actab, ip_ac=ipac_use)
+                         pol_norm=pnorm, ip_polar=1, ac_tab=actab, ip_ac=ipac_use, &
+                         ib_scale=sbe%eph_ib_scale)
             else
                 call eph_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
                          sbe%eph_ecbm_au, sbe%eph_evbm_au, sbe%eph_nph, &
@@ -2495,14 +2501,15 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
                          sbe%eph_nb(1:sbe%eph_nph), sbe%eph_nusat_au, sbe%eph_eps0_au, &
                          sbe%eph_n, sbe%eph_sigma_au, tau, dpop, gout, &
                          kidx=sbe%kmap_idx, kn=sbe%kmap_n, &
-                         ac_tab=actab, ip_ac=ipac_use)
+                         ac_tab=actab, ip_ac=ipac_use, ib_scale=sbe%eph_ib_scale)
             end if
         else
             call eph_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
                      sbe%eph_ecbm_au, sbe%eph_evbm_au, sbe%eph_nph, &
                      sbe%eph_hw(1:sbe%eph_nph), sbe%eph_wrel(1:sbe%eph_nph), &
                      sbe%eph_nb(1:sbe%eph_nph), sbe%eph_nusat_au, sbe%eph_eps0_au, &
-                     sbe%eph_n, sbe%eph_sigma_au, tau, dpop, gout)
+                     sbe%eph_n, sbe%eph_sigma_au, tau, dpop, gout, &
+                     ib_scale=sbe%eph_ib_scale)
         end if
         deallocate(actab)
         call ring_ledger(sbe, 1, nba, nk, ic, eval_all, dpop)

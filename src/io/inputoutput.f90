@@ -620,6 +620,7 @@ contains
       & sbe_bgr_coeff, &
       & sbe_search_sigma_e_ev, &
       & sbe_ring_gate_fs, &
+      & sbe_eph_interband_scale, &
       & yn_sbe_eeh, &
       & sbe_eeh_nu_sat, &
       & yn_sbe_auger, &
@@ -1097,6 +1098,7 @@ contains
     sbe_ring_gate_fs        = 0.0d0      ! ring virtual gate [fs]; 0: OFF (default -- a lifetime
                                          ! gate cannot separate envelope-following dressing in
                                          ! sub-cycle fields); <0: auto 2*pi/Egap; >0: manual
+    sbe_eph_interband_scale = 1.0d0      ! eph ring gap-straddling (BTBT) rate factor; 1 = upper estimate
     yn_sbe_eeh              = 'n'        ! 'y': carrier-carrier (e-e/e-h) thermalization channel
     sbe_eeh_nu_sat          = -1.0d0     ! carrier-carrier rate scale [s^-1]; <=0: 1e14 default
     yn_sbe_auger            = 'n'        ! 'y': Auger recombination (density-gated CPTP, Sec 13)
@@ -1775,6 +1777,7 @@ contains
     call comm_bcast(sbe_bgr_coeff,           nproc_group_global)
     call comm_bcast(sbe_search_sigma_e_ev,   nproc_group_global)
     call comm_bcast(sbe_ring_gate_fs,        nproc_group_global)
+    call comm_bcast(sbe_eph_interband_scale, nproc_group_global)
     call comm_bcast(yn_sbe_eeh,              nproc_group_global)
     call comm_bcast(sbe_eeh_nu_sat,          nproc_group_global)
     call comm_bcast(yn_sbe_auger,            nproc_group_global)
@@ -2813,6 +2816,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_bgr_coeff', sbe_bgr_coeff
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_search_sigma_e_ev', sbe_search_sigma_e_ev
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_ring_gate_fs', sbe_ring_gate_fs
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_eph_interband_scale', sbe_eph_interband_scale
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_eeh', yn_sbe_eeh
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_eeh_nu_sat', sbe_eeh_nu_sat
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_auger', yn_sbe_auger
