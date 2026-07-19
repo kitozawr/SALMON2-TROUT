@@ -1157,7 +1157,7 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     real(8) :: t_node(2, 3), s_node
     real(8) :: Ac_node(1:3, 2, 3)
     integer :: isub
-    real(8) :: pcoset
+    real(8) :: pcoset, cross_damp
 
     integer :: ik, nb, nba, i, j, idir, in, im
 
@@ -1228,7 +1228,7 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
     if (sbe%flag_nl_ii .and. nba > 0) call gather_global_occupation(sbe, gs)
 
     !$omp parallel default(shared) &
-    !$omp    private(ik, i, j, idir, in, im, isub, s, pcoset) &
+    !$omp    private(ik, i, j, idir, in, im, isub, s, pcoset, cross_damp) &
     !$omp    private(p_active, rho_a, H1f, H2f, HVG, eigen_active, V_begin, V_end, X_a, w_act_sub) &
     !$omp    private(p_k_full, rho_n_full)
 
@@ -1313,11 +1313,24 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
             call build_HVG(nba, eigen_active, p_active, Ac_begin, HVG)
             if (sbe%flag_coulomb) HVG = HVG + sbe%sigma_hf(:, :, ik)
             call houston_dissipate(sbe, nba, rho_a, HVG, p_active, Ac_begin, X_a, &
-                                   0.5d0 * dt, V_begin, w_act_sub)
+                                   0.5d0 * dt, V_begin, w_act_sub, cross_damp)
             do j = 1, nba; im = sbe%active_idx(j)
                 do i = 1, nba; in = sbe%active_idx(i)
                     rho_n_full(in, im) = rho_a(i, j)
                 end do; end do
+            ! CP extension of the block dissipators to the frozen sector: the
+            ! active<->frozen coherences must carry the same loss-Kraus factor
+            ! as the block coherences, or rho loses PSD (|rho_af|^2 > f_a f_f)
+            ! and the Houston diagonal goes negative on later steps.
+            if (cross_damp < 1d0 .and. nba < nb) then
+                do im = 1, nb
+                    if (sbe%is_active(im)) cycle
+                    do i = 1, nba; in = sbe%active_idx(i)
+                        rho_n_full(in, im) = rho_n_full(in, im) * cross_damp
+                        rho_n_full(im, in) = rho_n_full(im, in) * cross_damp
+                    end do
+                end do
+            end if
         end if
 
         ! Step 2: S4 unitary = S2(p1 h) o S2(p2 h) o S2(p1 h) on the FULL basis.
@@ -1348,11 +1361,21 @@ subroutine dt_evolve_bloch_cf4(sbe, gs, t_start, dt, Ac_begin, Ac_end)
             call build_HVG(nba, eigen_active, p_active, Ac_end, HVG)
             if (sbe%flag_coulomb) HVG = HVG + sbe%sigma_hf(:, :, ik)
             call houston_dissipate(sbe, nba, rho_a, HVG, p_active, Ac_end, X_a, &
-                                   0.5d0 * dt, V_end, w_act_sub)
+                                   0.5d0 * dt, V_end, w_act_sub, cross_damp)
             do j = 1, nba; im = sbe%active_idx(j)
                 do i = 1, nba; in = sbe%active_idx(i)
                     rho_n_full(in, im) = rho_a(i, j)
                 end do; end do
+            ! CP extension to the frozen sector (see the first D(h/2) above).
+            if (cross_damp < 1d0 .and. nba < nb) then
+                do im = 1, nb
+                    if (sbe%is_active(im)) cycle
+                    do i = 1, nba; in = sbe%active_idx(i)
+                        rho_n_full(in, im) = rho_n_full(in, im) * cross_damp
+                        rho_n_full(im, in) = rho_n_full(im, in) * cross_damp
+                    end do
+                end do
+            end if
         end if
 
         ! Branch-position update via the midpoint (average endpoint) velocity --
@@ -1792,7 +1815,8 @@ end subroutine apply_unitary_rotation
 ! Also returns the instantaneous branch (group) velocities in the field
 ! polarization direction, V_a = [(U^dagger pi U)_aa . e_hat] + (A . e_hat)
 ! (computed only when the Kuhn-Zurek dephasing needs the branch positions).
-subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_sub)
+subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_sub, &
+                             cross_damp)
     use eigen_lapack, only: eigen_zheev
     implicit none
     type(s_sbe_bloch_solver), intent(in) :: sbe
@@ -1805,12 +1829,22 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
     real(8),    intent(in)    :: tau
     real(8),    intent(out)   :: V(nba)
     real(8),    intent(in)    :: w_act_sub(4, nba)  ! field-free sublattice weights of the active bands
+    ! Kraus factor the CALLER must apply to the active<->frozen coherence
+    ! blocks (which this block routine cannot see). For the carrier-carrier
+    ! convex-mix channel rho -> (1-a) rho + a diag(...) the CP extension to
+    ! the frozen sector damps every active<->frozen coherence by the SAME
+    ! (1-a) the within-block coherences get -- accumulated over sub-steps.
+    ! Without it the frozen coherences outlive the block population they
+    ! belong to, |rho_af|^2 > f_a*f_f, rho loses PSD and the Houston diagonal
+    ! goes negative on later steps (the nelec/nhole < 0 pathology).
+    real(8),    intent(out)   :: cross_damp
 
     real(8)    :: evals(nba), ehat(3), Ac_norm
     complex(8) :: W(nba, nba), t1(nba, nba), t2(nba, nba)
-    real(8)    :: wsub_branch(4, nba), wcoef, tau_sub_d
+    real(8)    :: wsub_branch(4, nba), wcoef, tau_sub_d, alpha_cc
     integer :: i, j, idir, a, s, m_sub, isub_d
 
+    cross_damp = 1d0
     call eigen_zheev(H, evals, W)
 
     ! rho~ = U^dagger rho U
@@ -1870,8 +1904,13 @@ subroutine houston_dissipate(sbe, nba, rho, H, p_active, Ac, X, tau, V, w_act_su
                                              wsub_branch, sbe%flag_unfold_ii)
             if (sbe%flag_eph .and. .not. sbe%flag_ring) &
                 call apply_eph_relaxation(sbe, nba, t2, evals, Ac, tau_sub_d)
-            if (sbe%flag_eeh) &
-                call apply_carrier_carrier(sbe, nba, t2, evals, tau_sub_d)
+            if (sbe%flag_eeh) then
+                call apply_carrier_carrier(sbe, nba, t2, evals, tau_sub_d, alpha_cc)
+                ! (1-a): the same EID factor the within-block coherences get --
+                ! the convex mix of identity and the (replace-block, keep-frozen)
+                ! channel, both CPTP, so the composite is CPTP by construction.
+                cross_damp = cross_damp * max(1d0 - alpha_cc, 0d0)
+            end if
             ! k-LOCAL (C n^3) Auger only when the ring is OFF; with the ring the
             ! momentum-conserving inter-k Auger (the II time-reverse) runs once
             ! per step in apply_ii_interk_ring (outside).
@@ -2514,9 +2553,19 @@ subroutine ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
     complex(8) :: W(sbe%n_active_bands, sbe%n_active_bands)
     complex(8) :: t1(sbe%n_active_bands, sbe%n_active_bands)
     complex(8) :: rad(sbe%n_active_bands, sbe%n_active_bands)
+    complex(8) :: Dk(sbe%n_active_bands, sbe%n_active_bands)
+    complex(8) :: cvec(sbe%n_active_bands), ctmp
     real(8), allocatable :: fold_loc(:,:)
     logical, save :: limiter_printed = .false.
     real(8), parameter :: dtol = 1d-14
+    ! Absolute one-step occupancy slack for the limiter ratios: a state whose
+    ! REMAINING capacity is pure roundoff (a full valence band at t~0, or a
+    ! frozen-window diagonal a hair outside [0,occ]) must not stall the WHOLE
+    ! BZ's dissipation through the global min over capacity/flux -- with the
+    ! slack the per-state overdraw is bounded by captol (trace stays exact,
+    ! positivity is violated by at most captol) while any MATERIAL overdraw is
+    ! still scaled away.
+    real(8), parameter :: captol = 1d-12
 
     nba = sbe%n_active_bands
 
@@ -2546,8 +2595,8 @@ subroutine ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
         do a = 1, nba
             fold = min(max(real(rad(a,a)), 0d0), sbe%occ_max)
             fold_loc(a, ik) = real(rad(a,a))
-            if (dpop(a,ik) < -dtol) scal = min(scal, fold / (-dpop(a,ik)))
-            if (dpop(a,ik) >  dtol) scal = min(scal, (sbe%occ_max - fold) / dpop(a,ik))
+            if (dpop(a,ik) < -dtol) scal = min(scal, (fold + captol) / (-dpop(a,ik)))
+            if (dpop(a,ik) >  dtol) scal = min(scal, (sbe%occ_max - fold + captol) / dpop(a,ik))
         end do
     end do
     scal = max(scal, 0d0)
@@ -2606,6 +2655,36 @@ subroutine ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
                 sbe%rho(in, im, ik) = rad(i, j)
             end do
         end do
+        ! ---- CP extension to the FROZEN sector -------------------------------
+        ! The loss-Kraus K0 = W diag(damp) W^dagger that damped the WITHIN-block
+        ! coherences must also damp the active<->frozen coherence blocks (the
+        ! full-space Kraus is K0 (+) 1_frozen; the gain operators have no frozen
+        ! part). Skipping it leaves |rho_af|^2 > f_a f_f after a population
+        ! loss, the full rho stops being PSD, and the next step's Houston
+        ! diagonal dips below 0 -- the accumulating negative-population
+        ! pathology (nelec/nhole < 0) seen on frozen windows at large dt, which
+        ! the eeh channel then converted into a trace leak.
+        if (nba < sbe%nb .and. any(damp < 1d0)) then
+            do j = 1, nba
+                t1(:, j) = W(:, j) * damp(j)
+            end do
+            call ZGEMM('N','C', nba,nba,nba, cmplx(1d0,0d0, 8), t1,nba, W,nba, &
+                       cmplx(0d0,0d0, 8), Dk,nba)
+            do im = 1, sbe%nb
+                if (sbe%is_active(im)) cycle
+                do i = 1, nba
+                    cvec(i) = sbe%rho(sbe%active_idx(i), im, ik)
+                end do
+                do i = 1, nba
+                    ctmp = cmplx(0d0, 0d0, 8)
+                    do j = 1, nba
+                        ctmp = ctmp + Dk(i, j) * cvec(j)
+                    end do
+                    sbe%rho(sbe%active_idx(i), im, ik) = ctmp
+                    sbe%rho(im, sbe%active_idx(i), ik) = conjg(ctmp)
+                end do
+            end do
+        end if
     end do
     deallocate(fold_loc)
 end subroutine ring_apply_dpop
@@ -2661,14 +2740,16 @@ end subroutine build_kmap
 ! [Taj-Rossi PRA 78, 052113; Rosati et al. PRB 90, 125140; Goodnick-Lugli
 !  PRB 37, 2578; conserves N and E -- validation invariants]
 !=============================================================================
-subroutine apply_carrier_carrier(sbe, nba, rho_ad, evals, tau)
+subroutine apply_carrier_carrier(sbe, nba, rho_ad, evals, tau, alpha_out)
     use sbe_superres_ssbe, only: carrier_carrier_relax
     implicit none
     type(s_sbe_bloch_solver), intent(in)    :: sbe
     integer,                  intent(in)    :: nba
     complex(8),               intent(inout) :: rho_ad(nba, nba)
     real(8),                  intent(in)    :: evals(nba), tau
-    call carrier_carrier_relax(nba, rho_ad, evals, sbe%occ_max, sbe%eeh_nu_au, tau)
+    real(8),                  intent(out)   :: alpha_out
+    call carrier_carrier_relax(nba, rho_ad, evals, sbe%occ_max, sbe%eeh_nu_au, tau, &
+                               alpha_out)
 end subroutine apply_carrier_carrier
 
 

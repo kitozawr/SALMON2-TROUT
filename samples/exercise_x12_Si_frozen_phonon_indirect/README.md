@@ -58,15 +58,22 @@ python3 phonon_analysis.py         # -> phonon_assisted_demo.png
 
 | | eph OFF (field only) | eph ON (phonon) |
 |---|---|---|
-| final `nex` (lowest CB) | 5.9×10¹⁸ cm⁻³ | 1.5×10²⁰ cm⁻³ (**≈26×**) |
-| ⟨E−E_CBM⟩ | 1.0 eV (hot) | 0.33 eV (cooled to the valley) |
+| final `nex` | 5.9×10¹⁸ cm⁻³ | 1.1×10²¹ cm⁻³ (**≈180×**) |
+| ⟨E−E_CBM⟩ (lowest CB) | 1.0 eV (hot) | 0.42 eV (cooled to the valley) |
 | electrons (every step) | **8.000** | **8.000** |
 
-The phonon opens the indirect Γ→X channel (≈26× more real carriers — most of
+The phonon opens the indirect Γ→X channel (≈180× more real carriers — most of
 Si's band-edge absorption is phonon-assisted), lands them in the **lowest**
-conduction band (band-5 / band-6 population ratio ≈ 124×, i.e. **not** thrown to
-the top band), and cools them from 1.0 → 0.33 eV above the CBM by phonon
+conduction band (band-5 / band-6 population ratio ≈ 33×, i.e. **not** thrown to
+the top band), and cools them from 1.23 → 0.42 eV above the CBM by phonon
 emission.
+
+> Reference numbers regenerated **2026-07-19** after the CP extension of the
+> frozen-window dissipators (`wiki/00`): the active↔frozen coherences now carry
+> the same loss-Kraus factors as the active block, so a real scattering event
+> decoheres the reversible frozen-band dressing (collision-assisted generation)
+> instead of leaving ρ non-positive. The eph-OFF column is bit-identical to the
+> pre-fix build; the eph-ON carrier yield is larger.
 
 ## Adding impact ionization (+ phonon-assisted II)
 
@@ -80,7 +87,9 @@ phonon-assisted branch). In `Si_frozen_phonon_rt.inp` set both:
   sbe_ii_phassist          = 1.0d0
 ```
 
-Electrons stay **8.000** (checked at I=10¹¹ and 10¹² W/cm², and with Auger on).
+Electrons stay **8.000** (checked at I=10¹¹ and 10¹² W/cm², with Auger on, and
+with the FULL channel set eph+ac+II+holes+phassist+Auger+eeh+Coulomb at
+dt=10 a.u. — 8.000 at every step, no negative nelec/nhole).
 
 ## Notes / caveats
 

@@ -1385,13 +1385,29 @@ contains
     ! a convex combination of identity and a constant-state channel -> CPTP.
     ! Conserves Tr rho (number) and sum_a eps_a rho_aa (energy) exactly. A no-op
     ! when the population set is empty/full or not Fermi-Dirac representable.
-    subroutine carrier_carrier_relax(nlev, rho, eps, occ, nu, tau)
+    !
+    ! TRACE-EXACT FORM: the FD target is fitted to the [0,1]-CLAMPED populations
+    ! (the fit needs a representable set), so the update is written as a pure
+    ! TRANSFER against that same clamped set,
+    !     rho_aa += alpha * occ * (ftgt(a) - f_clamped(a)),   sum_a(...) = 0,
+    ! which equals the convex mix above whenever the raw diagonal is in [0,occ].
+    ! The old form mixed the RAW diagonal with the clamped-fit target; on a
+    ! frozen active window whose Houston diagonal dips below 0 (PSD loss at the
+    ! active<->frozen boundary) that mismatch CREATED trace at rate
+    ! alpha*(occ*ntot_clamped - Tr rho) EVERY sub-step -- the monotone
+    ! electrons 8.000 -> 8.012 drift seen with yn_sbe_eeh + frozen core.
+    ! alpha_out reports the applied mixing weight (0 when the map was a no-op)
+    ! so the caller can Kraus-extend the EID coherence damping, sqrt(1-alpha),
+    ! to the active<->frozen coherence blocks it owns.
+    subroutine carrier_carrier_relax(nlev, rho, eps, occ, nu, tau, alpha_out)
         integer,    intent(in)    :: nlev
         complex(8), intent(inout) :: rho(nlev, nlev)
         real(8),    intent(in)    :: eps(nlev), occ, nu, tau
+        real(8),    intent(out)   :: alpha_out
         real(8) :: f(nlev), ftgt(nlev), ntot, etot, alpha, beta, mu
         integer :: a, b
         logical :: ok
+        alpha_out = 0d0
         ntot = 0d0; etot = 0d0
         do a = 1, nlev
             f(a) = min(max(real(rho(a, a)) / occ, 0d0), 1d0)
@@ -1402,10 +1418,11 @@ contains
         call fit_fermi_dirac(nlev, eps, ntot, etot, beta, mu, ftgt, ok)
         if (.not. ok) return
         alpha = 1d0 - exp(-nu * tau)
+        alpha_out = alpha
         do b = 1, nlev
             do a = 1, nlev
                 if (a == b) then
-                    rho(a, a) = (1d0 - alpha) * rho(a, a) + cmplx(alpha * occ * ftgt(a), 0d0, 8)
+                    rho(a, a) = rho(a, a) + cmplx(alpha * occ * (ftgt(a) - f(a)), 0d0, 8)
                 else
                     rho(a, b) = (1d0 - alpha) * rho(a, b)
                 end if

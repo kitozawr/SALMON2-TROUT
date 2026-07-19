@@ -6,7 +6,7 @@
 ! PHONON-ASSISTED -- the field supplies the energy (near-tunneling, Keldysh gamma ~ 1) and  !
 ! a phonon supplies the crystal momentum for the Gamma(VBM) -> X(CBM) transition. Turn the  !
 ! e-ph ring OFF (yn_sbe_eph='n') and the indirect channel closes: the residual real-carrier !
-! density drops ~25x. Turn it ON and carriers are generated in the LOWEST conduction band   !
+! density drops ~180x. Turn it ON and carriers are generated in the LOWEST conduction band  !
 ! at the indirect X-valley and cooled toward the band minimum by phonon emission.           !
 !                                                                                          !
 ! FROZEN CORE: the dissipators (e-ph, II, Auger) act only on the active Houston window --   !

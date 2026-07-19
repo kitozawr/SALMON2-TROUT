@@ -119,6 +119,20 @@ in `H_VG`). So a nonzero deviation of a frozen band from its ground occupation i
 (Freezing pays off for large `nstate` with genuine spectator bands; on the
 8-band Si gap-edge quartet there is *no* inert band, so freeze nothing there.)
 
+**Active↔frozen coherences carry the dissipators' Kraus factors.** A dissipator
+that removes population from an active level must damp that level's coherences
+to the **frozen** bands by the same loss-Kraus factor it applies inside the
+active block (the exact lift `K₀ ⊕ 1_frozen`); the eeh convex-mix channel damps
+them by its `(1−α)` EID factor. Leaving them untouched violates
+`|ρ_af|² ≤ f_a f_f`, ρ stops being positive-semidefinite, and the Houston
+diagonal of the active block goes negative on later steps (negative
+nelec/nhole), which the eeh clamped-fit then converted into a trace drift —
+both observed at 9³/nstate=24/dt=0.25 fs and fixed 2026-07-19 (see `wiki/00`).
+Physical consequence: a genuine scattering event now decoheres the reversible
+frozen-band dressing at the CP-minimal rate — collision-assisted generation —
+so frozen-window runs generate somewhat *more* real carriers than the pre-fix
+build (which was silently non-positive).
+
 **Threshold energies drop the A²/2 too.** The band-uniform ponderomotive scalar
 `A²/2` is dropped from `H_VG` as a global phase, so the Houston eigenvalues
 `ε_n(k,t)` exclude it. Every scattering **kinetic-energy threshold** (impact
