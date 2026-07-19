@@ -58,22 +58,37 @@ python3 phonon_analysis.py         # -> phonon_assisted_demo.png
 
 | | eph OFF (field only) | eph ON (phonon) |
 |---|---|---|
-| final `nex` | 5.9×10¹⁸ cm⁻³ | 1.1×10²¹ cm⁻³ (**≈180×**) |
-| ⟨E−E_CBM⟩ (lowest CB) | 1.0 eV (hot) | 0.42 eV (cooled to the valley) |
+| final `nex` | 5.9×10¹⁸ cm⁻³ | 6.3×10²⁰ cm⁻³ (**≈106×**) |
+| ⟨E−E_CBM⟩ (lowest CB) | 1.0 eV (hot) | 0.56 eV (cooled toward the valley) |
 | electrons (every step) | **8.000** | **8.000** |
 
-The phonon opens the indirect Γ→X channel (≈180× more real carriers — most of
+The phonon opens the indirect Γ→X channel (≈106× more real carriers — most of
 Si's band-edge absorption is phonon-assisted), lands them in the **lowest**
-conduction band (band-5 / band-6 population ratio ≈ 33×, i.e. **not** thrown to
-the top band), and cools them from 1.23 → 0.42 eV above the CBM by phonon
-emission.
+conduction band (band-5 / band-6 population ratio ≈ 14×), and cools them from
+~1.2 → 0.56 eV above the CBM by phonon emission.
 
-> Reference numbers regenerated **2026-07-19** after the CP extension of the
-> frozen-window dissipators (`wiki/00`): the active↔frozen coherences now carry
-> the same loss-Kraus factors as the active block, so a real scattering event
-> decoheres the reversible frozen-band dressing (collision-assisted generation)
-> instead of leaving ρ non-positive. The eph-OFF column is bit-identical to the
-> pre-fix build; the eph-ON carrier yield is larger.
+> Reference numbers regenerated **2026-07-19** after two model corrections
+> (`wiki/00`): (1) the **CP extension** — active↔frozen coherences now carry
+> the same loss-Kraus factors as the active block (a real scattering event
+> decoheres the reversible frozen-band dressing instead of leaving ρ
+> non-positive); (2) the **virtual-transient gate** — the ring population
+> kernels read the *persistent* Houston floor (rise time 2π/E_gap ≈ 2.5 fs),
+> so sub-lifetime virtual transients only dephase (the e-ph T2 role) and are
+> never population-scattered as if they were real carriers
+> (`sbe_ring_gate_fs`: −1 auto, 0 off). The eph-OFF column is bit-identical
+> to the pre-fix build.
+
+## Absolute-rate benchmark (`rate_benchmark.py`)
+
+`python3 rate_benchmark.py` (after the on/off workflow) integrates the
+Chefonov-style rate equation dn/dt = W_Keldysh(E(t)) on the same pulse and
+overlays the SBE curves (→ `rate_benchmark.png`). At this field the two
+Keldysh curves only *bracket* the physics (A₀ = 0.37 a.u. sweeps ~60 % of the
+half-BZ — far outside the parabolic two-band regime), but the comparison makes
+the absolute scale visible: treat SBE `nex` magnitudes at γ ≲ 1 as **upper
+estimates** until benchmarked on your grid (`nk` convergence, σ_E, ν_sat).
+The distributions (which k, which band, cooling) are robust; the absolute
+yield is the calibration-sensitive part.
 
 ## Adding impact ionization (+ phonon-assisted II)
 

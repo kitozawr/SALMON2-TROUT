@@ -150,6 +150,14 @@ module bloch_solver_ssbe
         real(8) :: eph_sigma_au = 0d0   ! energy-bin width sigma_E [Ha]
         real(8) :: eph_ecbm_au  = 0d0   ! field-free CBM [Ha]
         real(8) :: eph_evbm_au  = 0d0   ! field-free VBM [Ha]
+        ! Ring virtual-transient gate (real-vs-virtual separation): the ring
+        ! POPULATION kernels see the persistent Houston floor f_gate -- drops
+        ! instantly with f, rises toward f with time constant ring_gate_tau_au
+        ! ~ 2*pi/Egap (the energy-time virtuality scale). Sub-lifetime LZ /
+        ! dressing transients never enter the transfer rates; they still lose
+        ! coherence at the full nu (the gout/T2 role is untouched).
+        real(8) :: ring_gate_tau_au = 0d0            ! 0 = gate off
+        real(8), allocatable :: f_ring_gate(:, :)    ! (nba, nk) persistent floor
         integer :: eph_nph      = 0     ! number of phonon modes in the table
         real(8), allocatable :: eph_hw(:)   ! phonon energies hw_p [Ha]
         real(8), allocatable :: eph_nb(:)   ! Bose factors N_B(hw_p, T_ph)
@@ -302,6 +310,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
                              yn_sbe_hf_sublattice_proj, yn_sbe_coset_proj, &
                              yn_sbe_eph, sbe_eph_temperature_k, sbe_eph_nu_sat, &
                              sbe_eph_eps0_ev, sbe_eph_n, sbe_search_sigma_e_ev, &
+                             sbe_ring_gate_fs, &
                              yn_sbe_bgr_threshold, sbe_bgr_n_gate, sbe_bgr_coeff, &
                              yn_sbe_superres, yn_sbe_eeh, sbe_eeh_nu_sat, epm_material, &
                              yn_sbe_auger, sbe_auger_c_cm6s, sbe_auger_n_gate_cm3, &
@@ -785,6 +794,26 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
                 ' 1/a.u.t; CPTP relax to Fermi-Dirac (conserves number+energy)'
         end if
     end if
+
+    ! Ring virtual-transient gate (real-vs-virtual separation, see the struct
+    ! comment). Auto time constant = 2*pi/Egap -- a Houston population must
+    ! outlive the interband virtuality time before the population kernels may
+    ! scatter it; sub-cycle LZ/dressing transients only dephase (gout/T2).
+    sbe%ring_gate_tau_au = 0d0
+    if (sbe_ring_gate_fs > 0d0) then
+        sbe%ring_gate_tau_au = sbe_ring_gate_fs / au_fs
+    else if (sbe_ring_gate_fs < 0d0 .and. homo_idx + 1 <= gs%nb) then
+        block
+            real(8) :: egap_au
+            egap_au = minval(gs%eigen(homo_idx + 1, :)) - maxval(gs%eigen(homo_idx, :))
+            if (egap_au > 1d-6) sbe%ring_gate_tau_au = 2d0 * pi / egap_au
+        end block
+    end if
+    if (sbe%ring_gate_tau_au > 0d0 .and. lprint) &
+        write(*, '(a,f8.3,a)') '# ring virtual-transient gate: tau = ', &
+            sbe%ring_gate_tau_au * au_fs, ' fs (population kernels read the'// &
+            ' persistent Houston floor; coherence/T2 rates unchanged;'// &
+            ' sbe_ring_gate_fs=0 disables)'
 
     ! =========================================================================
     ! Auger recombination (Sec 13): density-gated, number-conserving CPTP
@@ -2325,6 +2354,31 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
     end do
     call comm_summation(eval_loc, eval_all, nba*nk, sbe%icomm)
     call comm_summation(f_loc,    f_all,    nba*nk, sbe%icomm)
+
+    ! ---- virtual-transient gate: population kernels see REAL carriers only --
+    ! f_gate is the persistent Houston floor: it drops with f instantly (what
+    ! left cannot be scattered) but rises toward f only with the virtuality
+    ! time constant 2*pi/Egap -- so sub-lifetime LZ / field-dressing transients
+    ! (which the reversible unitary takes back) never feed the population
+    ! transfer, the free-carrier screen, or the FD fit. They still LOSE
+    ! COHERENCE at the full nu through the gout/T2 exponential (whose rate is
+    ! per-carrier, not population-weighted) -- e-ph keeps its T2 role for the
+    ! virtual electrons; only the real ones are transported. Deterministic and
+    ! rank-identical (f_all is). Not checkpointed: after a restart the floor
+    ! re-seeds from the instantaneous f (one-gate-time transient).
+    if (sbe%ring_gate_tau_au > 0d0) then
+        if (.not. allocated(sbe%f_ring_gate)) then
+            allocate(sbe%f_ring_gate(nba, nk))
+            sbe%f_ring_gate = f_all
+        end if
+        block
+            real(8) :: gfac
+            gfac = 1d0 - exp(-tau / sbe%ring_gate_tau_au)
+            sbe%f_ring_gate = min(f_all, sbe%f_ring_gate + &
+                                  (f_all - sbe%f_ring_gate) * gfac)
+        end block
+        f_all = sbe%f_ring_gate
+    end if
 
     ! ---- II/Auger screening context + the B1 vq table (also reused by A3) ---
     mp = get_material_params(epm_material)
