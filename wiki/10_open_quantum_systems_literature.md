@@ -624,3 +624,44 @@ Shipped per §8.6 (one branch, as approved):
   linearly with I — the POPULATION-kernel conversion (the ICFE sector /
   option-A dressed-basis fix) is the open item for the scaling *shape*;
   this increment fixed the dephasing sector.
+
+### 8.8 Two-sector localization of the §1 disease (maintainer analysis, 2026-07-20) + the population-sector design
+
+Maintainer's reading of the §8.7 result (confirmed): colmem lowered the
+fabricated generation ~5× but did not change the intensity exponent because
+the §1 disease lives in TWO matrix sectors and colmem fixes one:
+
+1. **Coherence sector (off-diagonal, L⁻)** — the field-oscillating virtual
+   polarization ρ_cv; its Markovian dephasing was the fabrication channel at
+   weak field. **Closed by colmem.**
+2. **Population sector (diagonal)** — the Stark-dressed diagonal: the field
+   mixes bands and ρ_cc carries a virtual share ~|eE·d/E_g|² ∝ I, which the
+   collision POPULATION kernels convert at the Markovian golden-rule rate →
+   the surviving ∝ I tail.
+
+**One precision on the remedy** (recorded so the next increment starts
+right): within the pure-dephasing (σ_z, g-type) bath, [MT99 Eq. (22)]'s
+second (L⁺-sourced) auxiliary set still cannot move the diagonal — BOTH
+feedback terms in ρ̇_s enter through the commutator L⁻, whose diagonal
+vanishes for a diagonal f. (The L⁺/b(t) sector is the memory Lamb shift on
+coherences — partially present already through the complex line response;
+its full MT99 form is a small refinement.) The population-sector conversion
+is an **a-type (energy-exchange) process in [M13]'s language** — it lives in
+the COLLISION INTEGRAL (the ICFE sector, §3C), not in the dephasing bath.
+
+**Proposed bounded remedy — memory-filtered source populations (NOT yet
+authorized):** reuse the SAME line machinery to low-pass the Houston
+populations that FEED the ring golden-rule kernels: auxiliary fields
+z_j[f_a(k,t)] per active state, transferable population
+f̃_a = Re Σ_j c_j z_j (anchor: static populations pass unfiltered, R(0)=1);
+`eph_interk_dpop`/II/Auger read f̃ instead of the instantaneous f. The
+dressing's A²(t) breathing (frequency 2ω_laser ≫ phonon lines) filters out
+of the SOURCE of every collision — the time-domain realization of the ICFE
+statement that the bath cannot follow sub-cycle population modulation —
+while slow real carriers transfer at the calibrated rates. Trace exactness
+and the CPTP limiter are unchanged (dpop still sums to zero; the filter
+only reshapes the source weights). Expected effect: bends the G(I) shape
+toward the Keldysh bracket (the ∝ I virtual-diagonal share stops feeding
+the kernels). Complementary to — not a replacement for — the option-A
+dressed-basis fix (§3A), which removes the dressing from the populations
+themselves rather than filtering its time signature.
