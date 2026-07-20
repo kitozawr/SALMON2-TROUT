@@ -182,6 +182,11 @@ module bloch_solver_ssbe
         ! GATHERED f_all, like the ring gate).
         logical :: flag_colmem_pop = .false.
         complex(8), allocatable :: zpop(:, :, :)     ! (nba, nl, nk)
+        ! Option A (wiki/10 sec. 3A/8.10): the ring channels measure carriers
+        ! against the FIELD-ROTATED ground state (dressed reference) instead
+        ! of the static {occ,0} -- the rotation background delta0 is
+        ! subtracted from the Houston populations before the gather.
+        logical :: flag_dressed_ref = .false.
 
         real(8) :: coul_pref     = 0d0  ! strength * 4 pi / (eps * Omega_cell * Nk)
         real(8) :: coul_screen2  = 0d0  ! kappa^2 [1/Bohr^2] (Yukawa regulariser)
@@ -338,6 +343,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
                              sbe_ii_phassist, yn_sbe_ii_holes, yn_sbe_eph_acoustic, &
                              sbe_eph_ac_xi_ev, &
                              yn_sbe_colmem, sbe_colmem_tau_fs, yn_sbe_colmem_pop, &
+                             yn_sbe_dressed_ref, &
                              num_kgrid
     use sbe_superres_ssbe, only: bose_factor, s_material_params, colmem_lines, colmem_response, &
                                  get_material_params, MAT_SUPPORTED
@@ -807,6 +813,15 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     ! =========================================================================
     sbe%flag_colmem     = (yn_sbe_colmem == 'y')
     sbe%flag_colmem_pop = (yn_sbe_colmem_pop == 'y')
+    sbe%flag_dressed_ref = (yn_sbe_dressed_ref == 'y')
+    if (sbe%flag_dressed_ref .and. .not. sbe%flag_ring) then
+        if (lprint) write(*, '(a)') '# ERROR: yn_sbe_dressed_ref applies to the ring channels' // &
+            ' -- enable yn_sbe_superres.'
+        error stop 'dressed-reference carrier measure requires the ring'
+    end if
+    if (sbe%flag_dressed_ref .and. lprint) &
+        write(*, '(a)') '# Option A dressed-reference carrier measure enabled:' // &
+            ' ring channels read f - delta0[U(A)] (wiki/10 sec. 3A/8.10)'
     if (sbe%flag_colmem .or. sbe%flag_colmem_pop) then
         if (.not. (sbe%flag_eph .and. sbe%flag_ring)) then
             if (lprint) write(*, '(a)') '# ERROR: yn_sbe_colmem/_pop ride the e-ph ring' // &
@@ -2338,7 +2353,7 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
                                  rana_auger_dpop, mp_grid_triple, get_material_params, &
                                  s_material_params, build_vq_table, build_acscreen_table, &
                                  t_ring_opts, debye_kappa2, tf_kappa2_degenerate, fit_fermi_dirac, &
-                                 colmem_pop_filter, colmem_pop_init
+                                 colmem_pop_filter, colmem_pop_init, dressed_ref_delta
     use eigen_lapack, only: eigen_zheev
     use communication, only: comm_summation
     use salmon_global, only: num_kgrid, epm_material, sbe_eph_temperature_k
@@ -2426,9 +2441,25 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
             eval_loc(a,ik) = evals(a)
             f_loc(a,ik)    = real(rad(a,a))
         end do
+        ! ---- Option A: dressed-reference carrier measure (wiki/10 sec. 3A) --
+        ! Subtract the field-rotated-GS background delta0 (trace-neutral,
+        ! vanishes at A = 0) so the channels see only genuine excess; the
+        ! sub-cycle state tracks this rotation to corr 0.99 (wiki/00), so
+        ! the dominant fabrication seed is removed at the SOURCE. Composes
+        ! with the ring gate and the collisional-memory pop filter (both
+        ! act downstream on the gathered f). Clamped to [0, occ] after the
+        ! gather (an adiabatic state gives negative upper excess -> 0).
+        if (sbe%flag_dressed_ref) then
+            block
+                real(8) :: dref(nba)
+                call dressed_ref_delta(nba, sbe%nv_act, sbe%occ_max, U_loc(:,:,ik), dref)
+                f_loc(:, ik) = f_loc(:, ik) - dref(:)
+            end block
+        end if
     end do
     call comm_summation(eval_loc, eval_all, nba*nk, sbe%icomm)
     call comm_summation(f_loc,    f_all,    nba*nk, sbe%icomm)
+    if (sbe%flag_dressed_ref) f_all = min(max(f_all, 0d0), sbe%occ_max)
 
     ! ---- virtual-transient gate: population kernels see REAL carriers only --
     ! f_gate is the persistent Houston floor: it drops with f instantly (what

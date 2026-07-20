@@ -123,7 +123,7 @@ A prior AI-generated survey (Haiku) proposed four Floquet citations. Audit:
 
 ## 3. Candidate universal fixes, ranked
 
-### A. Dissipate in the instantaneous field-DRESSED (adiabatic) basis — RECOMMENDED
+### A. Dissipate in the instantaneous field-DRESSED (adiabatic) basis — ✅ IMPLEMENTED (2026-07-20, §8.10: the basis was already dressed; the missing piece was the dressed REFERENCE — `yn_sbe_dressed_ref`)
 Rediagonalize the full instantaneous light-matter Hamiltonian `H(k,t)` (band
 energies **plus** the interband `A·p`/dipole coupling) at each step and let the
 dissipator act on the **dressed** populations. A state that adiabatically follows
@@ -705,3 +705,48 @@ dressing passes R(0)=1 by construction — separating that share needs the
 basis-level fix (option A, §3A), which remains the recorded open item.
 The x12 Keldysh-bracket comparison at 9³ with the calibrated ν_sat is the
 maintainer's cluster run.
+
+### 8.10 IMPLEMENTED + VALIDATED (2026-07-20): Option A — `yn_sbe_dressed_ref`
+
+Maintainer "Go, option A". **Ring-basis audit closed** (the §3A blocking
+sub-task): `apply_ring_channels` and `houston_dissipate` already diagonalize
+the full instantaneous H_VG + A·p (+ Σ^HF) every step — the dissipators DO
+act in the instantaneous dressed basis. What was missing is the dressed
+REFERENCE: carriers were measured against the static {occ, 0}, so the
+field-ROTATED ground state (which the sub-cycle state tracks at corr 0.99,
+§1) looked like carriers. Implemented:
+
+- `dressed_ref_delta` (sbe_superres, pure): the rotation background
+  Δ₀_a = occ·Σ_{v≤nv}|W(v,a)|² − occ·[a≤nv]; **Σ_a Δ₀ = 0 exactly**
+  (unitarity), Δ₀ → 0 at A → 0. The ring's carrier measure becomes
+  f_eff = f − Δ₀ (subtracted per local k before the gather; clamped to
+  [0, occ] after; composes with the ring gate + both memory filters, which
+  act downstream on the gathered array). A FROZEN (non-reacting) state maps
+  to equilibrium exactly; an ADIABATIC state gives negative upper excess
+  (clamped) — both reversible limits are protected; only genuine
+  (collision-created or multiphoton) population survives. `test_dressed_ref`
+  (trace-neutrality, zero-field identity, frozen/adiabatic limits, real
+  carrier survival); suite 24/24. Input `yn_sbe_dressed_ref` (needs the
+  ring; independent of the colmem flags).
+
+**Validation (same Si 4³ I-scan; figure
+`samples/exercise_x10_Si_full_dissipation/optionA_validation.png`);
+electrons = 8.000 in ALL runs. G = nex(eph)−nex(coherent) [cm⁻³]:**
+
+| I [W/cm²] | G Markov | G mem(both) | G dressed-ref only | G mem+dressed | G_all/G_mar |
+|---|---|---|---|---|---|
+| 10¹¹ | 6.7e20 | 2.7e19 | 1.1e20 | 3.6e18 | **0.0053** |
+| 3.16×10¹¹ | 2.0e21 | 3.4e19 | 3.7e20 | 9.8e18 | **0.0048** |
+| 10¹² | 6.0e21 | 5.8e19 | 1.4e21 | 2.1e19 | **0.0035** |
+
+Reading: the dressed reference alone removes ~80 % (the same share the
+coherence memory removes — both target the fast rotation, one in the basis,
+one in time); the COMBINATION is multiplicative: **×190→×280 suppression,
+growing with I**, and nex(all) = nex(coherent) + 4 % at 10¹². The §1
+"universal virtual/real carrier separation" open task is now closed at the
+mechanism level: coherence sector (colmem), population fast sector (pop
+filter), rotation/DC sector (dressed reference). The residual G (~0.5 % of
+Markov) plausibly contains GENUINE phonon-assisted indirect generation —
+Si is an indirect semiconductor, a nonzero G is physical. The quantitative
+Keldysh-bracket verdict (x12 `rate_benchmark.py`, 9³, calibrated ν_sat) is
+the maintainer's cluster run.

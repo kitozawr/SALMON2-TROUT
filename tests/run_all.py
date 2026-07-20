@@ -38,6 +38,7 @@ FORTRAN_DEPS = {
     "test_bath_corr.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
     "test_sfsb_kernel.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
     "test_colmem_lines.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
+    "test_dressed_ref.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
 }
 
 

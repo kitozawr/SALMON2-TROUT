@@ -6,7 +6,20 @@ Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #
 
 ---
 
-## 🎯 OPEN TASK — universal virtual/real carrier separation (dressed-basis dissipation)
+## ✅ CLOSED (2026-07-20) — universal virtual/real carrier separation
+**All three sectors implemented + validated the same day (wiki/10 §8.6–8.10),
+each maintainer-approved:** coherence sector (`yn_sbe_colmem`), population
+fast sector (`yn_sbe_colmem_pop`), rotation/DC sector (**option A** —
+`yn_sbe_dressed_ref`: the ring-basis audit showed the dissipators already
+act in the dressed basis; the missing dressed REFERENCE Δ₀[U(A)] is now
+subtracted). Combined Si 4³ I-scan: the fabricated generation suppressed
+**×190→×280 (growing with I)**, nex(eph) → nex(coherent)+4 % at 10¹² W/cm²,
+electrons = 8.000 in every run, 24/24 tests. Remaining (quantitative, not
+mechanism): the 9³ Keldysh-bracket verdict with calibrated ν_sat =
+maintainer's cluster run (`rate_benchmark.py`); eeh EID memory (plasmon
+line) = optional follow-up. Historical problem statement below.
+
+## 🎯 (historical) OPEN TASK — universal virtual/real carrier separation (dressed-basis dissipation)
 **Priority open item (2026-07-19).** The Markovian ring dissipators scatter the
 field-induced **virtual polarization** (reversible "dressing") as if it were real
 population → unphysical near-linear generation `G ∝ I^0.94` instead of the

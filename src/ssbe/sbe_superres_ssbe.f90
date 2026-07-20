@@ -44,6 +44,7 @@ module sbe_superres_ssbe
               vg_eta_admixture, vg_trunc_shift2, vg_conv_error, vg_ptop_exceeds, &
               bath_t2_high_t, bath_corr_table, sfsb_nc_series, &
               colmem_lines, colmem_response, colmem_pop_filter, colmem_pop_init, &
+              dressed_ref_delta, &
               get_material_params
 
     ! =====================================================================
@@ -2154,6 +2155,47 @@ contains
             z(j) = f * tau / (1d0 - exp(-mul(j) * tau))
         end do
     end subroutine colmem_pop_init
+
+    ! =====================================================================
+    ! Option A (wiki/10 sec. 3A): DRESSED-REFERENCE carrier measure.
+    ! The ring dissipators already act in the instantaneous dressed basis
+    ! (H_VG + A.p (+ Sigma^HF) is diagonalized every step -- the ring-basis
+    ! audit, wiki/10 sec. 8.10), but they MEASURED carriers against the
+    ! static {occ, 0} reference. The field-rotated GROUND STATE then looks
+    ! like carriers: its Houston-frame populations f0_a = occ sum_{v<=nv}
+    ! |W(v,a)|^2 breathe with A^2 -- and the wiki/00 diagnostic shows the
+    ! actual sub-cycle state tracks exactly this rotation background
+    ! (corr 0.99, 99.9% return). The dressed reference subtracts it:
+    !
+    !   delta0_a = occ sum_{v<=nv} |W(v,a)|^2 - occ [a <= nv],
+    !   f_eff    = f - delta0
+    !
+    ! Properties (tested): sum_a delta0_a = 0 exactly (unitarity -> the
+    ! carrier measure is trace-neutral); A -> 0 => W -> 1 => delta0 = 0
+    ! (post-pulse carriers counted exactly); a FROZEN (non-reacting) state
+    ! f = f0 gives f_eff = {occ,0} -> the channels see equilibrium, zero
+    ! fabrication; an ADIABATIC state f = {occ,0} gives negative upper
+    ! excess -> clamped, also protected. Only genuine (non-adiabatic,
+    ! collision-created or multiphoton) population survives in f_eff.
+    ! Composes with the collisional-memory filters: subtract BEFORE the
+    ! gather/gate/filter, so the linear pop filter smooths f - delta0.
+    ! =====================================================================
+    pure subroutine dressed_ref_delta(nba, nv, occ, W, delta)
+        integer, intent(in) :: nba, nv
+        real(8), intent(in) :: occ
+        complex(8), intent(in) :: W(nba, nba)
+        real(8), intent(out) :: delta(nba)
+        integer :: a, v
+        real(8) :: f0
+        do a = 1, nba
+            f0 = 0d0
+            do v = 1, min(nv, nba)
+                f0 = f0 + abs(W(v, a))**2
+            end do
+            delta(a) = occ * f0
+            if (a <= nv) delta(a) = delta(a) - occ
+        end do
+    end subroutine dressed_ref_delta
 
     ! Steady-state damping response of the line set at coherence modulation
     ! frequency w (a.u.): R(0) = 1 (the Markov anchor) by construction.

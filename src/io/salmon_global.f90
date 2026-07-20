@@ -516,6 +516,7 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_sbe_colmem          ! 'y': non-Markovian (memory) collisional dephasing; needs yn_sbe_eph + yn_sbe_superres
   real(8)        :: sbe_colmem_tau_fs      ! kernel line width 1/tau_c; <=0: hbar/sigma_E (grid-matched default)
   character(1)   :: yn_sbe_colmem_pop      ! 'y': ring collision kernels read MEMORY-FILTERED populations (wiki/10 sec. 8.8, population sector)
+  character(1)   :: yn_sbe_dressed_ref     ! 'y': Option A -- ring channels measure carriers against the field-rotated ground state (wiki/10 sec. 3A)
   ! Carrier-carrier (e-e/e-h) scattering (Part F): CPTP relaxation of the
   ! adiabatic populations toward a Fermi-Dirac with the same number AND energy
   ! (intraband thermalization + EID), at a screened-Coulomb rate.
