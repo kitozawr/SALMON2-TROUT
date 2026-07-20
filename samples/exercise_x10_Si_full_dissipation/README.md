@@ -94,3 +94,8 @@ dressed diagonal's sub-cycle breathing stops feeding the golden-rule
 conversion. Validated I-scan (`colmem_pop_validation.png`): with both
 sectors on the fabricated generation drops 25×→100× (growing with I) and
 nex(eph) → nex(coherent) + a small correction.
+
+Add `yn_sbe_dressed_ref = 'y'` (Option A, wiki/10 §8.10) to measure carriers
+against the field-rotated ground state. Combined with both memory flags the
+fabricated below-gap generation drops ×190–280 (`optionA_validation.png`)
+and nex(eph) → nex(coherent) + 4 % at 10¹² W/cm².
