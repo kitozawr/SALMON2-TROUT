@@ -43,6 +43,7 @@ module sbe_superres_ssbe
               auger_interk_dpop, mp_grid_triple, mp_partner_triple, &
               vg_eta_admixture, vg_trunc_shift2, vg_conv_error, vg_ptop_exceeds, &
               bath_t2_high_t, bath_corr_table, sfsb_nc_series, &
+              colmem_lines, colmem_response, &
               get_material_params
 
     ! =====================================================================
@@ -2052,6 +2053,78 @@ contains
         logical :: over
         over = (ptop > thr)
     end function vg_ptop_exceeds
+
+    ! =====================================================================
+    ! Collisional-memory (non-Markovian) dephasing lines.
+    ! [MT99] Meier & Tannor, JCP 111, 3365 (1999); [B25] RPP 88, 070501
+    ! (2025); maintainer decision wiki/10 sec. 8.6: the production
+    ! decoherence is COLLISIONAL -- the Markovian exp(-gout*tau/2) factor
+    ! of the e-ph Lindblad is the zero-memory limit of the channel's own
+    ! bath correlation kernel. The kernel is built VERBATIM from the cited
+    ! phonon table (no new free parameters):
+    !
+    !   phi(tau) = (1/A) sum_p wrel_p [ (N_p+1) e^{-i w_p tau}
+    !                                 +  N_p    e^{+i w_p tau} ] e^{-tau/tau_c}
+    !
+    ! = Lorentzian lines [MT99 Eq. (15)] at the cited mode energies w_p,
+    ! emission/absorption weights (N_p+1)/N_p (detailed balance), common
+    ! width 1/tau_c (default sigma_E -- the time-domain completion of the
+    ! sigma_E-broadened golden rule already in use). The anchor
+    ! A = Re sum_j c_j/mu_j normalizes the zero-frequency response to 1:
+    ! a slow (adiabatically following) Houston coherence is damped at
+    ! EXACTLY the channel's Markovian rate; only the response to
+    ! sub-correlation-time modulation (the field-driven dressing) changes
+    ! -- the bath cannot follow it [B25 Fig 5(b)].
+    ! Lines: j=(p,+): c = wrel_p (N_p+1)/A, mu = 1/tau_c + i w_p
+    !        j=(p,-): c = wrel_p  N_p   /A, mu = 1/tau_c - i w_p
+    ! Frequency response (tested): R(w) = Re sum_j c_j/(mu_j + i w);
+    ! R(0) = 1 exactly, R -> 0 for |w| >> w_p + 1/tau_c.
+    ! =====================================================================
+
+    subroutine colmem_lines(nph, hw, wrel, nbose, tauc, nl, cl, mul)
+        integer, intent(in) :: nph
+        real(8), intent(in) :: hw(nph), wrel(nph), nbose(nph), tauc
+        integer, intent(out) :: nl
+        complex(8), intent(out) :: cl(2*nph), mul(2*nph)
+        real(8) :: anchor
+        integer :: p, j
+
+        nl = 0
+        do p = 1, nph
+            if (wrel(p) <= 0d0) cycle
+            nl = nl + 1
+            cl(nl)  = cmplx(wrel(p) * (nbose(p) + 1d0), 0d0, 8)
+            mul(nl) = cmplx(1d0 / tauc, hw(p), 8)
+            if (nbose(p) > 0d0) then
+                nl = nl + 1
+                cl(nl)  = cmplx(wrel(p) * nbose(p), 0d0, 8)
+                mul(nl) = cmplx(1d0 / tauc, -hw(p), 8)
+            end if
+        end do
+        if (nl == 0) return
+        anchor = 0d0
+        do j = 1, nl
+            anchor = anchor + real(cl(j) / mul(j))
+        end do
+        if (anchor <= 0d0) error stop 'colmem_lines: non-positive Markov anchor'
+        do j = 1, nl
+            cl(j) = cl(j) / anchor
+        end do
+    end subroutine colmem_lines
+
+    ! Steady-state damping response of the line set at coherence modulation
+    ! frequency w (a.u.): R(0) = 1 (the Markov anchor) by construction.
+    pure function colmem_response(nl, cl, mul, w) result(r)
+        integer, intent(in) :: nl
+        complex(8), intent(in) :: cl(nl), mul(nl)
+        real(8), intent(in) :: w
+        real(8) :: r
+        integer :: j
+        r = 0d0
+        do j = 1, nl
+            r = r + real(cl(j) / (mul(j) + cmplx(0d0, w, 8)))
+        end do
+    end function colmem_response
 
     ! =====================================================================
     ! SFSB non-Markovian heat bath (strong-field spin-boson model).

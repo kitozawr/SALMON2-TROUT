@@ -235,6 +235,6 @@ use the Airy JDOS lineshape per-k — it double-counts the explicit k-sum.
 > local EPM undershoots gaps (GaAs Γ: 1.27 vs 1.42/1.52 eV exp.), so quote
 > Γ-normalized probabilities / relative geometry unless you scissor-correct.
 
-### `hhg_spectrum.py` (in `samples/exercise_x8...`, `x10`, `x11`)
+### `hhg_spectrum.py` (in `samples/exercise_x08...`, `x10`, `x11`)
 HHG intensity $|\omega J(\omega)|^2$ vs harmonic order (log scale); only odd
 orders for centrosymmetric Si — the clean check against TDDFT harmonics.

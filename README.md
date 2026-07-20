@@ -55,14 +55,16 @@ of a textbook.
   cross-checks) — [`wiki/05`](wiki/05_folding_unfolding.md)
 - **Real DFT levels into the SBE** (`theory='dft'` + `yn_out_tm='y'` →
   `dft_band` → SBE with the frozen-core window) —
-  [`samples/exercise_x9_bulkSi_dft_sbe/`](samples/exercise_x9_bulkSi_dft_sbe/)
+  [`samples/exercise_x09_bulkSi_dft_sbe/`](samples/exercise_x09_bulkSi_dft_sbe/)
 - HHG with realistic scattering-limited coherence; gauge-invariant current,
   conductivity σ(ω) and STFT maps, 3D BZ population movies —
   [`wiki/09`](wiki/09_plotting_and_analysis.md)
-- **SFSB non-Markovian heat bath** (Boroumand 2025): the bath correlation
-  kernel C(t) replaces the relaxation-time T₂; memory-integral ionization mode
-  `yn_sbe_sfsb` reproducing dephasing ionization / suppression —
-  [`wiki/10`](wiki/10_open_quantum_systems_literature.md) §6–7
+- **Non-Markovian dissipation** (Boroumand 2025 / Meier–Tannor 1999):
+  the SFSB memory-integral ionization reference (`yn_sbe_sfsb`) and
+  **collisional-memory dephasing** of the e-ph Lindblad (`yn_sbe_colmem` —
+  kernel lines from the cited phonon table; adiabatic coherences damp at the
+  calibrated Markovian rate, sub-cycle field-driven dressing is protected) —
+  [`wiki/10`](wiki/10_open_quantum_systems_literature.md) §6–8
 
 ## Quick start
 
@@ -73,7 +75,7 @@ cmake -B build -S . -D CMAKE_BUILD_TYPE=Release -D USE_MPI=OFF \
 cmake --build build -j "$(nproc)"
 
 # smallest full pipeline: EPM ground state -> SBE dynamics -> pictures
-cd samples/exercise_x7_primitive_cell_epm
+cd samples/exercise_x07_primitive_cell_epm
 ../../build/salmon < Si_prim_epm_gs.inp   # writes Si_prim_k/_eigen/_tm.data
 ../../build/salmon < Si_prim_sbe_rt.inp   # clean velocity-gauge dynamics
 python3 ../../plot_sbe_results.py -i . -o plots --snapshots --valleys
@@ -90,9 +92,9 @@ once, watch the carriers roll into the valleys in 3D:
 
 | sample | what it teaches |
 |---|---|
-| [`exercise_x7_primitive_cell_epm/`](samples/exercise_x7_primitive_cell_epm/) | the EPM→SBE pipeline on the primitive cell, all 4 materials, clean dynamics + per-channel notes |
-| [`exercise_x8_Si_primitive_hhg_basis/`](samples/exercise_x8_Si_primitive_hhg_basis/) | velocity-gauge **basis sufficiency** + reading the output (band maps, BZ maps, HHG); br3d ↔ multiphoton-injection cross-ref |
-| [`exercise_x9_bulkSi_dft_sbe/`](samples/exercise_x9_bulkSi_dft_sbe/) | replacing the EPM with a **real DFT** ground state (rough LDA → SBE, frozen core) |
+| [`exercise_x07_primitive_cell_epm/`](samples/exercise_x07_primitive_cell_epm/) | the EPM→SBE pipeline on the primitive cell, all 4 materials, clean dynamics + per-channel notes |
+| [`exercise_x08_Si_primitive_hhg_basis/`](samples/exercise_x08_Si_primitive_hhg_basis/) | velocity-gauge **basis sufficiency** + reading the output (band maps, BZ maps, HHG); br3d ↔ multiphoton-injection cross-ref |
+| [`exercise_x09_bulkSi_dft_sbe/`](samples/exercise_x09_bulkSi_dft_sbe/) | replacing the EPM with a **real DFT** ground state (rough LDA → SBE, frozen core) |
 | [`exercise_x10_Si_full_dissipation/`](samples/exercise_x10_Si_full_dissipation/) | Si with all channels — the bleaching-ready copy of x8 (BGR+KZ variant) |
 | [`exercise_x11_full_dissipation_showcase/`](samples/exercise_x11_full_dissipation_showcase/) | **the flagship demo**: all 4 materials × every valid channel (Σ^HF instead of BGR, collisional decoherence instead of KZ, nonlocal ring II), valley-rolling 3D movies |
 | [`exercise_x13_GaAs_sfsb_nonmarkovian/`](samples/exercise_x13_GaAs_sfsb_nonmarkovian/) | **non-Markovian dissipation**: the SFSB memory kernel vs the relaxation-time approximation (dephasing ionization ×30, low-T suppression ×25, the Im C flip) |

@@ -65,3 +65,25 @@ Same amplitude ladder as x8 (A/eV/fs; col 1 = time [fs], never rescale it):
 0.028 / `0.1.txt` 0.0028. Basis-sufficiency methodology (P_top monitor,
 nex ∈ [0, nelec]) — see exercise_x8's README; with `nstate=20` the 10.txt
 drive is clean.
+
+## Non-Markovian collisional dephasing (`yn_sbe_colmem`, wiki/10 §8.6)
+
+Add to `&sbe` (needs `yn_sbe_eph='y'` + `yn_sbe_superres='y'`):
+
+```
+  yn_sbe_colmem     = 'y'      ! memory kernel for the e-ph gout dephasing
+  sbe_colmem_tau_fs = -1.0d0   ! <=0: tau_c = hbar/sigma_E (grid-matched)
+```
+
+The instantaneous `exp(-gout*tau/2)` coherence damping becomes a memory
+convolution whose kernel lines sit at the **cited Si phonon energies** with
+(N+1)/N thermal weights ([MT99] Lorentzian parametrization; no new physical
+constants). An adiabatically-following coherence is damped at exactly the
+Markovian rate (anchor R(0)=1); the sub-cycle field-driven dressing is
+protected — the phonon bath cannot follow it. Validated on this 4³ Si setup
+(below-gap 0.39 eV Acos2, 63 fs): electrons = 8.000 exact, and the
+phonon-assisted generation `nex(eph)-nex(coherent)` drops ~5× vs the
+Markovian gout at 10¹¹ W/cm² — the memory removes the dephasing-fabricated
+share of the virtual-carrier conversion (wiki/00 §1 disease, coherence
+sector). Forbidden for graphene (both dephasing channels off — maintainer
+decision).

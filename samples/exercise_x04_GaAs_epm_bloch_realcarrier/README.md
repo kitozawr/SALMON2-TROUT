@@ -58,7 +58,7 @@ they must match for step 2 to read step 1's output.
   drives multiphoton/tunnelling excitation spread over k; raise ω toward the
   2.5 eV gap for a more Γ-localised response.
 - **Dissipation:** every `yn_sbe_*` defaults OFF. Turn them on one at a time
-  (see `exercise_x3` and wiki/04) to add e-ph cooling, carrier-carrier
+  (see `exercise_x03` and wiki/04) to add e-ph cooling, carrier-carrier
   thermalization, impact ionization, etc. — the channels are CPTP, trace stays
   at 32.
 - **Spinor (spin-orbit) GaAs:** the Python reference `epm_gaas_reference.py`

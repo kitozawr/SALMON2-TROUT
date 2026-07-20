@@ -554,3 +554,114 @@ the constant-rate dephasing, [MT99] structure with [B25]'s bath:
 - graphene: allow the MT channel where KZ is forbidden, or keep both off?
 - bounded-increment split: (1) kernels c(τ) + Prony fit + tests; (2) solver
   wiring + CF4 refactor; (3) validation + docs — one PR each or one branch?
+
+### 8.6 MAINTAINER DECISIONS (2026-07-20) + corrected target
+
+1. ✅ Machinery approved; TC2 positivity-under-monitor accepted; ONE branch.
+2. **Graphene: BOTH dephasing channels stay OFF** (KZ forbidden as before;
+   the memory upgrade must not apply to graphene either — guard).
+3. **CORRECTED TARGET (maintainer): "ты чинишь не Kuhn–Zurek, а линдблад
+   (ii, eph, e-e, auger, etc.), где столкновения и создают дефазировку."**
+   The production decoherence is COLLISIONAL — the per-channel coherence
+   damping (gout / Kraus loss factors) that accompanies every Lindblad
+   collision channel; KZ is off in production (x11 philosophy: "collisional
+   decoherence instead of KZ"). So the non-Markovian upgrade goes into the
+   CHANNELS' dephasing kernels, not into a separate abstract σ_z bath:
+   - **kernel per channel from its own cited microphysics** — e-ph: the
+     cited phonon mode table (ω_m, weights, coth(βω_m/2) thermal factors);
+     Coulomb-mediated (e-e / II / Auger): the plasmon pole ω_pl(n(t)) from
+     the existing Part-G screening machinery. Line widths: the existing
+     σ_E energy-broadening scale (memory time τ_c = ħ/σ_E — the time-domain
+     completion of the σ_E-broadened golden rule the code already uses).
+     **No new free parameters**; [MT99 Eq. (15)] Lorentzian parametrization
+     with parameters read from the cited tables — the exponential
+     decomposition is EXACT, no Prony fit needed.
+   - **Markov anchor**: each kernel is normalized so its zero-frequency
+     limit reproduces the channel's current golden-rule damping rate
+     exactly — the upgrade changes the sub-correlation-time response
+     (the B25/ICFE physics), never the calibrated long-time rates.
+   - **Scope**: the ring path (`ring_apply_dpop` damp/gout — the single
+     point through which e-ph/II/Auger coherence damping flows in
+     production ring-on mode) + the eeh EID damping (`cross_damp`);
+     k-local legacy paths stay Markovian (documented). Population kernels
+     (the ICFE collision-integral sector) stay Markovian in this increment.
+   - The abstract σ_z/2-bath variant of §8.3 remains available as a
+     DIAGNOSTIC option (B25 A/B comparisons), not the production channel.
+
+### 8.7 IMPLEMENTED + VALIDATED (2026-07-20): `yn_sbe_colmem`
+
+Shipped per §8.6 (one branch, as approved):
+- `colmem_lines`/`colmem_response` (sbe_superres, pure): Lorentzian lines at
+  the cited phonon energies, (N+1)/N thermal weights, common width 1/τ_c
+  (default σ_E), anchor-normalized R(0) = 1 exactly. 12 lines for Si.
+- `ring_apply_dpop`: with `yn_sbe_colmem='y'` the within-block gout
+  exponential is replaced by the memory convolution (auxiliary fields
+  `zmem` per coherence element × line, decay e^{−μτ} + source, damping
+  −(g_a+g_b)/2·τ·Σc_j z_j); the population-paired √(f_new/f_old) Kraus
+  factors are untouched (they ARE the ii/auger dephasing — nothing to fix
+  there); the active↔frozen CP extension keeps the conservative Markovian
+  gout. Trace exactly conserved (diagonal untouched).
+- Guards: requires eph + ring; graphene error-stops (both dephasing
+  channels off — maintainer decision). Inputs: `yn_sbe_colmem`,
+  `sbe_colmem_tau_fs` (≤0 → ħ/σ_E). Tests: `test_colmem_lines`
+  (anchor/detailed balance/Markov limit/detuning suppression/toy
+  propagation rates) — 23/23 suite.
+- **Calc-validated** (Si 4³, below-gap 0.39 eV Acos2 63 fs, dt=2 a.u.;
+  figure `samples/exercise_x10_Si_full_dissipation/colmem_validation.png`):
+  electrons = 8.000 every step in all six runs; dt cross-check 0.2 vs 2.0
+  a.u. agrees to 2.5 %. Post-pulse nex [cm⁻³]:
+
+  | I [W/cm²] | coherent | Markov gout | memory gout | G_mem/G_mar |
+  |---|---|---|---|---|
+  | 10¹¹ | 2.58e16 | 6.72e20 | 1.32e20 | **0.20** |
+  | 10¹² | 4.96e20 | 6.47e21 | 1.84e21 | **0.23** |
+
+  The memory kernel removes ~80 % of the Markovian-fabricated
+  phonon-assisted generation — the coherence-sector share of the §1
+  virtual-carrier disease (the dressing's sub-cycle modulation is
+  protected; only genuinely slow coherences dephase at the calibrated
+  rate). HONEST REMAINDER: the surviving generation still scales ≈
+  linearly with I — the POPULATION-kernel conversion (the ICFE sector /
+  option-A dressed-basis fix) is the open item for the scaling *shape*;
+  this increment fixed the dephasing sector.
+
+### 8.8 Two-sector localization of the §1 disease (maintainer analysis, 2026-07-20) + the population-sector design
+
+Maintainer's reading of the §8.7 result (confirmed): colmem lowered the
+fabricated generation ~5× but did not change the intensity exponent because
+the §1 disease lives in TWO matrix sectors and colmem fixes one:
+
+1. **Coherence sector (off-diagonal, L⁻)** — the field-oscillating virtual
+   polarization ρ_cv; its Markovian dephasing was the fabrication channel at
+   weak field. **Closed by colmem.**
+2. **Population sector (diagonal)** — the Stark-dressed diagonal: the field
+   mixes bands and ρ_cc carries a virtual share ~|eE·d/E_g|² ∝ I, which the
+   collision POPULATION kernels convert at the Markovian golden-rule rate →
+   the surviving ∝ I tail.
+
+**One precision on the remedy** (recorded so the next increment starts
+right): within the pure-dephasing (σ_z, g-type) bath, [MT99 Eq. (22)]'s
+second (L⁺-sourced) auxiliary set still cannot move the diagonal — BOTH
+feedback terms in ρ̇_s enter through the commutator L⁻, whose diagonal
+vanishes for a diagonal f. (The L⁺/b(t) sector is the memory Lamb shift on
+coherences — partially present already through the complex line response;
+its full MT99 form is a small refinement.) The population-sector conversion
+is an **a-type (energy-exchange) process in [M13]'s language** — it lives in
+the COLLISION INTEGRAL (the ICFE sector, §3C), not in the dephasing bath.
+
+**Proposed bounded remedy — memory-filtered source populations (NOT yet
+authorized):** reuse the SAME line machinery to low-pass the Houston
+populations that FEED the ring golden-rule kernels: auxiliary fields
+z_j[f_a(k,t)] per active state, transferable population
+f̃_a = Re Σ_j c_j z_j (anchor: static populations pass unfiltered, R(0)=1);
+`eph_interk_dpop`/II/Auger read f̃ instead of the instantaneous f. The
+dressing's A²(t) breathing (frequency 2ω_laser ≫ phonon lines) filters out
+of the SOURCE of every collision — the time-domain realization of the ICFE
+statement that the bath cannot follow sub-cycle population modulation —
+while slow real carriers transfer at the calibrated rates. Trace exactness
+and the CPTP limiter are unchanged (dpop still sums to zero; the filter
+only reshapes the source weights). Expected effect: bends the G(I) shape
+toward the Keldysh bracket (the ∝ I virtual-diagonal share stops feeding
+the kernels). Complementary to — not a replacement for — the option-A
+dressed-basis fix (§3A), which removes the dressing from the populations
+themselves rather than filtering its time signature.
