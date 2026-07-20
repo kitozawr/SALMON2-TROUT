@@ -43,7 +43,7 @@ module sbe_superres_ssbe
               auger_interk_dpop, mp_grid_triple, mp_partner_triple, &
               vg_eta_admixture, vg_trunc_shift2, vg_conv_error, vg_ptop_exceeds, &
               bath_t2_high_t, bath_corr_table, sfsb_nc_series, &
-              colmem_lines, colmem_response, &
+              colmem_lines, colmem_response, colmem_pop_filter, colmem_pop_init, &
               get_material_params
 
     ! =====================================================================
@@ -2111,6 +2111,49 @@ contains
             cl(j) = cl(j) / anchor
         end do
     end subroutine colmem_lines
+
+    ! Population-sector memory filter (wiki/10 sec. 8.8): one discrete step of
+    ! the line convolution on a POPULATION f, returning the memory-filtered
+    ! ftil that feeds the ring collision kernels. Auxiliary fields z_j evolve
+    ! as z <- z e^{-mu tau} + f tau; ftil = Re sum_j c_j z_j / gnorm with the
+    ! DISCRETE normalization gnorm = Re sum_j c_j tau/(1-e^{-mu_j tau}), so a
+    ! CONSTANT f is a machine-exact fixed point (ftil = f) at ANY tau -- the
+    ! calibrated Markovian rates are untouched for slow populations. Fast
+    ! (sub-correlation-time) modulation -- the A^2(t) dressing breathing --
+    ! filters out of the collision SOURCE: the time-domain ICFE statement
+    ! that the phonon bath cannot follow sub-cycle population modulation.
+    ! Initialize z with colmem_pop_init so ftil(0) = f(0) exactly.
+    pure subroutine colmem_pop_filter(nl, cl, mul, tau, f, z, ftil)
+        integer, intent(in) :: nl
+        complex(8), intent(in) :: cl(nl), mul(nl)
+        real(8), intent(in) :: tau, f
+        complex(8), intent(inout) :: z(nl)
+        real(8), intent(out) :: ftil
+        real(8) :: gnorm
+        integer :: j
+        ftil = 0d0
+        gnorm = 0d0
+        do j = 1, nl
+            z(j) = z(j) * exp(-mul(j) * tau) + f * tau
+            ftil = ftil + real(cl(j) * z(j))
+            gnorm = gnorm + real(cl(j) * tau / (1d0 - exp(-mul(j) * tau)))
+        end do
+        ftil = ftil / max(gnorm, 1d-30)
+    end subroutine colmem_pop_filter
+
+    ! Fixed-point initialization of the filter fields: z_j = f tau/(1-e^{-mu_j tau})
+    ! makes the very first filtered value equal f exactly (and a constant f
+    ! stays a fixed point of colmem_pop_filter thereafter).
+    pure subroutine colmem_pop_init(nl, mul, tau, f, z)
+        integer, intent(in) :: nl
+        complex(8), intent(in) :: mul(nl)
+        real(8), intent(in) :: tau, f
+        complex(8), intent(out) :: z(nl)
+        integer :: j
+        do j = 1, nl
+            z(j) = f * tau / (1d0 - exp(-mul(j) * tau))
+        end do
+    end subroutine colmem_pop_init
 
     ! Steady-state damping response of the line set at coherence modulation
     ! frequency w (a.u.): R(0) = 1 (the Markov anchor) by construction.

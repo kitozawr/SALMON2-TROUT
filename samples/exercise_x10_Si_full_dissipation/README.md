@@ -87,3 +87,10 @@ Markovian gout at 10¹¹ W/cm² — the memory removes the dephasing-fabricated
 share of the virtual-carrier conversion (wiki/00 §1 disease, coherence
 sector). Forbidden for graphene (both dephasing channels off — maintainer
 decision).
+
+Add `yn_sbe_colmem_pop = 'y'` for the **population-sector** memory (wiki/10
+§8.8–8.9): the ring kernels read memory-filtered populations, so the Stark-
+dressed diagonal's sub-cycle breathing stops feeding the golden-rule
+conversion. Validated I-scan (`colmem_pop_validation.png`): with both
+sectors on the fabricated generation drops 25×→100× (growing with I) and
+nex(eph) → nex(coherent) + a small correction.

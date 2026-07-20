@@ -67,6 +67,7 @@
 |---|---|---|---|
 | yn_sbe_colmem | — | 'n' | non-Markovian **memory** version of the e-ph ring gout dephasing ("collisions create the dephasing"): kernel = Lorentzian lines at the **cited phonon-table** energies with (N+1)/N thermal weights [MT99 Eq. (15)]; a slow (adiabatic) coherence damps at exactly the Markovian rate (anchor R(0)=1), sub-correlation-time field-driven modulation is protected (the bath can't follow it, [B25 Fig 5b]). Requires `yn_sbe_eph='y'` + `yn_sbe_superres='y'`; **forbidden for graphene** (both dephasing channels off — maintainer decision). No new physical constants. |
 | sbe_colmem_tau_fs | fs | −1.0 | kernel line width 1/τ_c; ≤0 → τ_c = ħ/σ_E (the time-domain completion of the σ_E-broadened golden rule). |
+| yn_sbe_colmem_pop | — | 'n' | **population-sector** memory (wiki/10 §8.8): the ring collision kernels (e-ph/II/Auger) + the free-carrier screen/FD fit read the **memory-filtered** populations f̃ = filter[f] (same cited phonon lines; a constant f is a machine-exact fixed point ⇒ calibrated rates untouched; the A²(t) dressing breathing filters out of the collision source — the time-domain ICFE). Same prerequisites/guards as `yn_sbe_colmem`; the two sectors toggle independently. |
 
 ## &epm parameters ✅
 | Parameter | Units | Default | Description |

@@ -19,7 +19,8 @@
 !  Standalone gfortran (uses sbe_superres_ssbe.f90).
 !
 program test_colmem_lines
-    use sbe_superres_ssbe, only: colmem_lines, colmem_response, bose_factor, mev_to_ha
+    use sbe_superres_ssbe, only: colmem_lines, colmem_response, bose_factor, mev_to_ha, &
+                                 colmem_pop_filter, colmem_pop_init
     implicit none
     integer, parameter :: NPH = 3
     real(8), parameter :: KB_HA_K = 3.166811563d-6
@@ -111,6 +112,42 @@ program test_colmem_lines
     write(*,'(a,2es14.6)') '  fast-modulated decay rate vs g = ', amp_fast, GOUT
     if (amp_fast > 0.2d0 * GOUT) &
         call bad('fast-modulated coherence must be much less damped than Markov')
+
+    ! --- (7) population filter (wiki/10 sec. 8.8) ---------------------------
+    ! constant f is a machine-exact fixed point (discrete anchor at any tau);
+    ! fast-modulated f is smoothed toward its mean (the dressing breathing
+    ! filters out of the collision source).
+    block
+        complex(8) :: zp(nl)
+        real(8) :: fval, ftil, fmean, dev_raw, dev_fil, tt
+        integer :: it2
+        real(8), parameter :: TAUP = 2.0d0        ! ring call cadence [a.u.t]
+        fval = 0.7d0
+        call colmem_pop_init(nl, mul, TAUP, fval, zp)
+        do it2 = 1, 500
+            call colmem_pop_filter(nl, cl, mul, TAUP, fval, zp, ftil)
+            if (abs(ftil - fval) > 1d-12) then
+                call bad('constant f must be a machine-exact fixed point of the pop filter')
+                exit
+            end if
+        end do
+        ! modulated f = mean + 0.5*mean*cos(2 w_mod t), w_mod = 20*w3 (fast)
+        fmean = 0.5d0
+        call colmem_pop_init(nl, mul, TAUP, fmean, zp)
+        dev_raw = 0d0; dev_fil = 0d0
+        do it2 = 1, 4000
+            tt = it2 * TAUP
+            fval = fmean * (1d0 + 0.5d0 * cos(2d0 * 20d0 * hw(3) * tt))
+            call colmem_pop_filter(nl, cl, mul, TAUP, fval, zp, ftil)
+            if (it2 > 2000) then
+                dev_raw = max(dev_raw, abs(fval - fmean))
+                dev_fil = max(dev_fil, abs(ftil - fmean))
+            end if
+        end do
+        write(*,'(a,2es14.6)') '  pop filter: raw vs filtered modulation amplitude = ', dev_raw, dev_fil
+        if (dev_fil > 0.15d0 * dev_raw) &
+            call bad('fast population modulation must be strongly filtered from the source')
+    end block
 
     if (nfail == 0) then
         write(*,'(a)') 'PASS'

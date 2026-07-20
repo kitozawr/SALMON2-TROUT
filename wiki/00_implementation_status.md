@@ -47,9 +47,15 @@ separate them in sub-cycle fields.
   Markovian-fabricated phonon-assisted generation drops ~5× (G_mem/G_mar =
   0.20 @1e11, 0.23 @1e12 W/cm²); dt 0.2↔2.0 cross-check 2.5%. ii/auger need
   no extra fix (their dephasing is the population-paired Kraus factor);
-  eeh EID memory (plasmon line, same machinery) = recorded follow-up; the
-  POPULATION-kernel sector (ICFE / option-A dressed basis) remains the open
-  item for the I-scaling shape. Historical note (superseded proposal below): The
+  eeh EID memory (plasmon line, same machinery) = recorded follow-up.
+  **Population sector CLOSED TOO (same day, maintainer two-sector analysis +
+  "Go"): `yn_sbe_colmem_pop`** — the ring kernels read memory-filtered
+  populations (machine-exact static anchor; wiki/10 §8.8–8.9). I-scan: the
+  fabricated generation suppressed 25×→100× (growing with I), nex(eph) →
+  nex(coherent)+~12% at 1e12 W/cm²; electrons = 8.000 in all nine runs.
+  Remaining (recorded): the envelope-slow dressing share passes any
+  time-domain filter — that separation needs option-A (dressed basis);
+  eeh EID memory (plasmon line). Historical note (superseded proposal below): The
   maintainer supplied the two sources (Meier–Tannor JCP 111, 3365 (1999)
   [MT99] + Merkli–Berman–Sayre JMC 51, 890 (2013) [M13] = B25 ref [75]);
   both are transcribed and the complete design is **wiki/10 §8**: MT
