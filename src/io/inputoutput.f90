@@ -634,6 +634,7 @@ contains
       & sbe_sfsb_stride, &
       & yn_sbe_colmem, &
       & sbe_colmem_tau_fs, &
+      & yn_sbe_colmem_pop, &
       & yn_sbe_eeh, &
       & sbe_eeh_nu_sat, &
       & yn_sbe_auger, &
@@ -1125,6 +1126,7 @@ contains
     sbe_sfsb_stride         = 0          ! 0: auto stride from the Stark-shifted gap
     yn_sbe_colmem           = 'n'        ! 'y': collisional-memory (non-Markovian) dephasing
     sbe_colmem_tau_fs       = -1.0d0     ! memory time tau_c [fs]; <=0: hbar/sigma_E
+    yn_sbe_colmem_pop       = 'n'        ! 'y': memory-filtered source populations for the ring kernels
     yn_sbe_eeh              = 'n'        ! 'y': carrier-carrier (e-e/e-h) thermalization channel
     sbe_eeh_nu_sat          = -1.0d0     ! carrier-carrier rate scale [s^-1]; <=0: 1e14 default
     yn_sbe_auger            = 'n'        ! 'y': Auger recombination (density-gated CPTP, Sec 13)
@@ -1817,6 +1819,7 @@ contains
     call comm_bcast(sbe_sfsb_stride,         nproc_group_global)
     call comm_bcast(yn_sbe_colmem,           nproc_group_global)
     call comm_bcast(sbe_colmem_tau_fs,       nproc_group_global)
+    call comm_bcast(yn_sbe_colmem_pop,       nproc_group_global)
     call comm_bcast(yn_sbe_eeh,              nproc_group_global)
     call comm_bcast(sbe_eeh_nu_sat,          nproc_group_global)
     call comm_bcast(yn_sbe_auger,            nproc_group_global)
@@ -2869,6 +2872,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I8)')     'sbe_sfsb_stride', sbe_sfsb_stride
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_colmem', yn_sbe_colmem
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_colmem_tau_fs', sbe_colmem_tau_fs
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_colmem_pop', yn_sbe_colmem_pop
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_eeh', yn_sbe_eeh
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_eeh_nu_sat', sbe_eeh_nu_sat
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_auger', yn_sbe_auger

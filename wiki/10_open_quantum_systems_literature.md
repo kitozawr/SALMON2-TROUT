@@ -665,3 +665,43 @@ toward the Keldysh bracket (the ∝ I virtual-diagonal share stops feeding
 the kernels). Complementary to — not a replacement for — the option-A
 dressed-basis fix (§3A), which removes the dressing from the populations
 themselves rather than filtering its time signature.
+
+### 8.9 IMPLEMENTED + VALIDATED (2026-07-20): `yn_sbe_colmem_pop` (the §8.8 population-sector filter)
+
+Maintainer "Go". Shipped:
+- `colmem_pop_filter`/`colmem_pop_init` (sbe_superres, pure): one discrete
+  step of the line convolution on a population, with the DISCRETE anchor —
+  a constant f is a **machine-exact fixed point at any τ** (tested to
+  1e-12 over 500 steps), so the calibrated golden-rule rates are untouched
+  for slow populations; fast modulation (the A²(t) dressing breathing at
+  2ω_laser ≫ phonon lines) is filtered ×12 out of the collision SOURCE.
+- `apply_ring_channels`: with `yn_sbe_colmem_pop='y'` the gathered `f_all`
+  is replaced by the memory-filtered f̃ right after the ring-gate slot —
+  ALL downstream consumers (e-ph/II/Auger kernels, free-carrier screen,
+  FD fit) see f̃; the application to ρ keeps the REAL populations + the
+  CPTP limiter. Rank-identical (filters the gathered array); z re-seeds
+  from the instantaneous f after a restart (ring-gate policy). The two
+  sectors (`yn_sbe_colmem` coherence / `_pop` population) toggle
+  independently; same guards (eph + ring, graphene forbidden).
+
+**Validation (Si 4³, below-gap 0.39 eV, Acos2 63 fs, I-scan; figure
+`samples/exercise_x10_Si_full_dissipation/colmem_pop_validation.png`);
+electrons = 8.000 in ALL nine runs. G = nex(eph)−nex(coherent):**
+
+| I [W/cm²] | G Markov | G mem-gout | G mem+pop | G_mp/G_mar |
+|---|---|---|---|---|
+| 10¹¹ | 6.7e20 (I^0.97) | 1.3e20 (I^0.97) | 2.7e19 (I^0.18) | **0.041** |
+| 3.16×10¹¹ | 2.1e21 | 4.1e20 | 3.4e19 | **0.016** |
+| 10¹² | 6.0e21 (I^0.93) | 1.3e21 (I^1.04) | 5.8e19 (I^0.47) | **0.010** |
+
+Reading: with BOTH memory sectors on, the fabricated generation is
+suppressed **25×→100× (growing with I)** and `nex(eph on) → nex(coherent)`
+— at 10¹² the e-ph channel adds ~12 % to the coherent multiphoton yield
+instead of swamping it ×13. The residual G is small and sublinear; at
+10¹² it is the difference of two nearly-equal numbers (12 %), so its
+exponent is not robust — quantitative claims should use the RATIOS. What a
+time-domain filter can never remove: the SLOW (envelope-scale) part of the
+dressing passes R(0)=1 by construction — separating that share needs the
+basis-level fix (option A, §3A), which remains the recorded open item.
+The x12 Keldysh-bracket comparison at 9³ with the calibrated ν_sat is the
+maintainer's cluster run.

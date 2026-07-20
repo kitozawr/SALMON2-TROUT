@@ -176,6 +176,12 @@ module bloch_solver_ssbe
         integer :: colmem_nl   = 0
         complex(8), allocatable :: colmem_c(:), colmem_mu(:)
         complex(8), allocatable :: zmem(:, :, :, :)  ! (nba,nba,nl,ik_min:ik_max)
+        ! population-sector memory filter (wiki/10 sec. 8.8): the ring
+        ! collision kernels read the memory-filtered f instead of the
+        ! instantaneous Houston populations. Rank-identical (filters the
+        ! GATHERED f_all, like the ring gate).
+        logical :: flag_colmem_pop = .false.
+        complex(8), allocatable :: zpop(:, :, :)     ! (nba, nl, nk)
 
         real(8) :: coul_pref     = 0d0  ! strength * 4 pi / (eps * Omega_cell * Nk)
         real(8) :: coul_screen2  = 0d0  ! kappa^2 [1/Bohr^2] (Yukawa regulariser)
@@ -331,7 +337,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
                              sbe_ring_vq_floor, yn_sbe_ii_fk_soften, sbe_ii_fk_mu, &
                              sbe_ii_phassist, yn_sbe_ii_holes, yn_sbe_eph_acoustic, &
                              sbe_eph_ac_xi_ev, &
-                             yn_sbe_colmem, sbe_colmem_tau_fs, &
+                             yn_sbe_colmem, sbe_colmem_tau_fs, yn_sbe_colmem_pop, &
                              num_kgrid
     use sbe_superres_ssbe, only: bose_factor, s_material_params, colmem_lines, colmem_response, &
                                  get_material_params, MAT_SUPPORTED
@@ -799,10 +805,11 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     ! (wiki/10 sec. 8.6, maintainer-approved 2026-07-20). The kernel lines are
     ! read from the cited phonon table just built above -- no new constants.
     ! =========================================================================
-    sbe%flag_colmem = (yn_sbe_colmem == 'y')
-    if (sbe%flag_colmem) then
+    sbe%flag_colmem     = (yn_sbe_colmem == 'y')
+    sbe%flag_colmem_pop = (yn_sbe_colmem_pop == 'y')
+    if (sbe%flag_colmem .or. sbe%flag_colmem_pop) then
         if (.not. (sbe%flag_eph .and. sbe%flag_ring)) then
-            if (lprint) write(*, '(a)') '# ERROR: yn_sbe_colmem rides the e-ph ring gout' // &
+            if (lprint) write(*, '(a)') '# ERROR: yn_sbe_colmem/_pop ride the e-ph ring' // &
                 ' -- enable yn_sbe_eph and yn_sbe_superres.'
             error stop 'collisional-memory dephasing requires eph + ring'
         end if
@@ -820,11 +827,17 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
         call colmem_lines(sbe%eph_nph, sbe%eph_hw, sbe%eph_wrel, sbe%eph_nb, &
                           colmem_tauc, sbe%colmem_nl, sbe%colmem_c, sbe%colmem_mu)
         if (sbe%colmem_nl < 1) error stop 'collisional-memory: no kernel lines'
-        allocate(sbe%zmem(sbe%n_active_bands, sbe%n_active_bands, sbe%colmem_nl, &
-                          sbe%ik_min:sbe%ik_max))
-        sbe%zmem = (0d0, 0d0)
+        if (sbe%flag_colmem) then
+            allocate(sbe%zmem(sbe%n_active_bands, sbe%n_active_bands, sbe%colmem_nl, &
+                              sbe%ik_min:sbe%ik_max))
+            sbe%zmem = (0d0, 0d0)
+        end if
         if (lprint) then
-            write(*, '(a)') '# collisional-memory dephasing (non-Markovian e-ph gout) enabled:'
+            if (sbe%flag_colmem) &
+                write(*, '(a)') '# collisional-memory dephasing (non-Markovian e-ph gout) enabled:'
+            if (sbe%flag_colmem_pop) &
+                write(*, '(a)') '# collisional-memory POPULATION filter (ring kernels read the' // &
+                    ' memory-filtered f) enabled:'
             write(*, '(a,i3,a,f8.3,a)') '#   ', sbe%colmem_nl, &
                 ' kernel lines from the cited phonon table; tau_c = ', &
                 colmem_tauc * au_fs, ' fs'
@@ -2324,7 +2337,8 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
     use sbe_superres_ssbe, only: eph_interk_dpop, ii_interk_dpop, auger_interk_dpop, &
                                  rana_auger_dpop, mp_grid_triple, get_material_params, &
                                  s_material_params, build_vq_table, build_acscreen_table, &
-                                 t_ring_opts, debye_kappa2, tf_kappa2_degenerate, fit_fermi_dirac
+                                 t_ring_opts, debye_kappa2, tf_kappa2_degenerate, fit_fermi_dirac, &
+                                 colmem_pop_filter, colmem_pop_init
     use eigen_lapack, only: eigen_zheev
     use communication, only: comm_summation
     use salmon_global, only: num_kgrid, epm_material, sbe_eph_temperature_k
@@ -2439,6 +2453,42 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
                                   (f_all - sbe%f_ring_gate) * gfac)
         end block
         f_all = sbe%f_ring_gate
+    end if
+
+    ! ---- collisional-memory POPULATION filter (wiki/10 sec. 8.8) -----------
+    ! The Stark-dressed diagonal carries a virtual share ~ |eE.d/E_g|^2 ~ I
+    ! that the Markovian golden-rule kernels convert at a linear rate (the
+    ! surviving ~ I tail after the coherence-sector colmem fix). Remedy: the
+    ! kernels read the MEMORY-FILTERED populations -- auxiliary fields z_j
+    ! per (state, k) convolve f with the SAME cited phonon lines; a constant
+    ! f is a machine-exact fixed point (discrete anchor, calibrated rates
+    ! untouched), while the A^2(t) dressing breathing (2*w_laser >> phonon
+    ! lines) filters out of the collision SOURCE -- the time-domain ICFE.
+    ! Filters the gathered f_all like the ring gate => rank-identical; all
+    ! downstream consumers (kernels, free-carrier screen, FD fit) see the
+    ! filtered f; application to rho keeps the REAL populations + limiter.
+    ! Not checkpointed: after a restart z re-seeds from the instantaneous f
+    ! (one-memory-time transient), same policy as the ring gate.
+    if (sbe%flag_colmem_pop) then
+        if (.not. allocated(sbe%zpop)) then
+            allocate(sbe%zpop(nba, sbe%colmem_nl, nk))
+            do ik = 1, nk
+                do a = 1, nba
+                    call colmem_pop_init(sbe%colmem_nl, sbe%colmem_mu, tau, &
+                                         f_all(a, ik), sbe%zpop(a, :, ik))
+                end do
+            end do
+        end if
+        block
+            real(8) :: ftil
+            do ik = 1, nk
+                do a = 1, nba
+                    call colmem_pop_filter(sbe%colmem_nl, sbe%colmem_c, sbe%colmem_mu, &
+                                           tau, f_all(a, ik), sbe%zpop(a, :, ik), ftil)
+                    f_all(a, ik) = min(max(ftil, 0d0), sbe%occ_max)
+                end do
+            end do
+        end block
     end if
 
     ! ---- II/Auger screening context + the B1 vq table (also reused by A3) ---
