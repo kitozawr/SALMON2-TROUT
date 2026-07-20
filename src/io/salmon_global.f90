@@ -510,6 +510,11 @@ character(256),allocatable :: atom_name(:)
   integer        :: sbe_sfsb_nv            ! # top valence bands in the SFSB pair sum
   integer        :: sbe_sfsb_nc            ! # bottom conduction bands in the SFSB pair sum
   integer        :: sbe_sfsb_stride        ! integrate every Nth field sample; 0: auto from the Stark-shifted gap
+  ! Collisional-memory (non-Markovian) dephasing of the e-ph ring gout
+  ! (wiki/10 sec. 8.6): kernel lines from the cited phonon table, no new
+  ! physical constants -- only the memory-time override below.
+  character(1)   :: yn_sbe_colmem          ! 'y': non-Markovian (memory) collisional dephasing; needs yn_sbe_eph + yn_sbe_superres
+  real(8)        :: sbe_colmem_tau_fs      ! kernel line width 1/tau_c; <=0: hbar/sigma_E (grid-matched default)
   ! Carrier-carrier (e-e/e-h) scattering (Part F): CPTP relaxation of the
   ! adiabatic populations toward a Fermi-Dirac with the same number AND energy
   ! (intraband thermalization + EID), at a screened-Coulomb rate.

@@ -164,6 +164,19 @@ module bloch_solver_ssbe
         real(8), allocatable :: eph_nb(:)   ! Bose factors N_B(hw_p, T_ph)
         real(8), allocatable :: eph_wrel(:) ! relative golden-rule weights (sum=1)
 
+        ! Collisional-memory (non-Markovian) dephasing of the e-ph ring gout
+        ! (wiki/10 sec. 8.6, maintainer-approved): the instantaneous
+        ! exp(-gout*tau/2) is replaced by a memory convolution whose kernel is
+        ! built VERBATIM from the cited phonon table (Lorentzian lines at the
+        ! mode energies, (N+1)/N thermal weights, width 1/tau_c = sigma_E by
+        ! default -- colmem_lines in sbe_superres). Auxiliary coherence fields
+        ! zmem live elementwise in the Houston frame (upper triangle a<b),
+        ! attached to sorted-branch indices like every other ring quantity.
+        logical :: flag_colmem = .false.
+        integer :: colmem_nl   = 0
+        complex(8), allocatable :: colmem_c(:), colmem_mu(:)
+        complex(8), allocatable :: zmem(:, :, :, :)  ! (nba,nba,nl,ik_min:ik_max)
+
         real(8) :: coul_pref     = 0d0  ! strength * 4 pi / (eps * Omega_cell * Nk)
         real(8) :: coul_screen2  = 0d0  ! kappa^2 [1/Bohr^2] (Yukawa regulariser)
         ! A7: 2D-sheet exchange kernel (graphene): V_2D = 2 pi/(eps A Nk (q+kappa))
@@ -318,8 +331,9 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
                              sbe_ring_vq_floor, yn_sbe_ii_fk_soften, sbe_ii_fk_mu, &
                              sbe_ii_phassist, yn_sbe_ii_holes, yn_sbe_eph_acoustic, &
                              sbe_eph_ac_xi_ev, &
+                             yn_sbe_colmem, sbe_colmem_tau_fs, &
                              num_kgrid
-    use sbe_superres_ssbe, only: bose_factor, s_material_params, &
+    use sbe_superres_ssbe, only: bose_factor, s_material_params, colmem_lines, colmem_response, &
                                  get_material_params, MAT_SUPPORTED
     use math_constants, only: pi
     use phys_constants, only: au_fs, kB_au, au_ev
@@ -341,6 +355,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     type(s_material_params) :: mp
     character(20) :: ii_form_eff
     real(8) :: ii_exp_eff, ii_pref_eff, ii_thr_eff, coul_eps_eff
+    real(8) :: colmem_tauc
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
@@ -776,6 +791,47 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
                     ', weight = ', sbe%eph_wrel(ib)
             end do
             write(*, '(a)') '#   k-local skeleton; CPTP amplitude damping; toggle Kuhn-Zurek off'
+        end if
+    end if
+
+    ! =========================================================================
+    ! Collisional-memory (non-Markovian) dephasing of the e-ph ring gout
+    ! (wiki/10 sec. 8.6, maintainer-approved 2026-07-20). The kernel lines are
+    ! read from the cited phonon table just built above -- no new constants.
+    ! =========================================================================
+    sbe%flag_colmem = (yn_sbe_colmem == 'y')
+    if (sbe%flag_colmem) then
+        if (.not. (sbe%flag_eph .and. sbe%flag_ring)) then
+            if (lprint) write(*, '(a)') '# ERROR: yn_sbe_colmem rides the e-ph ring gout' // &
+                ' -- enable yn_sbe_eph and yn_sbe_superres.'
+            error stop 'collisional-memory dephasing requires eph + ring'
+        end if
+        if (trim(epm_material) == 'graphene') then
+            ! maintainer decision (2026-07-20): BOTH dephasing channels stay OFF
+            ! for graphene (KZ forbidden; the memory upgrade excluded too).
+            error stop 'collisional-memory dephasing disabled for graphene (wiki/10 sec. 8.6)'
+        end if
+        if (sbe_colmem_tau_fs > 0d0) then
+            colmem_tauc = sbe_colmem_tau_fs / au_fs
+        else
+            colmem_tauc = 1d0 / sbe%eph_sigma_au      ! hbar/sigma_E default
+        end if
+        allocate(sbe%colmem_c(2 * sbe%eph_nph), sbe%colmem_mu(2 * sbe%eph_nph))
+        call colmem_lines(sbe%eph_nph, sbe%eph_hw, sbe%eph_wrel, sbe%eph_nb, &
+                          colmem_tauc, sbe%colmem_nl, sbe%colmem_c, sbe%colmem_mu)
+        if (sbe%colmem_nl < 1) error stop 'collisional-memory: no kernel lines'
+        allocate(sbe%zmem(sbe%n_active_bands, sbe%n_active_bands, sbe%colmem_nl, &
+                          sbe%ik_min:sbe%ik_max))
+        sbe%zmem = (0d0, 0d0)
+        if (lprint) then
+            write(*, '(a)') '# collisional-memory dephasing (non-Markovian e-ph gout) enabled:'
+            write(*, '(a,i3,a,f8.3,a)') '#   ', sbe%colmem_nl, &
+                ' kernel lines from the cited phonon table; tau_c = ', &
+                colmem_tauc * au_fs, ' fs'
+            write(*, '(a,f10.6,a,es10.3)') '#   Markov anchor R(0) = ', &
+                colmem_response(sbe%colmem_nl, sbe%colmem_c, sbe%colmem_mu, 0d0), &
+                ';  R(10 w_max) = ', colmem_response(sbe%colmem_nl, sbe%colmem_c, &
+                sbe%colmem_mu, 10d0 * maxval(sbe%eph_hw))
         end if
     end if
 
@@ -2608,9 +2664,11 @@ subroutine ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
     complex(8), intent(in) :: U_loc(sbe%n_active_bands, sbe%n_active_bands, sbe%ik_min:sbe%ik_max)
     real(8),    intent(in) :: dpop(sbe%n_active_bands, sbe%nk), tau
     real(8),    intent(in), optional :: gout(sbe%n_active_bands, sbe%nk)
-    integer :: ik, i, j, in, im, a, b, nba
-    real(8) :: fold, fnew, scal
+    integer :: ik, i, j, in, im, a, b, nba, jl
+    real(8) :: fold, fnew, scal, grate
+    complex(8) :: mem_c, cnew
     real(8)    :: damp(sbe%n_active_bands)
+    real(8)    :: dampf(sbe%n_active_bands)
     complex(8) :: W(sbe%n_active_bands, sbe%n_active_bands)
     complex(8) :: t1(sbe%n_active_bands, sbe%n_active_bands)
     complex(8) :: rad(sbe%n_active_bands, sbe%n_active_bands)
@@ -2699,7 +2757,20 @@ subroutine ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
             end if
             ! gout is the coherence out-rate paired with the population loss;
             ! scale it consistently with the limited population transfer.
-            if (present(gout)) damp(a) = damp(a) * exp(-0.5d0 * scal * gout(a, ik) * tau)
+            ! With collisional MEMORY on (wiki/10 sec. 8.6) the within-block
+            ! gout damping is applied through the memory convolution below
+            ! instead of this instantaneous exponential; the active<->frozen
+            ! extension keeps the Markovian factor (dampf) -- those coherences
+            ! are far off-shell and get the conservative CP-consistent damping.
+            dampf(a) = damp(a)
+            if (present(gout)) then
+                if (sbe%flag_colmem) then
+                    dampf(a) = dampf(a) * exp(-0.5d0 * scal * gout(a, ik) * tau)
+                else
+                    damp(a) = damp(a) * exp(-0.5d0 * scal * gout(a, ik) * tau)
+                    dampf(a) = damp(a)
+                end if
+            end if
             rad(a,a) = cmplx(fnew, 0d0, 8)
         end do
         do b = 1, nba
@@ -2707,6 +2778,34 @@ subroutine ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
                 if (a /= b) rad(a,b) = rad(a,b) * damp(a) * damp(b)
             end do
         end do
+        ! ---- collisional-memory dephasing (wiki/10 sec. 8.6) -----------------
+        ! Replaces the instantaneous exp(-(g_a+g_b) tau/2): the Houston-frame
+        ! coherence drives auxiliary fields z_j (one per kernel line, decay
+        ! e^{-mu_j tau} + source), and is damped by the convolution
+        ! rho_ab -= (g_a+g_b)/2 * tau * sum_j c_j z_j. A slow (adiabatic)
+        ! coherence is damped at exactly the Markovian rate (anchor R(0)=1);
+        ! sub-correlation-time (field-driven) modulation is protected -- the
+        ! phonon bath cannot follow it. z is attached to the sorted Houston
+        ! branch indices, first-order-consistent like every ring quantity.
+        ! Trace untouched (diagonal not modified); Hermiticity by mirroring.
+        if (sbe%flag_colmem .and. present(gout)) then
+            do b = 2, nba
+                do a = 1, b - 1
+                    mem_c = (0d0, 0d0)
+                    do jl = 1, sbe%colmem_nl
+                        mem_c = mem_c + sbe%colmem_c(jl) * sbe%zmem(a, b, jl, ik)
+                    end do
+                    grate = 0.5d0 * scal * (gout(a, ik) + gout(b, ik))
+                    cnew = rad(a, b) - grate * tau * mem_c
+                    do jl = 1, sbe%colmem_nl
+                        sbe%zmem(a, b, jl, ik) = sbe%zmem(a, b, jl, ik) &
+                            * exp(-sbe%colmem_mu(jl) * tau) + rad(a, b) * tau
+                    end do
+                    rad(a, b) = cnew
+                    rad(b, a) = conjg(cnew)
+                end do
+            end do
+        end if
         call ZGEMM('N','N', nba,nba,nba, cmplx(1d0,0d0, 8), W,nba, rad,nba, cmplx(0d0,0d0, 8), t1,nba)
         call ZGEMM('N','C', nba,nba,nba, cmplx(1d0,0d0, 8), t1,nba, W,nba, cmplx(0d0,0d0, 8), rad,nba)
         do j = 1, nba
@@ -2725,9 +2824,9 @@ subroutine ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
         ! diagonal dips below 0 -- the accumulating negative-population
         ! pathology (nelec/nhole < 0) seen on frozen windows at large dt, which
         ! the eeh channel then converted into a trace leak.
-        if (nba < sbe%nb .and. any(damp < 1d0)) then
+        if (nba < sbe%nb .and. any(dampf < 1d0)) then
             do j = 1, nba
-                t1(:, j) = W(:, j) * damp(j)
+                t1(:, j) = W(:, j) * dampf(j)
             end do
             call ZGEMM('N','C', nba,nba,nba, cmplx(1d0,0d0, 8), t1,nba, W,nba, &
                        cmplx(0d0,0d0, 8), Dk,nba)

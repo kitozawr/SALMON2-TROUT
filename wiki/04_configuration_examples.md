@@ -62,6 +62,12 @@
 | sbe_sfsb_nc | — | 1 | number of conduction bands, one channel each (gap line = E_c−E_v,top). |
 | sbe_sfsb_stride | — | 0 | integrate every Nth field sample; 0 = auto from the Stark-shifted gap (2π/(24·E_s^max)). |
 
+### Collisional-memory (non-Markovian) dephasing (✅ implemented 2026-07-20; wiki/10 §8.6)
+| Parameter | Units | Default | Description |
+|---|---|---|---|
+| yn_sbe_colmem | — | 'n' | non-Markovian **memory** version of the e-ph ring gout dephasing ("collisions create the dephasing"): kernel = Lorentzian lines at the **cited phonon-table** energies with (N+1)/N thermal weights [MT99 Eq. (15)]; a slow (adiabatic) coherence damps at exactly the Markovian rate (anchor R(0)=1), sub-correlation-time field-driven modulation is protected (the bath can't follow it, [B25 Fig 5b]). Requires `yn_sbe_eph='y'` + `yn_sbe_superres='y'`; **forbidden for graphene** (both dephasing channels off — maintainer decision). No new physical constants. |
+| sbe_colmem_tau_fs | fs | −1.0 | kernel line width 1/τ_c; ≤0 → τ_c = ħ/σ_E (the time-domain completion of the σ_E-broadened golden rule). |
+
 ## &epm parameters ✅
 | Parameter | Units | Default | Description |
 |---|---|---|---|
@@ -178,10 +184,10 @@ current.
 
 | Exercise | Material | Step 1 (ground state) | Highlights |
 |---|---|---|---|
-| [`exercise_x3_bulkSi_epm_bloch_superres`](../samples/exercise_x3_bulkSi_epm_bloch_superres/) | Si (diamond) | `salmon < Si_epm_gs.inp` | super-compute mode, all CPTP dissipation channels |
-| [`exercise_x4_GaAs_epm_bloch_realcarrier`](../samples/exercise_x4_GaAs_epm_bloch_realcarrier/) | GaAs (zincblende) | `salmon < GaAs_epm_gs.inp` | real-carrier maps (Γ populated, no breathing) + intra-band current |
-| [`exercise_x5_CdS_wurtzite_epm_bloch`](../samples/exercise_x5_CdS_wurtzite_epm_bloch/) | CdS (wurtzite) | `python3 epm_wurtzite_cds.py gs` | 2-coset unfold, direct 2.5 eV gap |
-| [`exercise_x6_graphene_epm_bloch`](../samples/exercise_x6_graphene_epm_bloch/) | graphene (π-model) | `python3 epm_graphene.py gs` | 2-coset unfold, Dirac carriers, **in-plane** field |
+| [`exercise_x03_bulkSi_epm_bloch_superres`](../samples/exercise_x03_bulkSi_epm_bloch_superres/) | Si (diamond) | `salmon < Si_epm_gs.inp` | super-compute mode, all CPTP dissipation channels |
+| [`exercise_x04_GaAs_epm_bloch_realcarrier`](../samples/exercise_x04_GaAs_epm_bloch_realcarrier/) | GaAs (zincblende) | `salmon < GaAs_epm_gs.inp` | real-carrier maps (Γ populated, no breathing) + intra-band current |
+| [`exercise_x05_CdS_wurtzite_epm_bloch`](../samples/exercise_x05_CdS_wurtzite_epm_bloch/) | CdS (wurtzite) | `python3 epm_wurtzite_cds.py gs` | 2-coset unfold, direct 2.5 eV gap |
+| [`exercise_x06_graphene_epm_bloch`](../samples/exercise_x06_graphene_epm_bloch/) | graphene (π-model) | `python3 epm_graphene.py gs` | 2-coset unfold, Dirac carriers, **in-plane** field |
 
 The Python EPM `gs` mode (`epm_wurtzite_cds.py gs`, `epm_graphene.py gs`) emits
 `SYSNAME_k/_eigen/_tm/_unfold/_bandpath.data` into the working directory without
@@ -211,7 +217,7 @@ Constants and their primary-source citations: [Constants](02_constants.md).
 > selects its phonon table (Si: 6 intervalley g/f modes; GaAs: Fröhlich LO + 5
 > intervalley) from `epm_material`, which **defaults to `'GaAs'`** if absent.
 > A runnable two-step example lives in
-> [`../samples/exercise_x3_bulkSi_epm_bloch_superres/`](../samples/exercise_x3_bulkSi_epm_bloch_superres/).
+> [`../samples/exercise_x03_bulkSi_epm_bloch_superres/`](../samples/exercise_x03_bulkSi_epm_bloch_superres/).
 
 ### GaAs — per-channel quick reference
 | Mode | Minimal `&sbe` | Material defaults (auto if unset) |
@@ -570,7 +576,7 @@ The validated Python references:
 
 > **Pipeline status (honest):** **all four materials emit SBE ground-state files** (`SYSNAME_k/_eigen/_tm.data`) and run in the SBE, in **two interchangeable representations**:
 >
-> * **PRIMITIVE (the default, `epm_cell='primitive'`) — recommended.** The non-orthogonal primitive cell, NO folding. The **Fortran `theory='epm'`** path now does **all four** materials (GaAs/Si FCC 2-atom; graphene & CdS hexagonal) — each **verified interchangeable** with the Python primitive references (`epm_{gaas,si,graphene,cds}_primitive.py`): band energies to 5×10⁻¹¹ Ha (GaAs/Si/CdS) / ~6×10⁻⁸ eV (graphene). So the whole EPM→SBE primitive pipeline runs in-SALMON for every material (`samples/exercise_x7_primitive_cell_epm/*_epm_gs.inp`), including the **spinor GaAs** path (`yn_spinorbit='y'` — verified interchangeable with the Python `INCLUDE_SPIN_ORBIT` reference to 5×10⁻¹¹ Ha).
+> * **PRIMITIVE (the default, `epm_cell='primitive'`) — recommended.** The non-orthogonal primitive cell, NO folding. The **Fortran `theory='epm'`** path now does **all four** materials (GaAs/Si FCC 2-atom; graphene & CdS hexagonal) — each **verified interchangeable** with the Python primitive references (`epm_{gaas,si,graphene,cds}_primitive.py`): band energies to 5×10⁻¹¹ Ha (GaAs/Si/CdS) / ~6×10⁻⁸ eV (graphene). So the whole EPM→SBE primitive pipeline runs in-SALMON for every material (`samples/exercise_x07_primitive_cell_epm/*_epm_gs.inp`), including the **spinor GaAs** path (`yn_spinorbit='y'` — verified interchangeable with the Python `INCLUDE_SPIN_ORBIT` reference to 5×10⁻¹¹ Ha).
 > * **FOLDED (`epm_cell='folded'`) — legacy, for the band-unfold map.** The cubic/orthorhombic supercell + an `_unfold.data` coset map. GaAs/Si fold in-SALMON (Fortran, 4-coset FCC) or via the Python ref; **CdS and graphene use the Python references** (`epm_wurtzite_cds.py` / `epm_graphene.py`) on their folded supercells (CdS orthorhombic 2-fold; graphene rectangular 4-atom 2-fold — both verified exact). The unfold infrastructure (`gs_info_ssbe`, `bloch_solver`, `datafile`, the plotter) is generalized from the hardcoded **4 FCC cosets to N** (4 = cubic, 2 = wurtzite/rectangular); legacy 4-coset GaAs maps still read.
 >
 > See `wiki/00_implementation_status.md` for the full TODO.
@@ -708,7 +714,7 @@ Setting `INCLUDE_SPIN_ORBIT = False` in the script restores the scalar pipeline 
 
 `theory='dft_band'` diagonalizes the **converged** Kohn-Sham Hamiltonian at k-points along a high-symmetry path and writes the eigenvalues to `band.dat` **and** to `SYSNAME_bandpath.data` (the same plotter/SBE-spectral contract the EPM emits). It is a post-processing step: run a normal `theory='dft'` ground state first, then restart from it. A ready-to-run pair lives in `samples/exercise_04_bulkSi_gs/` (`Si_gs.inp` + `Si_band.inp`).
 
-> **Feeding real DFT levels straight into the SBE.** Beyond band structure, a `theory='dft'` run with `yn_out_tm='y'` writes `SYSNAME_k/_eigen/_tm.data` in the exact `gs_info_ssbe` format (reduced k with the `# b1/b2/b3` header for non-orthogonal cells; `esp[eV]` auto-converted to Hartree; both `_tm.data` blocks, the nonlocal one genuinely non-zero for a real pseudopotential) — so a real (even rough) DFT band structure can replace the EPM as the SBE ground state. The SBE's active/frozen-core window (`frozen_core_threshold_ev`) freezes the deep DFT bonding bands the EPM never had. End-to-end example: [`samples/exercise_x9_bulkSi_dft_sbe/`](samples/exercise_x9_bulkSi_dft_sbe/) (Si FCC primitive, explicit `al_vec`, rough DFT GS → `dft_band` path → short SBE, electrons conserved). **Gotcha:** point `dft_band`'s `base_directory` at a sub-directory (e.g. `./band`) so its path-k `_k.data`/`_eigen.data` don't overwrite the MP-grid GS files the SBE reads.
+> **Feeding real DFT levels straight into the SBE.** Beyond band structure, a `theory='dft'` run with `yn_out_tm='y'` writes `SYSNAME_k/_eigen/_tm.data` in the exact `gs_info_ssbe` format (reduced k with the `# b1/b2/b3` header for non-orthogonal cells; `esp[eV]` auto-converted to Hartree; both `_tm.data` blocks, the nonlocal one genuinely non-zero for a real pseudopotential) — so a real (even rough) DFT band structure can replace the EPM as the SBE ground state. The SBE's active/frozen-core window (`frozen_core_threshold_ev`) freezes the deep DFT bonding bands the EPM never had. End-to-end example: [`samples/exercise_x09_bulkSi_dft_sbe/`](samples/exercise_x09_bulkSi_dft_sbe/) (Si FCC primitive, explicit `al_vec`, rough DFT GS → `dft_band` path → short SBE, electrons conserved). **Gotcha:** point `dft_band`'s `base_directory` at a sub-directory (e.g. `./band`) so its path-k `_k.data`/`_eigen.data` don't overwrite the MP-grid GS files the SBE reads.
 
 ```sh
 cd samples/exercise_04_bulkSi_gs
