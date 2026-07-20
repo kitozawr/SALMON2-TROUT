@@ -1,7 +1,7 @@
 !########################################################################################!
 ! Si SBE real-time on REAL DFT levels (step 3/3) -- reads the step-1 DFT files.          !
 !----------------------------------------------------------------------------------------!
-! Same velocity-gauge SBE as exercise_x8, but the ground state is the ROUGH DFT of       !
+! Same velocity-gauge SBE as exercise_x08, but the ground state is the ROUGH DFT of       !
 ! step 1 (Si_k.data / Si_eigen.data / Si_tm.data) instead of the EPM: real               !
 ! pseudopotential levels, real <u|p|u> AND the nonlocal <u|-i[r,Vnl]|u> block (the       !
 ! EPM writes zeros there -- with DFT it is genuinely nonzero).                           !

@@ -1,4 +1,4 @@
-# exercise_x9 — bulk Si: REAL DFT levels into the SBE (instead of the EPM)
+# exercise_x09 — bulk Si: REAL DFT levels into the SBE (instead of the EPM)
 
 The `_k.data / _eigen.data / _tm.data` files the SBE reads were originally
 modeled on SALMON's DFT output — this exercise closes that loop again: a
@@ -30,7 +30,7 @@ underestimates the experimental 1.17 eV), Γ-conduction ≈ 2.5 eV.
 ## Run (serial; a few minutes total)
 
 ```bash
-cd samples/exercise_x9_bulkSi_dft_sbe
+cd samples/exercise_x09_bulkSi_dft_sbe
 
 # 1/3 DFT ground state -> Si_k.data, Si_eigen.data, Si_tm.data, data_for_restart/
 ../../build/salmon < Si_dft_gs.inp | tee dft_gs.out
@@ -78,7 +78,7 @@ python3 ../../plot_sbe_results.py -i . -o plots --spectral --valleys
 
 `A/eV/fs` units: column 1 = time [fs] (never rescale it), columns 2–4 = vector
 potential Ax,Ay,Az. `10.txt` (A_max = 0.28, along z) and `1.txt` (A_max =
-0.028) are the same pulse shape at different amplitudes — see exercise_x8 for
+0.028) are the same pulse shape at different amplitudes — see exercise_x08 for
 the full amplitude-sweep / basis-sufficiency methodology.
 
 ## Notes & pitfalls
@@ -95,5 +95,5 @@ the full amplitude-sweep / basis-sufficiency methodology.
 * `Si_rps.dat` is the same norm-conserving Si pseudopotential as exercise_04
   (`izatom=14`, `lloc_ps=2`).
 * Tighten `num_rgrid`, `num_kgrid`, `threshold` (and raise `nstate`) for
-  production physics; re-verify basis sufficiency (wiki/06, exercise_x8) after
+  production physics; re-verify basis sufficiency (wiki/06, exercise_x08) after
   any change.

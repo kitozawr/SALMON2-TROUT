@@ -27,7 +27,7 @@ awk '{printf "%s %.15g %.15g %.15g\n", $1, $2/10, $3/10, $4/10}' 100.txt > 10.tx
 ## 1. Run the pipeline
 
 ```bash
-cd samples/exercise_x8_Si_primitive_hhg_basis
+cd samples/exercise_x08_Si_primitive_hhg_basis
 
 # (1) ground state: in-SALMON Fortran EPM (Si FCC primitive, nstate=20)
 ../../build/salmon < Si_prim_epm_gs.inp > gs.log
