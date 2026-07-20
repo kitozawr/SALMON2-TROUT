@@ -47,6 +47,21 @@
 | yn_sbe_hf_sublattice_proj | — | 'y' | project Σ^HF block-diagonally onto 4 FCC sublattices (folding fix, E). |
 | sbe_search_sigma_e_ev | eV | grid-matched | energy-bin width σ_E for the final-state search (C3). |
 
+### SFSB non-Markovian heat bath (✅ implemented 2026-07-20; [B25] = Boroumand 2025, wiki/10 §6–7)
+| Parameter | Units | Default | Description |
+|---|---|---|---|
+| yn_sbe_sfsb | — | 'n' | run the SFSB **memory-integral ionization mode** [B25 Eq. (3)] instead of the density-matrix propagation. Requires `num_kgrid=(N,1,1)` and E∥b1 (error stop otherwise). Outputs `_sfsb_nex/_sfsb_nck.data`. |
+| sbe_bath_model | — | 'none' | bath spectral profile of C(t) [B25 Eq. (5)]: 'none' (coherent), 'ohmic' (e^{−ω/ω_c}; [B25]'s numerics), 'debye' (Drude–Lorentz; the RTA anchor model), 'rta' (C=−t/T₂ exactly — the Markovian reference). |
+| sbe_bath_jo | — | 0.1 | dimensionless bath coupling j₀ (phonons <1, polar/collective up to ~5) [B25]. 0 ⇒ bath off. |
+| sbe_bath_wc_ev | eV | −1.0 | bath cutoff ħω_c; **required > 0** for ohmic/debye (THz–far-IR phonons … UV plasmons). |
+| sbe_bath_temperature_k | K | 300.0 | bath temperature (local electron/lattice T); 0 = T=0 allowed. |
+| sbe_bath_rta_t2_fs | fs | −1.0 | RTA only: explicit T₂; ≤0 derives the [B25 §2] high-T anchor T₂=ħ/(2πk_BTj₀). |
+| sbe_bath_memory_fs | fs | −1.0 | memory-kernel truncation window; ≤0 = full history (kernel-decay-safe truncation tested). |
+| yn_sbe_bath_imc | — | 'y' | 'n' zeroes Im C(t) — the [B25 Fig 3(c)] diagnostic (flips suppression→enhancement; NOT physics, keep 'y'). |
+| sbe_sfsb_nv | — | 1 | top-valence manifold size for the **bright-state quadrature coupling** √Σ|d·ê|² (use the whole degenerate band-edge manifold, e.g. 4 for GaAs). |
+| sbe_sfsb_nc | — | 1 | number of conduction bands, one channel each (gap line = E_c−E_v,top). |
+| sbe_sfsb_stride | — | 0 | integrate every Nth field sample; 0 = auto from the Stark-shifted gap (2π/(24·E_s^max)). |
+
 ## &epm parameters ✅
 | Parameter | Units | Default | Description |
 |---|---|---|---|

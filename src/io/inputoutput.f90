@@ -621,6 +621,17 @@ contains
       & sbe_search_sigma_e_ev, &
       & sbe_ring_gate_fs, &
       & sbe_eph_interband_scale, &
+      & yn_sbe_sfsb, &
+      & sbe_bath_model, &
+      & sbe_bath_jo, &
+      & sbe_bath_wc_ev, &
+      & sbe_bath_temperature_k, &
+      & sbe_bath_rta_t2_fs, &
+      & sbe_bath_memory_fs, &
+      & yn_sbe_bath_imc, &
+      & sbe_sfsb_nv, &
+      & sbe_sfsb_nc, &
+      & sbe_sfsb_stride, &
       & yn_sbe_eeh, &
       & sbe_eeh_nu_sat, &
       & yn_sbe_auger, &
@@ -1099,6 +1110,17 @@ contains
                                          ! gate cannot separate envelope-following dressing in
                                          ! sub-cycle fields); <0: auto 2*pi/Egap; >0: manual
     sbe_eph_interband_scale = 1.0d0      ! eph ring gap-straddling (BTBT) rate factor; 1 = upper estimate
+    yn_sbe_sfsb             = 'n'        ! 'y': SFSB memory-integral ionization mode [B25]
+    sbe_bath_model          = 'none'     ! 'none'|'ohmic'|'debye'|'rta' [B25 Eq. (5)]
+    sbe_bath_jo             = 0.1d0      ! dimensionless bath coupling jo [B25 Fig. 2]
+    sbe_bath_wc_ev          = -1.0d0     ! bath cutoff hbar*wc [eV]; must be set > 0 for ohmic/debye
+    sbe_bath_temperature_k  = 300.0d0    ! bath temperature [K] (0 = T=0 allowed)
+    sbe_bath_rta_t2_fs      = -1.0d0     ! RTA T2 [fs]; <=0: hbar/(2 pi kB T jo) [B25 sec. 2]
+    sbe_bath_memory_fs      = -1.0d0     ! kernel truncation window [fs]; <=0: full history
+    yn_sbe_bath_imc         = 'y'        ! 'n': zero Im C(t) (diagnostic, B25 Fig. 3(c))
+    sbe_sfsb_nv             = 1          ! top valence bands in the pair sum
+    sbe_sfsb_nc             = 1          ! bottom conduction bands in the pair sum
+    sbe_sfsb_stride         = 0          ! 0: auto stride from the Stark-shifted gap
     yn_sbe_eeh              = 'n'        ! 'y': carrier-carrier (e-e/e-h) thermalization channel
     sbe_eeh_nu_sat          = -1.0d0     ! carrier-carrier rate scale [s^-1]; <=0: 1e14 default
     yn_sbe_auger            = 'n'        ! 'y': Auger recombination (density-gated CPTP, Sec 13)
@@ -1778,6 +1800,17 @@ contains
     call comm_bcast(sbe_search_sigma_e_ev,   nproc_group_global)
     call comm_bcast(sbe_ring_gate_fs,        nproc_group_global)
     call comm_bcast(sbe_eph_interband_scale, nproc_group_global)
+    call comm_bcast(yn_sbe_sfsb,             nproc_group_global)
+    call comm_bcast(sbe_bath_model,          nproc_group_global)
+    call comm_bcast(sbe_bath_jo,             nproc_group_global)
+    call comm_bcast(sbe_bath_wc_ev,          nproc_group_global)
+    call comm_bcast(sbe_bath_temperature_k,  nproc_group_global)
+    call comm_bcast(sbe_bath_rta_t2_fs,      nproc_group_global)
+    call comm_bcast(sbe_bath_memory_fs,      nproc_group_global)
+    call comm_bcast(yn_sbe_bath_imc,         nproc_group_global)
+    call comm_bcast(sbe_sfsb_nv,             nproc_group_global)
+    call comm_bcast(sbe_sfsb_nc,             nproc_group_global)
+    call comm_bcast(sbe_sfsb_stride,         nproc_group_global)
     call comm_bcast(yn_sbe_eeh,              nproc_group_global)
     call comm_bcast(sbe_eeh_nu_sat,          nproc_group_global)
     call comm_bcast(yn_sbe_auger,            nproc_group_global)
@@ -2817,6 +2850,17 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_search_sigma_e_ev', sbe_search_sigma_e_ev
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_ring_gate_fs', sbe_ring_gate_fs
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_eph_interband_scale', sbe_eph_interband_scale
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_sfsb', yn_sbe_sfsb
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'sbe_bath_model', trim(sbe_bath_model)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_bath_jo', sbe_bath_jo
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_bath_wc_ev', sbe_bath_wc_ev
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_bath_temperature_k', sbe_bath_temperature_k
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_bath_rta_t2_fs', sbe_bath_rta_t2_fs
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_bath_memory_fs', sbe_bath_memory_fs
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_bath_imc', yn_sbe_bath_imc
+      write(fh_variables_log, '("#",4X,A,"=",I8)')     'sbe_sfsb_nv', sbe_sfsb_nv
+      write(fh_variables_log, '("#",4X,A,"=",I8)')     'sbe_sfsb_nc', sbe_sfsb_nc
+      write(fh_variables_log, '("#",4X,A,"=",I8)')     'sbe_sfsb_stride', sbe_sfsb_stride
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_eeh', yn_sbe_eeh
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_eeh_nu_sat', sbe_eeh_nu_sat
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_auger', yn_sbe_auger

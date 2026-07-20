@@ -1,0 +1,39 @@
+!########################################################################################!
+! GaAs 1D k-LINE EPM ground state for the SFSB non-Markovian ionization mode.             !
+!----------------------------------------------------------------------------------------!
+! Step 1 of 2. Writes GaAs_line_k/_eigen/_tm.data read by GaAs_sfsb_rt.inp (step 2).      !
+! The SFSB mode [Boroumand 2025, RPP 88, 070501; wiki/10 sec. 6-7] integrates the         !
+! second-order memory integral on a 1D Brillouin-zone line: num_kgrid = (N,1,1) samples   !
+! the Gamma-L line (along b1 of the FCC primitive cell), exactly like the paper's 1D      !
+! Gamma-M reduction. 96 points already converge the GaAs line to ~0.2% (96/192/384       !
+! gave 2.957/2.962/2.9625e18 cm^-3); use 192 for a safety margin.                         !
+!########################################################################################!
+
+&calculation
+    theory = 'epm'
+/
+
+&control
+    sysname = 'GaAs_line'
+/
+
+&units
+    unit_system = 'au'
+/
+
+&system
+    yn_periodic = 'y'
+    al(1:3) = 10.683d0, 10.683d0, 10.683d0
+    nelec  = 8
+    nstate = 12
+/
+
+&kgrid
+    num_kgrid(1:3) = 192, 1, 1          ! 1D Gamma-L line along b1 (SFSB mode)
+/
+
+&epm
+    epm_material     = 'GaAs'
+    epm_pw_cutoff_ry = 11.1d0
+    epm_cell         = 'primitive'
+/

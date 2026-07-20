@@ -13,7 +13,7 @@ program test_carrier_carrier
     implicit none
     integer, parameter :: n = 6
     integer :: nfail, a, b, it
-    real(8) :: eps(n), occ, nu, tau, N0, E0, N1, E1, beta, mu, ftgt(n)
+    real(8) :: eps(n), occ, nu, tau, N0, E0, N1, E1, beta, mu, ftgt(n), aout
     complex(8) :: rho(n,n)
     logical :: ok
     real(8), parameter :: TOL = 1d-9
@@ -30,7 +30,7 @@ program test_carrier_carrier
     rho(2,5)=(0.15d0,-0.05d0); rho(5,2)=conjg(rho(2,5))
 
     call moments(rho, eps, n, N0, E0)
-    call carrier_carrier_relax(n, rho, eps, occ, nu, tau)
+    call carrier_carrier_relax(n, rho, eps, occ, nu, tau, aout)
     call moments(rho, eps, n, N1, E1)
 
     call chk("number conserved", N1, N0, 1d-9)
@@ -51,7 +51,7 @@ program test_carrier_carrier
     ! repeated application drives toward the fixed FD point (number/energy fixed).
     ! Use a fast rate so the geometric relaxation (1-alpha)^it -> 0 converges.
     do it = 1, 200
-        call carrier_carrier_relax(n, rho, eps, occ, 2d0, tau)
+        call carrier_carrier_relax(n, rho, eps, occ, 2d0, tau, aout)
     end do
     call moments(rho, eps, n, N1, E1)
     call chk("number conserved (converged)", N1, N0, 1d-7)
@@ -78,7 +78,7 @@ program test_carrier_carrier
     rho = (0d0,0d0)
     rho(6,6)=(2d0,0d0); rho(5,5)=(2d0,0d0)   ! only the highest levels filled
     call moments(rho, eps, n, N0, E0)
-    call carrier_carrier_relax(n, rho, eps, occ, nu, tau)
+    call carrier_carrier_relax(n, rho, eps, occ, nu, tau, aout)
     call moments(rho, eps, n, N1, E1)
     call chk("inversion -> no-op (number)", N1, N0, TOL)
     call chk("inversion -> no-op (energy)", E1, E0, TOL)
