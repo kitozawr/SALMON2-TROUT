@@ -45,6 +45,23 @@ Verification legend: **[V]** bibliographic facts (title/authors/journal/year)
 confirmed via search; **[A]** claim confirmed at abstract level only;
 **[U]** could not verify — treat as a lead, not a source.
 
+### Non-Markovian machinery (maintainer-supplied PDFs, 2026-07-20)
+- **[V/P] C. Meier, D. J. Tannor, "Non-Markovian evolution of the density
+  operator in the presence of strong laser fields", J. Chem. Phys. 111, 3365
+  (1999)** [MT99]. Nakajima–Zwanzig to 2nd order in the system–bath coupling,
+  full memory + initial correlations, **arbitrary strong time-dependent
+  fields**; the memory kernel is made time-LOCAL by an exponential
+  decomposition of the bath correlation function → coupled primary + N
+  auxiliary density matrices. Transcribed §8.1.
+- **[V/P] M. Merkli, G. P. Berman, R. Sayre, "Electron transfer reactions:
+  generalized spin-boson approach", J. Math. Chem. 51, 890 (2013)** [M13]
+  (= [B25] ref [75]). Mathematically rigorous (dynamical-resonance method)
+  dynamics of a donor–acceptor system coupled to a thermal bath, with BOTH
+  energy-conserving (dephasing, g-type) and energy-exchange (a-type)
+  couplings, all orders in the tunneling V, controlled remainders uniform in
+  t; **multi-level donor/acceptor reduces exactly to a two-level model in the
+  collective-state basis with √N-rescaled couplings**. Transcribed §8.2.
+
 ### Primary anchor — strong-field open systems
 - **[V/P] N. Boroumand, A. Thorpe, G. Bart, A. M. Parks, M. Toutounji, G. Vampa,
   T. Brabec, L. Wang, "Strong field physics in open quantum systems",
@@ -377,3 +394,163 @@ sub-step is a damped linear map (CP-compatible stepping). Cost: n_aux (~3–6)
 extra complex fields per (k, pair). This slots into the existing coherence
 update; the population (ring) channels keep their separate ICFE story (§3C).
 **Awaiting maintainer go-ahead.**
+
+---
+
+## 8. Stage-2 PROPOSAL — non-Markovian dephasing inside the multiband master equation (2026-07-20, AWAITING MAINTAINER APPROVAL)
+
+The maintainer supplied the two sources ([MT99], [M13]) and asked for a
+thought-through fix. This section is the design; no solver code is written yet.
+
+### 8.1 [MT99] — verified transcription (the machinery)
+
+Model: Caldeira–Leggett bath, coupling H_sb = −f(x)·Σc_i x_i, plus an
+**arbitrary strong time-dependent field W(x,t) treated non-perturbatively**.
+NZ projection to 2nd order in the coupling λ gives the time-nonlocal master
+equation [MT99 Eq. (13′)]
+
+$$\dot\rho_s(t) = L_s^{\rm eff}(t)\rho_s(t) + \int_{-\infty}^{t}\! K(t,t')\rho_s(t')\,dt',$$
+
+$$K(t,t') = \lambda^2 L^-\big(a(t{-}t')\,\mathcal{T}e^{\int_{t'}^{t}L_s}L^-
++ b(t{-}t')\,\mathcal{T}e^{\int_{t'}^{t}L_s}L^+\big),$$
+
+with $L^-=-i[f,\cdot\,]$, $L^+=[f,\cdot\,]_+ -2\chi$ (χ = thermal mean of f),
+and the bath correlation function c(t) = a(t) − i b(t) [MT99 Eq. (8)]. Two
+essential structural facts: **the field enters the memory kernel** (bath
+influence is modified by strong fields), and the kernel is nonlocal — naive
+storage of ρ(t′) does not even suffice (the field-dressed backward propagator
+is needed).
+
+The fix [MT99 Sec. IV]: write a(t) = Σ_k α_k^r e^{γ_k^r t},
+b(t) = Σ_k α_k^i e^{γ_k^i t} (their Lorentzian parametrization of J(ω),
+Eq. (15)–(17), incl. Matsubara terms; **"we view Eq. (15) merely as a
+numerical decomposition"** — a direct numeric exponential fit is endorsed).
+Then auxiliary matrices ρ_k (Eqs. (18)–(21)) convert the problem to the
+time-LOCAL coupled system [MT99 Eq. (22)]:
+
+$$\dot\rho_s = L_s^{\rm eff}\rho_s + \lambda\Big(\sum_k \alpha_k^r L^-\rho_k^r
++ \sum_k \alpha_k^i L^-\rho_k^i\Big),$$
+$$\dot\rho_k^r = (L_s + \gamma_k^r)\rho_k^r + \lambda L^-\rho_s,\qquad
+\dot\rho_k^i = (L_s + \gamma_k^i)\rho_k^i + \lambda L^+\rho_s.$$
+
+Properties (all printed in [MT99]): the external field enters only
+block-diagonally (each matrix rides the SAME system propagator); cost =
+(N+1)× a Markovian propagation for arbitrarily long memory; genuine
+irreversible decay + the correct (to O(λ²)) thermal equilibrium; initial
+correlations = "memory from the past" (the t<0 field-free equilibrium
+history), naturally included by starting the coupled system in its field-free
+steady state.
+
+### 8.2 [M13] — verified transcription (the rigor + multilevel)
+
+Generalized spin-boson [M13 Eq. (1.3)]:
+
+$$H = \begin{pmatrix}E_D & V\\ V & E_A\end{pmatrix} + H_R
++ \lambda\begin{pmatrix}g_D & a\\ a & g_A\end{pmatrix}\otimes\varphi(h),$$
+
+g-type (diagonal) coupling = energy-conserving **dephasing**; a-type
+(off-diagonal) = **energy exchange** (bath-driven transport even at V = 0 —
+the physics missing from a pure-σ_z model). Dynamical-resonance method: the
+full reduced density matrix for ALL t ≥ 0, perturbation theory in λ with
+controlled remainders **uniform in t**, all orders in V; validity |λ| ≪
+E_D−E_A. Relaxation rates [Eqs. (1.8)/(1.10)] carry the bath through
+coth(βΔ/2)J(Δ) at the SYSTEM transition frequency Δ = √((E_D−E_A)²+4V²).
+**Multilevel acceptor** [Eqs. (1.12)–(1.14)]: an N_A-fold degenerate acceptor
+reduces EXACTLY, in the basis of the donor state and the collective state
+σ_A = N_A^{-1/2}Σ|A_i⟩, to the two-level model with rescaled couplings
+V → V√N_A, a → a√N_A. Rate grows with N_A (γ ∝ N_A in the small-hopping
+regime [Eq. (1.16)]); the transfer separation does NOT [Eq. (1.11)].
+
+**Retroactive grounding of #88:** the SFSB mode's bright-manifold quadrature
+coupling √Σ_v|d·ê|² IS [M13]'s collective-state √N rescaling — the two-band
+reduction we derived from gauge invariance is the rigorous multilevel
+reduction of [M13].
+
+### 8.3 The proposed fix, mapped onto the solver
+
+**What is being fixed.** The production dephasing is Markovian: Kuhn–Zurek
+`exp[−λ(X_a−X_b)²τ]` with constant λ = k_BT/τ_m (a white-noise/high-T limit)
+plus constant per-channel gout damping. [B25] (§6) shows this class fabricates
+ionization ("dephasing ionization") by real-ifying returning virtual
+polarization — the coherence-sector twin of the §1 disease. The merged
+`yn_sbe_sfsb` mode (#88) brackets the correct answer but is 2nd-order/1D —
+not the production propagator.
+
+**The fix: an MT auxiliary-mode non-Markovian dephasing channel** replacing
+the constant-rate dephasing, [MT99] structure with [B25]'s bath:
+
+1. **Coupling operator** f = diag(s_a/2), s_a = +1 conduction / −1 valence —
+   the multiband σ_z of [B25], rigorously justified for the (near-)degenerate
+   band-edge manifolds by [M13]'s collective reduction. **No a-type
+   (energy-exchange) bath coupling**: bath-driven interband population
+   transfer is already modeled by the collision channels (e-ph/II/Auger) —
+   adding it here would double-count (same rule class as BGR↔Σ^HF).
+   Optional later: f from the Kuhn–Zurek branch positions X_a (the
+   colored-noise upgrade of the exact same channel; shares 100% of the
+   machinery since both f are diagonal).
+2. **Kernel data**: c(τ) ≡ −C″(τ) of the SAME shipped bath models
+   (W(ω)=j₀g(|ω|)/ω; ohmic/debye, T₂ anchor). With f = σ_z/2 the exact
+   undriven coherence decay is exp[C(t)] **including the Im C phase** (the
+   dynamic gap addition, [B25 Fig 3c]) — since C(t) = −∫₀ᵗ(t−τ)c(τ)dτ
+   identically. This is the sign/normalization anchor test.
+3. **Exponential decomposition**: numeric Prony / least-squares fit of
+   a(τ) = Re c, b(τ) = −Im c to Σα e^{γτ} ([MT99]-endorsed), n_exp ≈ 3–6 +
+   Matsubara at finite T; fit-quality unit test against the table.
+4. **Wiring** (concrete, from `dt_evolve_bloch_cf4`): auxiliary matrices
+   σ_k(nb_full or nba?, per k) stored as `sbe%rho_mt(:,:,:,k)`;
+   Strang: [half MT-coupling + e^{γ_k dt/2} decay] → **the existing S4/CF4
+   unitary applied to ρ_s AND every σ_k** (refactor `cf4_unitary_step` to
+   build the two exponentials once per (k, sub-step) and apply to 1+n
+   matrices — the exponentials dominate, so the marginal cost is GEMMs) →
+   [half MT-coupling]. Because f is DIAGONAL, the coupling sub-step acts
+   ELEMENTWISE: (L⁻ρ)_{ab} = −i(s_a−s_b)/2·ρ_{ab}, (L⁺ρ)_{ab} =
+   ((s_a+s_b)/2−2χ)ρ_{ab} — each (a,b) element of (ρ_s, {σ_k}) closes into a
+   small (1+n)-dimensional constant-coefficient linear ODE whose exponential
+   is precomputed ONCE per element-class (s_a−s_b ∈ {0,±2}) per step — O(1)
+   overhead. Populations (s_a=s_b diagonal) are untouched by the coupling —
+   pure dephasing, exactly [B25]'s structure (the bath dephases, the LASER
+   converts).
+5. **Conservation/honesty**: trace conservation EXACT (only L⁻ commutators
+   feed ρ_s); Hermiticity kept by conjugate-pair exponentials + the existing
+   re-Hermitization. Positivity is NOT guaranteed by construction (TC2/
+   Redfield class — the fundamental non-Markovian↔CP tension, Schnell 2020):
+   weak-coupling validity documented (|λ| ≪ gap, [M13 Eq. (1.2)]), runtime
+   Houston-diagonal monitor (warn/stop per existing discipline).
+6. **Initial correlations**: start the coupled (ρ_s, σ_k) system in its
+   field-free steady state (pre-relax a few bath correlation times before
+   t=0) — [MT99]'s "time flows from −∞" form; cheap and clean.
+7. **Frozen window**: f and the auxiliaries live in the active window (same
+   scope as every dissipator); the CP-extension bookkeeping of the
+   active↔frozen coherences applies unchanged.
+8. **Guards**: mutual exclusion with `sbe_decoh_*` (two dephasing models on
+   ⇒ error stop); requires `sbe_bath_model` ohmic/debye (rta would be the
+   Markovian limit — allowed for A/B testing); graphene: replaces the
+   forbidden KZ (many-body coherence argument re-examined — the MT channel
+   with a physical bath may be legitimate there; needs its own decision).
+9. **Cost**: ×(1+n_exp) memory for ρ (e.g. ×5), runtime ×3–5 (GEMM-bound);
+   acceptable as a super-mode option.
+
+### 8.4 Validation plan (after approval)
+
+1. Undriven two-level, weak coupling: coherence decay ≡ exp[C(t)] (Re decay
+   AND Im phase) — pins signs/normalization against the merged C(τ) table.
+2. High-T Debye: MT channel → constant-T₂ behaviour (the RTA limit).
+3. Weak-field driven two-level: full-SBE MT channel vs the `yn_sbe_sfsb`
+   reference (#88) — must agree in the 2nd-order regime (this cross-check is
+   exactly what the SFSB mode was built to provide).
+4. Production demo (the headline): Si/GaAs 4³ multiband, below-gap pulse —
+   nex(coherent) vs nex(KZ 300 K) vs nex(MT ohmic 300 K); expected
+   MT ≈ coherent ≪ KZ (the fabricated dephasing ionization removed from the
+   full solver).
+5. [M13] check: rate vs conduction-manifold size (γ ∝ N in the small-V
+   regime) on a toy multiband spectrum.
+
+### 8.5 Decision points for the maintainer
+
+- (a) approve the channel as specified (f = band-character σ_z/2, no a-type
+  coupling)? (b) also want the X_a-coupled variant as an option?
+- accept the TC2 positivity caveat (monitored, weak-coupling domain) — or
+  require a CP-enforcing projection step after each dt?
+- graphene: allow the MT channel where KZ is forbidden, or keep both off?
+- bounded-increment split: (1) kernels c(τ) + Prony fit + tests; (2) solver
+  wiring + CF4 refactor; (3) validation + docs — one PR each or one branch?

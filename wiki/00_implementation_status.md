@@ -34,11 +34,20 @@ separate them in sub-cycle fields.
   calc-validated** as the SFSB non-Markovian memory-kernel mode
   (`yn_sbe_sfsb`, wiki/10 §7, exercise x13) — the quantitative reference
   bracket for option A. The page stays a live Fable-maintained document.
-- ⬜ **Stage-2 (NOT yet authorized): non-Markovian dephasing inside the
-  multiband master equation** via Meier–Tannor exponential decomposition of
-  e^{C(τ)} → auxiliary polarization ODEs per (k, v-c pair) — memory without
-  history storage, reduces to RTA/KZ in the single-exponential limit. Design
-  + why the "Re[e^C]·LρL† memory Lindblad" proposal was rejected: wiki/10 §7.4.
+- 🔶 **Stage-2: non-Markovian dephasing inside the multiband master equation
+  — FULL PROPOSAL READY (2026-07-20), AWAITING MAINTAINER APPROVAL.** The
+  maintainer supplied the two sources (Meier–Tannor JCP 111, 3365 (1999)
+  [MT99] + Merkli–Berman–Sayre JMC 51, 890 (2013) [M13] = B25 ref [75]);
+  both are transcribed and the complete design is **wiki/10 §8**: MT
+  auxiliary-density-matrix channel (time-local, field enters only
+  block-diagonally, cost (N+1)× Markovian), coupling f = band-character
+  σ_z/2 (NO a-type energy-exchange coupling — would double-count the
+  collision channels), exact trace conservation, exp[C(t)] anchor test,
+  elementwise coupling step (f diagonal ⇒ O(1) overhead beyond the shared
+  CF4 unitary), positivity monitored (TC2 caveat), [M13] √N collective
+  reduction = the rigorous version of #88's bright-manifold construction.
+  Decision points for the maintainer: wiki/10 §8.5. Earlier note kept: the
+  "Re[e^C]·LρL† memory Lindblad" formulation stays rejected (wiki/10 §7.4).
 
 ---
 
