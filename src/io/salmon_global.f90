@@ -496,6 +496,20 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: sbe_search_sigma_e_ev  ! energy-bin width sigma_E [eV] (<=0: grid-matched)
   real(8)        :: sbe_ring_gate_fs       ! ring virtual-transient gate time [fs] (0: off = default; <0: auto 2*pi/Egap; >0 manual). EXPERIMENTAL: in sub-cycle fields the dressing follows the envelope and outlives any lifetime gate.
   real(8)        :: sbe_eph_interband_scale ! calibration factor on the eph ring's gap-straddling (phonon-assisted BTBT) partial rates; 1 = cited nu_sat upper estimate
+  ! SFSB non-Markovian heat bath (Boroumand et al., Rep. Prog. Phys. 88, 070501
+  ! (2025); wiki/10 sec. 6): second-order memory-integral ionization mode with
+  ! the bath correlation kernel C(t) instead of the Markovian T2 dephasing.
+  character(1)   :: yn_sbe_sfsb            ! 'y': run the SFSB memory-integral ionization mode (1D k-line, E || b1)
+  character(16)  :: sbe_bath_model         ! bath spectral model: 'none'|'ohmic'|'debye'|'rta' [B25 Eq. (5)]
+  real(8)        :: sbe_bath_jo            ! dimensionless bath coupling jo [B25]
+  real(8)        :: sbe_bath_wc_ev         ! bath cutoff hbar*wc [eV]; required > 0 for ohmic/debye
+  real(8)        :: sbe_bath_temperature_k ! bath (electron/lattice) temperature [K]; 0 = T=0 allowed
+  real(8)        :: sbe_bath_rta_t2_fs     ! RTA T2 [fs]; <=0: derived T2 = hbar/(2 pi kB T jo) [B25 sec. 2]
+  real(8)        :: sbe_bath_memory_fs     ! memory-kernel truncation window [fs]; <=0: full history
+  character(1)   :: yn_sbe_bath_imc        ! 'n': zero Im C(t) -- diagnostic only [B25 Fig. 3(c)]
+  integer        :: sbe_sfsb_nv            ! # top valence bands in the SFSB pair sum
+  integer        :: sbe_sfsb_nc            ! # bottom conduction bands in the SFSB pair sum
+  integer        :: sbe_sfsb_stride        ! integrate every Nth field sample; 0: auto from the Stark-shifted gap
   ! Carrier-carrier (e-e/e-h) scattering (Part F): CPTP relaxation of the
   ! adiabatic populations toward a Fermi-Dirac with the same number AND energy
   ! (intraband thermalization + EID), at a screened-Coulomb rate.

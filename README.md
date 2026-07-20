@@ -59,6 +59,10 @@ of a textbook.
 - HHG with realistic scattering-limited coherence; gauge-invariant current,
   conductivity σ(ω) and STFT maps, 3D BZ population movies —
   [`wiki/09`](wiki/09_plotting_and_analysis.md)
+- **SFSB non-Markovian heat bath** (Boroumand 2025): the bath correlation
+  kernel C(t) replaces the relaxation-time T₂; memory-integral ionization mode
+  `yn_sbe_sfsb` reproducing dephasing ionization / suppression —
+  [`wiki/10`](wiki/10_open_quantum_systems_literature.md) §6–7
 
 ## Quick start
 
@@ -91,6 +95,7 @@ once, watch the carriers roll into the valleys in 3D:
 | [`exercise_x9_bulkSi_dft_sbe/`](samples/exercise_x9_bulkSi_dft_sbe/) | replacing the EPM with a **real DFT** ground state (rough LDA → SBE, frozen core) |
 | [`exercise_x10_Si_full_dissipation/`](samples/exercise_x10_Si_full_dissipation/) | Si with all channels — the bleaching-ready copy of x8 (BGR+KZ variant) |
 | [`exercise_x11_full_dissipation_showcase/`](samples/exercise_x11_full_dissipation_showcase/) | **the flagship demo**: all 4 materials × every valid channel (Σ^HF instead of BGR, collisional decoherence instead of KZ, nonlocal ring II), valley-rolling 3D movies |
+| [`exercise_x13_GaAs_sfsb_nonmarkovian/`](samples/exercise_x13_GaAs_sfsb_nonmarkovian/) | **non-Markovian dissipation**: the SFSB memory kernel vs the relaxation-time approximation (dephasing ionization ×30, low-T suppression ×25, the Im C flip) |
 | [`exercise_04_bulkSi_gs/`](samples/exercise_04_bulkSi_gs/) | plain DFT ground state + `dft_band` band structure |
 
 ## Configuration philosophy
@@ -145,6 +150,7 @@ there** and it is updated in the same commit as any code change.
 | [`07_nonlocal_auger.md`](wiki/07_nonlocal_auger.md) | nonlocal II ↔ Auger theory, ε(q)/umklapp, 2D Rana branch, source-verified coefficients |
 | [`08_master_equation.md`](wiki/08_master_equation.md) | **the full master equation, mathematically complete** — every effect as an explicit term |
 | [`09_plotting_and_analysis.md`](wiki/09_plotting_and_analysis.md) | the plotter, unfold pipeline, injection probes |
+| [`10_open_quantum_systems_literature.md`](wiki/10_open_quantum_systems_literature.md) | open-quantum-system dissipation review; **[B25] SFSB transcription (§6) + the non-Markovian memory-kernel mode (§7)** |
 
 Conventions (units, Houston basis, CPTP, provenance) are at the top of
 [`wiki/08`](wiki/08_master_equation.md) and in the pages above; working
@@ -165,6 +171,7 @@ validation by calculation, signed-off commits) in
 9. **Coulomb HF renormalization:** Golde, D., Kira, M., Meier, T., & Koch, S. W. *Phys. Status Solidi B* 248, 863 (2011).
 10. **Impact ionization fits:** Stobbe, M., Redmer, R., & Schattke, W. *Phys. Rev. B* 49, 4494 (1994); Keldysh, L. V. *JETP* 21, 1135 (1965).
 11. **Nonlocal Auger & impact ionization** (`wiki/07`): Laks, D. B., Neumark, G. F., & Pantelides, S. T. *Phys. Rev. B* 42, 5176 (1990) [L90]; Kioupakis, E. et al. *Phys. Rev. B* 92, 035207 (2015) [K15]; Steiauf, D., Kioupakis, E., & Van de Walle, C. G. *ACS Photonics* 1, 643 (2014) [S14]; Rana, F. *Phys. Rev. B* 76, 155431 (2007) [R07].
+12. **Non-Markovian strong-field heat bath** (`wiki/10`): Boroumand, N., Thorpe, A., Bart, G., Parks, A. M., Toutounji, M., Vampa, G., Brabec, T., & Wang, L. *Rep. Prog. Phys.* 88, 070501 (2025) [B25]; Meier, C., & Tannor, D. J. *J. Chem. Phys.* 111, 3365 (1999) (exponential bath decomposition).
 
 ## License
 

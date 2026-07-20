@@ -1,6 +1,7 @@
 # Open-Quantum-System Dissipation in Strong Fields — Literature Review
 
-**Status: literature-review task (seeded 2026-07-19). Assigned to Fable to extend/maintain.**
+**Status: literature-review task (seeded 2026-07-19). Assigned to Fable to extend/maintain.
+2026-07-20: the [B25] prescription is transcribed (§6) and implemented+validated in-repo (§7).**
 This page collects the *verified* literature behind the "virtual-vs-real carrier"
 problem and ranks the candidate universal fixes. It is a decision document for the
 open coding task tracked in `wiki/00` ("universal virtual/real carrier separation").
@@ -45,14 +46,13 @@ confirmed via search; **[A]** claim confirmed at abstract level only;
 **[U]** could not verify — treat as a lead, not a source.
 
 ### Primary anchor — strong-field open systems
-- **[V] N. Boroumand, A. Thorpe, G. Bart, A. M. Parks, M. Toutounji, G. Vampa,
+- **[V/P] N. Boroumand, A. Thorpe, G. Bart, A. M. Parks, M. Toutounji, G. Vampa,
   T. Brabec, L. Wang, "Strong field physics in open quantum systems",
   Rep. Prog. Phys. 88, 070501 (2025)** (= arXiv:2502.10240). Brabec/Vampa-group
-  review of dephasing/dissipation for a strong-field-driven electron coupled to a
-  bath. **[A]** frames the environment as a heat bath and dephasing as
-  environment-induced loss of phase coherence. *This is the authoritative recent
-  reference; its dissipation prescription must be transcribed directly from the
-  PDF (in-repo upload) before we cite specific equations.*
+  Letter on dephasing/dissipation for a strong-field-driven electron coupled to
+  a bath. **[P] = transcribed from the maintainer-supplied journal PDF
+  (2026-07-20); the full verified transcription is §6 below and the in-repo
+  implementation + validation is §7.** Referred to as **[B25]** throughout.
 
 ### Gauge / basis of the SBE dissipator
 - **[V] T. G. Jensen, L. B. Madsen, "Structure gauges and laser gauges for the
@@ -143,6 +143,9 @@ field- and energy-dependent with a broadened threshold. It is the rigorous origi
 of the correct field scaling but is **non-Markovian** (memory kernels) and costly.
 The code already has the mean-field shadow (`sbe_ii_fk_*`, Franz–Keldysh softening).
 Use it to *calibrate* option A, not as the primary mechanism.
+**Concretized (2026-07-20): the [B25] SFSB memory kernel — the coherence-sector
+member of this class — is implemented as the quantitative reference bracket
+(§6–7, `yn_sbe_sfsb`).**
 
 ### D. Phenomenological BTBT source + interband knob — CURRENT FALLBACK
 `sbe_eph_interband_scale` (gap-straddling rate factor) and/or a Hurkx/Kane source
@@ -175,8 +178,202 @@ Suggested manuscript framing (once option A is validated):
 
 ## 5. What is NOT verified (do before publishing)
 
-- The Boroumand review's **exact** dissipation prescription and equations
-  (fetch blocked; PDF is in the session upload — transcribe directly).
+- ~~The Boroumand review's **exact** dissipation prescription and equations~~
+  ✅ **DONE (2026-07-20)** — transcribed from the journal PDF into §6 and
+  implemented/validated (§7).
 - Whether arXiv:2508.07869's "well-behaved dephasing" basis is *the* dressed basis
   or a Wannier construction (abstract only).
 - The Schuler 2013 citation (treat as non-existent until found).
+- The [B25] **supplement** (spectral-density definitions section IV, ZnO
+  parameters table) is still NOT available — only the letter itself. The
+  Ohmic/Debye profile normalizations in §6.2 are pinned by the letter's own
+  printed anchors, not by the supplement.
+
+---
+
+## 6. [B25] — verified transcription (from the journal PDF, 2026-07-20)
+
+### 6.1 The SFSB model
+
+Single-electron two-band system + bosonic bath, linear diagonal coupling
+[B25 Eq. (1)]:
+
+$$H = -\tfrac12 E(K_t,t)\,\sigma_z + \tfrac12\hbar\Omega(K_t,t)\,\sigma_x
++ \sum_q \hbar\omega_q b_q^\dagger b_q + \sigma_z \sum_q g_q (b_q + b_q^\dagger)$$
+
+with $K_t = K + eA(t)/\hbar$, generalized Rabi frequency
+$\Omega = (2e/\hbar)\,d(K_t)E(t)$, transition dipole $d$ and gap $E$ at the
+shifted momentum. The bath couples **only diagonally** (pure dephasing — no
+direct bath-driven interband transitions); ionization is still affected
+because laser and bath dynamics couple. After a polaron transformation +
+interaction picture [B25 Eq. (2)]:
+
+$$H_I = -\tfrac{E}{2}\sigma_z + \tfrac{\hbar\Omega}{2}
+\left(\sigma_+ D^\dagger + \sigma_- D\right),\qquad
+D = \exp\Big\{-\sum_q g_q\big(b_q^\dagger - b_q\big)/(\hbar\omega_q)\Big\}$$
+
+— note the $1/(\hbar\omega_q)$ in the shift operator: the bath weight that
+appears downstream is $(g_q/\hbar\omega_q)^2$.
+
+### 6.2 The result: memory-kernel ionization
+
+Second-order Dyson expansion, bath traced out ⇒ [B25 Eqs. (3)–(4)]:
+
+$$n_c(K,t) = \tfrac12\,\mathrm{Re}\int_{-\infty}^{t}\! dt_1
+\int_{-\infty}^{t_1}\! dt_2\; \Omega^*(K_{t_1},t_1)\,\Omega(K_{t_2},t_2)\,
+\exp\big[\,i S(t_1,t_2) + C(t_1-t_2)\,\big],\qquad
+n_c(t)=\int_{BZ} n_c(K,t)\,dK$$
+
+with the dynamic-Stark-shifted action
+$S(t_1,t_2)=\int_{t_2}^{t_1} E_s(K_\tau,\tau)\,d\tau/\hbar$,
+$E_s=\sqrt{E^2+|\hbar\Omega|^2}$. **ALL environment influence is in the bath
+correlation function** [B25 Eq. (5)]:
+
+$$C(t_1-t_2) \approx \int_{-\infty}^{\infty} J(\omega)\Big[\, i\sin\omega(t_1{-}t_2)
+- \big(1-\cos\omega(t_1{-}t_2)\big)\coth\tfrac{\hbar\omega}{2k_BT} \Big]\,d\omega$$
+
+- $e^{C(\tau)}$ does **not** factorize across time steps — this pair-time
+  structure IS the non-Markovianity ("the future evolution depends on the past
+  history").
+- Temperature enters only via the coth.
+- $J(\omega)$ = continuum spectral density with two parameters: dimensionless
+  coupling $j_o$ and cutoff $\omega_c$. Models named: Debye, Ohmic,
+  Under-Damped Brownian, Gaussian, Shifted-Gaussian (**definitions are in the
+  unavailable supplement §IV** — see the normalization note below).
+- **Printed anchor** [B25 §2]: for the Debye bath at high T,
+  $C \to -(t_1-t_2)/T_2$ with $T_2 = \hbar/(2\pi k_B T j_o)$ — the
+  relaxation-time approximation is this limit. The other models do NOT become
+  linear-in-t at high T.
+- Ionization ratio $\eta = n_c(j_o\neq0)/n_c(j_o=0)|_{t=\infty}$ [B25 Eq. (6)].
+
+**Normalization (ours, anchored):** with the letter's $D$-operator convention
+the continuum weight is $W(\omega) = \sum_q (g_q/\hbar\omega_q)^2\,
+\delta(\omega-\omega_q)$ extended oddly; we implement
+$W(\omega)=j_o\,g(|\omega|)/\omega$ with $g_{\rm ohmic}=e^{-\omega/\omega_c}$,
+$g_{\rm debye}=\omega_c^2/(\omega^2+\omega_c^2)$. For ANY cutoff with
+$g(0)=1$ this reproduces the printed high-T anchor
+$T_2=\hbar/(2\pi k_BTj_o)$ **exactly** (test_bath_corr), plus the closed
+forms $\mathrm{Im}\,C_{\rm ohmic}=2j_o\arctan(\omega_c t)$,
+$\mathrm{Re}\,C_{\rm ohmic}(T{=}0)=-j_o\ln(1+\omega_c^2t^2)$,
+$\mathrm{Im}\,C_{\rm debye}=\pi j_o(1-e^{-\omega_c t})$. The supplement's own
+Gaussian/Shifted-Gaussian/UDB definitions are NOT implemented (no source).
+
+### 6.3 The letter's results (what a correct implementation must reproduce)
+
+1. **Dephasing ionization** [Fig 1]: RTA (T₂ = 6 fs) overestimates
+   under-resonant ionization by ~5 orders of magnitude (ZnO, 9-photon,
+   E₀ = 5×10⁸ V/m) — "when the phase relationship is disrupted, virtually
+   excited electrons are prevented from returning to the ground state."
+2. **Physical baths are benign at realistic T** [Fig 2(a)]: Ohmic/UDB/
+   Gaussian/Shifted-Gaussian all give negligible η changes at low T
+   ("as detected by experiments"); enhancement appears only at extreme
+   temperatures. Debye + RTA rise unphysically (the long ω-tail).
+3. **Debye → RTA at very high T** [Fig 2(b)].
+4. **Suppression at low T / strong coupling** [Fig 3]: the phase of C(t)
+   (Im part) acts as a **dynamic bandgap addition** ⇒ dephasing-SUPPRESSED
+   ionization; setting Im C = 0 flips suppression into enhancement [Fig 3(c)].
+5. **Distinct k-signature** [Fig 4]: dephasing ionization spreads nc(K) far
+   beyond the coherent distribution (ARPES-detectable).
+6. **Bath influence shrinks in the tunneling regime** [Fig 5(b)]: at γ < 1
+   the heat bath cannot follow the sub-cycle ionization step.
+7. Stated limits: 2nd-order Dyson (small n_c); thermal-equilibrium bath
+   (no dynamic T(t)); no e-e scattering (needs a fermionic bath / Keldysh);
+   two-band (multi-band extensions cited: their refs [74–76]).
+
+### 6.4 Connection to the §1 problem (why this page cares)
+
+[B25]'s "dephasing ionization" IS the §1 virtual/real disease in the
+**coherence sector**: the Markovian T₂ real-ifies the returning virtual
+polarization exactly like the Markovian ring collision operators real-ify the
+Houston dressing. And the paper's fix is the same *kind* of fix option C
+anticipated: keep the field-driven dynamics exact, make the environment
+non-Markovian (memory kernel), and the pathological conversion disappears at
+realistic temperatures. The SFSB model is therefore the quantitative
+**reference bracket** for how much generation a physical environment can
+add — option A's dressed-basis dissipator should land between the coherent
+result and the SFSB-with-physical-bath result, far below RTA.
+
+---
+
+## 7. SFSB in this repo — implementation + validation (2026-07-20)
+
+### 7.1 What was implemented
+
+| piece | where | what |
+|---|---|---|
+| `bath_corr_table` | `sbe_superres_ssbe.f90` | C(τ) table [B25 Eq. (5)]: ohmic / debye / rta profiles, Simpson ω-integral with the ω→0 limit node, coth series switches; `bath_t2_high_t` = ħ/(2πk_BTj_o) |
+| `sfsb_nc_series` | `sbe_superres_ssbe.f90` | pure Volterra stepper for Eq. (3): e^{iS} factorizes across steps, e^{C} does not — true history sum, truncatable window |
+| `yn_sbe_sfsb='y'` mode | `sfsb_ssbe.f90` | k-line driver: 1D MP line (num_kgrid=(N,1,1), E∥b1 enforced), K_t=K+A(t) trajectory with periodic **cubic-spline** interpolation, auto stride from the Stark gap, MPI×OpenMP over k, `_sfsb_nex/_sfsb_nck` outputs |
+| inputs | `&sbe` | `sbe_bath_model/jo/wc_ev/temperature_k/rta_t2_fs/memory_fs`, `yn_sbe_bath_imc`, `sbe_sfsb_nv/nc/stride` |
+| tests | `test_bath_corr.f90`, `test_sfsb_kernel.f90` | kernel closed forms + high-T anchor; stepper vs exact TDSE (RK4, 0.003%), RTA kernel ≡ Markov ODE (RK4), dephasing ionization ×1700 on a toy two-level, T=0 suppression, Im-C flip, window truncation |
+| example | `samples/exercise_x13_GaAs_sfsb_nonmarkovian/` | GaAs Γ–L, the paper's parameter points + `sfsb_validation.png` |
+
+### 7.2 The two-band-reduction traps (do not relitigate)
+
+Raw energy-sorted GS lines are NOT a two-band model; two traps found and
+solved on the way (both produced grid-DIVERGENT, orders-too-large nex):
+
+1. **Degenerate-manifold gauge randomness.** Individual |d_vc| between
+   members of a (near-)degenerate manifold are gauge-random per k (the GS
+   solver returns arbitrary per-k mixtures); sorted band indices also swap
+   character at avoided crossings (CdS: v7/v8 min splitting 3.6e-5 Ha; the
+   |d| line stepped 2.3 → 1e-9 between adjacent points). Only the
+   **quadrature (bright-state) sum** over the manifold is gauge-invariant and
+   smooth ⇒ coupling line = √Σ_v|d·ê|², gap line = band-edge E_c−E_v,top
+   (continuous by sorting). With this construction GaAs Γ–L converges:
+   nex = 2.957/2.962/2.9625e18 cm⁻³ at 96/192/384 points.
+2. **Selection-rule walls.** On CdS Γ–M (E⊥c) the whole band-edge channel is
+   allowed only in a pocket |q₁| ≲ 0.1 and **exactly zero** beyond (the bright
+   conduction character migrates diabatically to c10+): no smooth two-band
+   line exists on that line/polarization. The mode detects the wall
+   (adjacent-point coupling jump > 50 % of range) and WARNS; use a clean line
+   (GaAs Γ–L) or another polarization.
+
+### 7.3 Validation (GaAs Γ–L, 192 pts, λ₀ = 3.2 µm, E₀ = 2×10⁸ V/m, γ ≈ 2.15)
+
+All seven [§6.3] claims reproduce — figure
+`samples/exercise_x13_GaAs_sfsb_nonmarkovian/sfsb_validation.png`:
+RTA(6 fs) η = **30.6**; ohmic j₀=1/2.1ω₀/300 K η = **0.041** (suppressed);
+Im C := 0 flips to η = **158**; same bath at 2×10⁴ K η = **101**; ohmic/debye
+j₀=0.1/0.1ω₀ give η ≈ 1.08 for T ≤ 3×10³ K rising only above 10⁴ K; nc(K) of
+dephasing ionization is a flat BZ-wide background vs the sharp coherent peak
+[Fig-4 signature]; at γ ≈ 0.43 the RTA excess collapses 30.6 → 1.4 [Fig-5(b)].
+Debye at 3×10⁴ K is enhanced (η 5.3) but still ×29 below the derived-T₂ RTA —
+full convergence Debye→RTA needs T beyond our scan and the τ ≫ 1/ω_c regime;
+recorded as a quantitative difference from [B25 Fig 2(b)], not a discrepancy
+in trend.
+
+### 7.4 Route into the multiband master equation (proposed, NOT yet authorized)
+
+A proposal circulated to bolt the kernel into the Lindblad as
+∂ρ/∂t|diss = ∫K(t−t′)ρ(t′)dt′ with K(τ) ∝ Re[e^{C(τ)}]·L_jump ρ L_jump†.
+**Rejected as formulated**, three reasons:
+
+1. **Wrong object.** e^{C(τ)} is the *polaron cumulant* attached to the two
+   DRIVE vertices Ω(t₁)Ω(t₂) (that is what [B25 Eq. (2)–(3)] says: after the
+   polaron transform the bath rides the σ± drive term). A Nakajima–Zwanzig/
+   Born memory kernel on a jump operator would carry the *second-order* bath
+   correlator ⟨B(τ)B(0)⟩, not the exponentiated cumulant. Mixing the two
+   expansions has no derivation.
+2. **Re[·] alone is provably wrong physics.** Killing Im C flips suppression
+   into enhancement (test_sfsb_kernel: 5.2e-12 vs 0.16, eleven orders;
+   validation: η 0.041 → 158). The bath phase (dynamic gap addition) is not
+   decoration — it is the mechanism [B25 Fig 3(c)].
+3. **CP safety.** A raw time-nonlocal ρ-history kernel is not
+   CP-by-construction — the negative-population/trace-drift diseases the
+   frozen-window work (PRs #80–#87) just eliminated would return. And storing
+   ρ(t′) history for all (k, nb²) is prohibitive.
+
+**The correct Stage-2 route (bounded, CP-safe, no history storage):**
+Meier–Tannor exponential decomposition ([B25 ref 45]; Meier & Tannor,
+J. Chem. Phys. 111, 3365 (1999)) of the kernel,
+$e^{C(\tau)} \approx \sum_j a_j e^{-\gamma_j\tau}$ (complex γ_j, fitted once
+from `bath_corr_table`). The inner history integral then becomes a handful of
+**auxiliary polarization ODEs per (k, v-c pair)**:
+$\dot p_j = -(i\Delta E + \gamma_j)p_j + i a_j (\Omega/2) w$, with the
+coherence ρ_cv = Σ_j p_j — memory WITHOUT storing history, k-local, exactly
+reduces to the current RTA/Kuhn-Zurek for a single real exponential, and each
+sub-step is a damped linear map (CP-compatible stepping). Cost: n_aux (~3–6)
+extra complex fields per (k, pair). This slots into the existing coherence
+update; the population (ring) channels keep their separate ICFE story (§3C).
+**Awaiting maintainer go-ahead.**

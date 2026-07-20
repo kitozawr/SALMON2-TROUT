@@ -2,7 +2,7 @@
 
 **Read this first on every resume.** It records what is done, what is next, key decisions, and the test inventory. Update it in the same commit as any code change.
 
-Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #44 into `develop-2.0.0`); (2) new materials — **GaAs, Si/Si_cb, wurtzite CdS, monolayer graphene** — each a validated Python EPM reference + cited CPTP dissipation channels. The maintainer drives one bounded increment per session ("continue"). Test grid: **4×4×4 (or 5×5×5), scalar (no spinor)**. Current test count: **14/14** (`python3 tests/run_all.py`).
+Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #44 into `develop-2.0.0`); (2) new materials — **GaAs, Si/Si_cb, wurtzite CdS, monolayer graphene** — each a validated Python EPM reference + cited CPTP dissipation channels. The maintainer drives one bounded increment per session ("continue"). Test grid: **4×4×4 (or 5×5×5), scalar (no spinor)**. Current test count: **22/22** (`python3 tests/run_all.py`).
 
 ---
 
@@ -28,10 +28,17 @@ separate them in sub-cycle fields.
   `houston_dissipate` currently use, and whether the dressed basis can be reused
   cheaply or needs a new per-k-per-step eigendecomposition + kmap rework). In
   progress.
-- **Literature-review page (`wiki/10`) = Fable task** — extend/maintain it, and
-  transcribe the Boroumand et al. 2025 (Rep. Prog. Phys. 88, 070501) dissipation
-  prescription directly from the in-session PDF before citing specific equations
-  (WebFetch is blocked by the publishers).
+- ✅ **Literature-review page (`wiki/10`) = Fable task — transcription DONE
+  (2026-07-20).** The Boroumand 2025 [B25] prescription is transcribed verbatim
+  from the maintainer-supplied journal PDF (wiki/10 §6) **and implemented +
+  calc-validated** as the SFSB non-Markovian memory-kernel mode
+  (`yn_sbe_sfsb`, wiki/10 §7, exercise x13) — the quantitative reference
+  bracket for option A. The page stays a live Fable-maintained document.
+- ⬜ **Stage-2 (NOT yet authorized): non-Markovian dephasing inside the
+  multiband master equation** via Meier–Tannor exponential decomposition of
+  e^{C(τ)} → auxiliary polarization ODEs per (k, v-c pair) — memory without
+  history storage, reduces to RTA/KZ in the single-exponential limit. Design
+  + why the "Re[e^C]·LρL† memory Lindblad" proposal was rejected: wiki/10 §7.4.
 
 ---
 
@@ -43,7 +50,7 @@ Branch `claude/inter-k-ring-eph-ii` **merged into `develop-2.0.0`** (merge commi
 ---
 
 ## 🧭 NEXT SESSION — START HERE
-**Commit small changes directly to `develop-2.0.0`** (no feature branch unless the change is large/risky — then branch, as we did for the ring work). All four primitive materials run end-to-end: **GaAs (scalar+spinor), Si, CdS, graphene** (GS+SBE+maps); Si & CdS have dissipators+super-mode (CPTP); both ring channels (inter-k e-ph + momentum-II) are merged. Example set: `samples/exercise_x7_primitive_cell_epm/` (commented). Tests: **20/20** (`python3 tests/run_all.py`; incl. test_rana_auger_cptp).
+**Commit small changes directly to `develop-2.0.0`** (no feature branch unless the change is large/risky — then branch, as we did for the ring work). All four primitive materials run end-to-end: **GaAs (scalar+spinor), Si, CdS, graphene** (GS+SBE+maps); Si & CdS have dissipators+super-mode (CPTP); both ring channels (inter-k e-ph + momentum-II) are merged. Example set: `samples/exercise_x7_primitive_cell_epm/` (commented). Tests: **22/22** (`python3 tests/run_all.py`; incl. test_bath_corr + test_sfsb_kernel).
 
 ### 📍 SESSION-END STATUS (2026-07-03) — what is DONE vs what REMAINS
 **Merged this session (PRs #52–#62, all on `develop-2.0.0`):** nonlocal ring Auger (#52); DFT→SBE compatibility + `dft_band` bandpath + `exercise_x9` (#54); spinor Fortran EPM for GaAs SO (#55); `exercise_x10` Si full-dissipation template (#56); ring II/Auger **CDRB ε(q) + Cartesian umklapp G-sum** (#57); graphene **2D Rana** Auger/CM primitives (#58); Fortran EPM `_bandpath.data`; Auger **C(n) order-of-magnitude validation** vs S14/L90 (#62). The four wiki/07 journal PDFs (R07/K15/S14/L90) were supplied by the maintainer and every cited number is now **source-verified** (see wiki/07 §7 + the decisions log). Two conspect-transcription errors in wiki/07 §6 were caught & fixed against R07.
@@ -309,6 +316,7 @@ x11 showcase inputs updated with the new channels (holes+acoustic+checkpoints on
 - **Max ionization ceiling** (32 e per cubic cell) = 1.77e23 cm⁻³ (full valence inversion).
 - **GitHub CI is serial-only by request** (compiler/syntax gate). MPI verified locally.
 - **Commits are signed-off** (`git commit -s`), trailers Co-Authored-By + Claude-Session.
+- ✅ **SFSB non-Markovian memory-kernel mode [B25] (2026-07-20, maintainer: "goal = non-Markovian kernel for dissipation, may be with integration of memory"; PDF supplied).** Transcribed Boroumand 2025 (RPP 88, 070501) from the journal PDF into wiki/10 §6; implemented `bath_corr_table`/`bath_t2_high_t`/`sfsb_nc_series` (sbe_superres, pure) + the `yn_sbe_sfsb='y'` 1D k-line mode (`sfsb_ssbe.f90`) + 10 `&sbe` inputs + exercise x13. Normalization anchored by the letter's printed T₂=ħ/(2πk_BTj_o) (supplement unavailable — only ohmic/debye/rta shipped, STRICT provenance). **Calc-validated on GaAs Γ–L (192 pts, γ≈2.15): all seven [B25] claims reproduce** — RTA(6 fs) η=30.6 (dephasing ionization), ohmic j₀=1/2.1ω₀/300 K η=0.041 (suppression), Im C:=0 flips to η=158 (the bath PHASE is the suppressor — Fig 3(c)), 2e4 K η=101, η(T) plateau ≈1.08 below 3e3 K, flat nc(K) background signature, γ<1 collapse of the bath influence (30.6→1.4). Grid-converged 96/192/384 = 2.957/2.962/2.9625e18 cm⁻³. **Two traps recorded (wiki/10 §7.2, do NOT relitigate):** (1) individual |d_vc| inside a (near-)degenerate manifold are gauge-random per k and sorted indices swap character at avoided crossings — a fixed (v,c) pair line is a bright/dark STEP function (CdS: 2.3→1e-9 between adjacent points) whose interpolation noise exceeded the true multiphoton signal by 13 orders and diverged with the grid; only the quadrature bright sum √Σ|d·ê|² + the band-edge gap line are smooth invariants. (2) CdS Γ–M (E⊥c) has a **selection-rule wall** (channel exactly forbidden beyond |q₁|≈0.1) — no smooth two-band reduction exists there; the mode detects and WARNS (GaAs Γ–L is the clean validation line). **The "∂ρ/∂t=∫K(t−t′)ρ(t′)dt′ with K∝Re[e^C]·LρL†" proposal was REJECTED with reasons + the correct Meier–Tannor auxiliary-ODE Stage-2 route recorded (wiki/10 §7.4, not yet authorized).** En route: fixed `test_carrier_carrier.f90` (trunk-broken: `carrier_carrier_relax` gained the mandatory `alpha_out` arg in the CP-extension work without updating the standalone test).
 - **Part G = screening** (TF/Debye, static Lindhard/RPA = default, dynamic LOPC = GaAs-only); **Part F = carrier-carrier (e-e/e-h)** collision channel that USES G.
 - **No HF double-counting:** carrier-carrier (F) is the correlation (2nd-Born/GW) self-energy — dissipative only. The static screened-exchange energy shift stays SOLELY in HF (Σ^HF). Do not add it twice.
 - **Carrier-carrier invariants:** conserves Σf_k (number) AND ΣE_k f_k (energy) within the carrier subsystem (it thermalizes to a hot Fermi-Dirac, does NOT relax energy to the lattice). Use both as machine-precision validation invariants.
@@ -364,6 +372,8 @@ x11 showcase inputs updated with the new channels (holes+acoustic+checkpoints on
 | `test_auger_interk_cptp.f90` | inter-k Auger (ring) | `auger_interk_dpop` = time-reverse of `ii_interk_dpop`: trace conserved, recombining+promoting, bounded, **Fermi-Dirac detailed-balance fixed point** (net II+Auger dpop <1e-6) |
 | `test_rana_2d.f90` | graphene 2D Rana Auger/CM [R07] | `rana_rcccv`/`dirac_mu_2d`/`rana_qtf` [R07 Eqs.13/14/17]: **cited lifetimes** (τ_r=1.48 ps @1e12/300K/ε10; >5 ps @1e11; >1 ps @77K), equilibrium G=R, CVVV mirror, ε-ordering, monotonicity |
 | _manual_ `validate_auger_c.f90` | effective Auger C(n) vs S14/L90 | NOT in run_all (needs `Si_prim_eigen/_k.data`): C_eff=R/(n²p) from `auger_interk_dpop` on the Si 4³ EPM spectrum; n-independent (R∝n³), ~9–10× the Dziewior–Schmid Cₙ (order-of-mag agreement) |
+| `test_bath_corr.f90` | SFSB bath correlation C(t) [B25 Eq. 5] | closed-form anchors: ohmic Im C=2j₀atan(ω_c t) & Re C(T=0)=−j₀ln(1+ω_c²t²), debye Im C=πj₀(1−e^{−ω_c t}), **high-T slope → −2πk_BTj₀/ħ for BOTH profiles** (the printed [B25] T₂ anchor), RTA exact, C(0)=0, Re C≤0, j₀=0 off |
+| `test_sfsb_kernel.f90` | SFSB memory stepper [B25 Eq. 3] | vs exact two-level TDSE (RK4, 0.003% at C=0); RTA kernel ≡ Markov ODE (RK4, 7 digits); dephasing ionization ×1700 below-gap; virtual excursion returns without a bath (peak/final 210×); T=0 strong-coupling suppression; Im C:=0 flip; window truncation |
 | _(add per increment)_ | | |
 
 End-to-end smoke (manual): scalar GaAs 4³, `yn_sbe_superres='y'` + `yn_sbe_eph='y'`

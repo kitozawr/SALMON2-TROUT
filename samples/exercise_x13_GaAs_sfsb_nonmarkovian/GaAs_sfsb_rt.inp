@@ -1,0 +1,79 @@
+!########################################################################################!
+! SFSB non-Markovian memory-kernel ionization -- GaAs Gamma-L, multiphoton (gamma ~ 2).   !
+! [B25] Boroumand et al., Rep. Prog. Phys. 88, 070501 (2025); wiki/10 sec. 6-7.           !
+!----------------------------------------------------------------------------------------!
+! Step 2 of 2 (run GaAs_line_epm_gs.inp first). Computes the second-order conduction      !
+! population nc(K,t) with the bath memory kernel exp[C(t1-t2)] [B25 Eq. (3)+(5)]:         !
+! the ENTIRE environment is the correlation function C(t); the relaxation-time            !
+! approximation is the special case C = -t/T2. Outputs GaAs_line_sfsb_nex.data (nc(t))    !
+! and GaAs_line_sfsb_nck.data (k-resolved blocks).                                        !
+!                                                                                          !
+! This input is the paper's headline SUPPRESSION point: a strongly-coupled Ohmic bath     !
+! (jo = 1, wc = 2.1 w0) at 300 K SUPPRESSES 3.5-photon ionization ~25x below the          !
+! coherent (no bath) run, because Im C acts as a dynamic bandgap ADDITION [B25 Fig 3].    !
+! Reference numbers on the 192-pt line (validated 2026-07-20, sfsb_validation.png):       !
+!   sbe_bath_model='none'                        -> nex ~ 3.0e18 cm^-3 (coherent)         !
+!   'rta' + sbe_bath_rta_t2_fs=6.0               -> ~ 9.1e19  (x30 DEPHASING IONIZATION)  !
+!   'ohmic' jo=1 wc=0.817eV 300K  (this file)    -> ~ 1.2e17  (x25 suppressed)            !
+!   ... same + yn_sbe_bath_imc='n'               -> ~ 4.7e20  (flip: the phase suppresses)!
+!   ... same bath at 20000 K                     -> ~ 3.0e20  (high-T enhancement)        !
+! VALIDITY: 2nd order in the drive (small ionized fraction, gamma > 1); 1D line with      !
+! E || b1; two-band reduction = band-edge gap + bright-manifold coupling (wiki/10 sec. 7).!
+!########################################################################################!
+
+&calculation
+  theory = 'sbe'
+/
+
+&control
+  sysname = 'GaAs_line'
+/
+
+&units
+  unit_system = 'au'
+/
+
+&system
+  yn_periodic  = 'y'
+  ! FCC primitive (non-orthogonal) lattice vectors, a/2 = 5.3415 Bohr:
+  al_vec1(1:3) = 0.0d0,    5.3415d0, 5.3415d0
+  al_vec2(1:3) = 5.3415d0, 0.0d0,    5.3415d0
+  al_vec3(1:3) = 5.3415d0, 5.3415d0, 0.0d0
+  nelec  = 8
+  nstate = 12
+/
+
+&kgrid
+  num_kgrid(1:3) = 192, 1, 1            ! must match the GS line
+/
+
+&tgrid
+  dt = 0.4d0
+  nt = 7500                             ! 3000 a.u.t ~ 73 fs (pulse 2600 + tail)
+/
+
+&emfield
+  ae_shape1      = 'Acos2'
+  epdir_re1(1:3) = -0.57735027d0, 0.57735027d0, 0.57735027d0  ! E || b1 (the Gamma-L axis)
+  I_wcm2_1       = 5.31d+09             ! E0 = 2e8 V/m -> gamma ~ 2.15 (multiphoton)
+  tw1            = 2600.0d0             ! ~ tau = 20 fs Gaussian FWHM [B25]
+  omega1         = 0.01430d0            ! lambda0 = 3.2 um, hw = 0.389 eV [B25]
+/
+
+&analysis
+  out_projection_k_step = 3000          ! nck block cadence (in dt steps)
+/
+
+&sbe
+  yn_sbe_sfsb            = 'y'          ! SFSB memory-integral mode [B25 Eq. (3)]
+  sbe_bath_model         = 'ohmic'      ! 'none' | 'ohmic' | 'debye' | 'rta'
+  sbe_bath_jo            = 1.0d0        ! dimensionless coupling [B25]
+  sbe_bath_wc_ev         = 0.817d0      ! hbar*wc = 2.1 w0 (collective-excitation range)
+  sbe_bath_temperature_k = 300.0d0
+  sbe_bath_rta_t2_fs     = -1.0d0       ! rta only; <=0 derives T2 = hbar/(2 pi kB T jo)
+  sbe_bath_memory_fs     = -1.0d0       ! <=0: full history (no kernel truncation)
+  yn_sbe_bath_imc        = 'y'          ! 'n' zeroes Im C -- the [B25 Fig 3(c)] diagnostic
+  sbe_sfsb_nv            = 4            ! valence manifold for the bright coupling (all 4)
+  sbe_sfsb_nc            = 1            ! lowest conduction band only
+  sbe_sfsb_stride        = 0            ! auto integration stride from the Stark gap
+/

@@ -42,6 +42,7 @@ module sbe_superres_ssbe
               carrier_carrier_relax, eph_interk_dpop, ii_interk_dpop, &
               auger_interk_dpop, mp_grid_triple, mp_partner_triple, &
               vg_eta_admixture, vg_trunc_shift2, vg_conv_error, vg_ptop_exceeds, &
+              bath_t2_high_t, bath_corr_table, sfsb_nc_series, &
               get_material_params
 
     ! =====================================================================
@@ -2051,5 +2052,208 @@ contains
         logical :: over
         over = (ptop > thr)
     end function vg_ptop_exceeds
+
+    ! =====================================================================
+    ! SFSB non-Markovian heat bath (strong-field spin-boson model).
+    ! [B25] Boroumand, Thorpe, Bart, Parks, Toutounji, Vampa, Brabec, Wang,
+    ! Rep. Prog. Phys. 88, 070501 (2025) -- transcribed from the journal PDF
+    ! (wiki/10 sec. 6). The bath enters the driven two-band dynamics ONLY
+    ! through the correlation function [B25 Eq. (5)]
+    !
+    !   C(t) = int_{-inf}^{inf} dw W(w) [ i sin(wt) - (1-cos(wt)) coth(hw/2kT) ]
+    !
+    ! W(w) is the odd continuum spectral weight of the shift operator
+    ! D = exp{-sum_q g_q(b_q^+ - b_q)/(h w_q)} [B25 Eq. (2)]: the (g_q/h w_q)^2
+    ! mapping gives W(w) = jo*g(|w|)/w with a dimensionless coupling jo and a
+    ! cutoff profile g (g(0)=1). NORMALIZATION ANCHOR: for ANY such W the high-T
+    ! limit is C -> -t/T2 with T2 = hbar/(2 pi kB T jo) -- exactly the printed
+    ! [B25 sec. 2] Debye/relaxation-time-approximation anchor (verified in
+    ! test_bath_corr). Profiles implemented (the letter's supplement with the
+    ! full model list is not available -- STRICT provenance, wiki/10 sec. 6):
+    !   'ohmic':  g(w) = exp(-w/wc)          (used for ALL numerics in [B25])
+    !   'debye':  g(w) = wc^2/(w^2+wc^2)     (Drude-Lorentz; RTA anchor model)
+    !   'rta':    C(t) = -t/T2 exactly       (the Markovian reference [B25 Fig 2])
+    ! Closed-form anchors (tested): Im C_ohmic = 2 jo atan(wc t) exact;
+    ! Re C_ohmic(T=0) = -jo ln(1+wc^2 t^2); Im C_debye = pi jo (1-exp(-wc t)).
+    ! All quantities in Hartree a.u. (hbar = kB = 1; kT in Ha).
+    ! =====================================================================
+
+    ! High-temperature dephasing time of the jo-coupled bath:
+    ! T2 = hbar/(2 pi kB T jo)  [B25 sec. 2, printed formula], a.u.
+    pure function bath_t2_high_t(kT, jo) result(t2)
+        real(8), intent(in) :: kT, jo
+        real(8) :: t2
+        t2 = 1d0 / (2d0 * PI * max(kT, 1d-300) * max(jo, 1d-300))
+    end function bath_t2_high_t
+
+    ! coth(x) with the series/asymptotic switches that keep it accurate and
+    ! finite over the full bath integration range (x > 0).
+    pure function bath_coth(x) result(c)
+        real(8), intent(in) :: x
+        real(8) :: c
+        if (x > 19d0) then
+            c = 1d0
+        else if (x < 1d-4) then
+            c = 1d0 / x + x / 3d0
+        else
+            c = 1d0 / tanh(x)
+        end if
+    end function bath_coth
+
+    ! Tabulate C(tau) on tau = m*dtau, m = 0..nt [B25 Eq. (5)].
+    ! kT <= 0 means T = 0 (coth -> 1). jo <= 0 gives C = 0 (bath off).
+    ! model = 'ohmic' | 'debye' | 'rta'; for 'rta' the optional t2_rta (> 0)
+    ! overrides the high-T Debye T2 derived from (kT, jo).
+    ! The w-integral is composite Simpson on [0, wmax] with the w -> 0 limit
+    ! at the first node; wmax/resolution chosen so the closed-form anchors
+    ! reproduce to <= 1e-4 relative (test_bath_corr).
+    subroutine bath_corr_table(nt, dtau, kT, jo, wc, model, ctab, t2_rta)
+        integer, intent(in) :: nt
+        real(8), intent(in) :: dtau, kT, jo, wc
+        character(*), intent(in) :: model
+        complex(8), intent(out) :: ctab(0:nt)
+        real(8), intent(in), optional :: t2_rta
+        real(8) :: t2, taumax, dom, wmax, w, tau, sn, sh
+        real(8), allocatable :: wgt(:), cth(:), omg(:)
+        real(8) :: re, im
+        integer :: nw, j, m
+
+        ctab(:) = (0d0, 0d0)
+        if (jo <= 0d0 .and. trim(model) /= 'rta') return
+
+        select case (trim(model))
+        case ('rta')
+            t2 = bath_t2_high_t(kT, jo)
+            if (present(t2_rta)) then
+                if (t2_rta > 0d0) t2 = t2_rta
+            end if
+            do m = 0, nt
+                ctab(m) = cmplx(-m * dtau / t2, 0d0, 8)
+            end do
+            return
+        case ('ohmic')
+            wmax = 45d0 * wc
+        case ('debye')
+            ! the Drude-Lorentz 1/w^2 tail decays slowly; extend past the
+            ! thermal crossover so the truncated tail is O((wc/wmax)^2)
+            wmax = max(300d0 * wc, 40d0 * max(kT, 0d0))
+        case default
+            error stop 'bath_corr_table: unknown bath model (ohmic|debye|rta)'
+        end select
+
+        taumax = max(nt * dtau, dtau)
+        dom = min(2d0 * PI / (20d0 * taumax), wc / 24d0)
+        nw = int(wmax / dom) + 1
+        nw = min(max(nw + mod(nw, 2), 8), 4000000)   ! even panel count, capped
+        dom = wmax / nw
+
+        allocate(wgt(0:nw), cth(0:nw), omg(0:nw))
+        do j = 0, nw
+            omg(j) = j * dom
+            ! Simpson: 1,4,2,...,2,4,1 times dom/3; fold in 2*jo*g(w)/w
+            if (j == 0 .or. j == nw) then
+                wgt(j) = dom / 3d0
+            else if (mod(j, 2) == 1) then
+                wgt(j) = 4d0 * dom / 3d0
+            else
+                wgt(j) = 2d0 * dom / 3d0
+            end if
+            if (j > 0) then
+                w = omg(j)
+                if (trim(model) == 'ohmic') then
+                    wgt(j) = wgt(j) * 2d0 * jo * exp(-w / wc) / w
+                else
+                    wgt(j) = wgt(j) * 2d0 * jo * wc**2 / ((w**2 + wc**2) * w)
+                end if
+                if (kT > 0d0) then
+                    cth(j) = bath_coth(w / (2d0 * kT))
+                else
+                    cth(j) = 1d0
+                end if
+            else
+                wgt(0) = wgt(0) * 2d0 * jo    ! limit node: g(0)/w folded below
+                cth(0) = 1d0
+            end if
+        end do
+
+        !$omp parallel do private(m, tau, re, im, j, sn, sh) schedule(static)
+        do m = 0, nt
+            tau = m * dtau
+            ! w -> 0 limit of g/w * [i sin - (1-cos) coth] = i tau - kT tau^2
+            re = -wgt(0) * merge(max(kT, 0d0) * tau**2, 0d0, kT > 0d0)
+            im =  wgt(0) * tau
+            do j = 1, nw
+                sn = sin(omg(j) * tau)
+                sh = sin(0.5d0 * omg(j) * tau)
+                im = im + wgt(j) * sn
+                re = re - wgt(j) * 2d0 * sh * sh * cth(j)
+            end do
+            ctab(m) = cmplx(re, im, 8)
+        end do
+        !$omp end parallel do
+
+        deallocate(wgt, cth, omg)
+    end subroutine bath_corr_table
+
+    ! Second-order (Dyson) conduction population of a driven two-level pair
+    ! with the bath memory kernel [B25 Eq. (3)]:
+    !
+    !   nc(t) = (1/2) Re int^t dt1 int^t1 dt2 Om*(t1) Om(t2)
+    !                                  exp[ i S(t1,t2) + C(t1-t2) ]
+    !
+    ! S(t1,t2) = int_{t2}^{t1} Es dtau, Es = sqrt(dE^2 + |Om|^2) the
+    ! Stark-shifted gap [B25 after Eq. (4)]. Om(t) = 2 d(K_t) . E(t) is the
+    ! generalized Rabi frequency (a.u., e = hbar = 1), sampled by the caller
+    ! along the K_t = K + A(t) trajectory. The phase factorizes across steps,
+    ! exp[iS] = e^{i th(t1)} e^{-i th(t2)}; the bath kernel exp[C(t1-t2)] does
+    ! NOT -- that non-factorizable factor IS the memory (non-Markovian) part,
+    ! so the inner t2 integral is a true history sum (Volterra), truncatable
+    ! at nwin steps once |exp(Re C)| has decayed. C = 0 recovers textbook
+    ! second-order perturbation theory; C = -tau/T2 recovers the relaxation
+    ! time approximation (both asserted in test_sfsb_kernel).
+    ! nwin <= 0 or >= nt means the full history.
+    pure subroutine sfsb_nc_series(nt, dt, om, es, ctab, nwin, nc)
+        integer, intent(in) :: nt, nwin
+        real(8), intent(in) :: dt
+        complex(8), intent(in) :: om(0:nt)
+        real(8), intent(in) :: es(0:nt)
+        complex(8), intent(in) :: ctab(0:nt)
+        real(8), intent(out) :: nc(0:nt)
+        real(8), allocatable :: th(:)
+        complex(8), allocatable :: phi(:), kexp(:)
+        complex(8) :: inner
+        real(8) :: g_prev, g_cur
+        integer :: i, m, lo, win
+
+        allocate(th(0:nt), phi(0:nt), kexp(0:nt))
+        win = nwin
+        if (win <= 0 .or. win > nt) win = nt
+
+        th(0) = 0d0
+        do i = 1, nt
+            th(i) = th(i - 1) + 0.5d0 * (es(i - 1) + es(i)) * dt
+        end do
+        do i = 0, nt
+            phi(i)  = om(i) * exp(cmplx(0d0, -th(i), 8))
+            kexp(i) = exp(ctab(i))
+        end do
+
+        nc(0) = 0d0
+        g_prev = 0d0
+        do i = 1, nt
+            lo = max(0, i - win)
+            ! trapezoid over t2 in [t_lo, t_i]; kexp(0) = exp(C(0)) = 1
+            inner = 0.5d0 * (phi(lo) * kexp(i - lo) + phi(i))
+            do m = lo + 1, i - 1
+                inner = inner + phi(m) * kexp(i - m)
+            end do
+            inner = inner * dt
+            g_cur = 0.5d0 * real(conjg(om(i)) * exp(cmplx(0d0, th(i), 8)) * inner)
+            nc(i) = nc(i - 1) + 0.5d0 * (g_prev + g_cur) * dt
+            g_prev = g_cur
+        end do
+
+        deallocate(th, phi, kexp)
+    end subroutine sfsb_nc_series
 
 end module sbe_superres_ssbe
