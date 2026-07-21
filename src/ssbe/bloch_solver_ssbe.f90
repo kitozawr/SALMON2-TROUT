@@ -324,7 +324,8 @@ end subroutine init_eph_phonon_table
 
 subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     use util_ssbe
-    use communication, only: comm_get_groupinfo, comm_summation, comm_bcast
+    use communication, only: comm_get_groupinfo, comm_summation, comm_bcast, &
+                             comm_get_max, comm_sync_all
     use salmon_global, only: frozen_core_threshold_ev, frozen_free_threshold_ev, &
                              sbe_decoh_temperature_k, sbe_decoh_tau_m_fs, yn_sbe_spinor, &
                              yn_sbe_impact_ionization, sbe_ii_prefactor, &
@@ -477,10 +478,12 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
 
     ! 2. Initialize active bands array
     allocate(sbe%is_active(1:sbe%nb))
-    sbe%is_active = .false.  
-    sbe%n_active_bands = 0   
-    
-    ! 3. Determine active bands on root rank
+    sbe%is_active = .false.
+    sbe%n_active_bands = 0
+
+    ! 3. Determine active bands on the root rank only. The frozen-core window is
+    !    a global, k-independent property, so it is computed once and the MASK is
+    !    broadcast -- NEVER a separately-transmitted count (see step 5).
     if (irank == 0) then
         do ib = 1, sbe%nb
             eigen_ev = gs%eigen(ib, 1) * au_ev
@@ -488,32 +491,57 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
             if (eigen_ev > fermi_energy_ev + frozen_core_threshold_ev .and. &
                 eigen_ev < fermi_energy_ev + frozen_free_threshold_ev) then
                 sbe%is_active(ib) = .true.
-                sbe%n_active_bands = sbe%n_active_bands + 1
             end if
         end do
     end if
-    
-    ! 4. Broadcast n_active_bands
-    call comm_bcast(sbe%n_active_bands, icomm, 0)
-    
-    ! 5. Broadcast is_active logical array
+
+    ! 4. Broadcast the active MASK (as an integer buffer -- portable across the
+    !    MPI logical layout of any compiler). This mask is the SINGLE source of
+    !    truth: both the count (step 5) and the index table (step 6) are DERIVED
+    !    from it on every rank, so they can never disagree with the mask. The
+    !    previous code broadcast the count SEPARATELY from the mask; if the two
+    !    collectives ever delivered inconsistent data to a rank (a non-synchronized
+    !    distributed start, a partial broadcast), active_idx was sized by the count
+    !    but filled from the mask, leaving uninitialised tail entries -> garbage
+    !    band indices -> the ring self-energy read rho() out of bounds and
+    !    segfaulted on that one rank.
     if (sbe%nb > 0) then
         allocate(is_active_buf(1:sbe%nb))
-        
-        if (irank == 0) then
-            ! Modern Fortran: use merge() instead of a verbose do-loop
-            is_active_buf = merge(1, 0, sbe%is_active)
-        end if
-        
+        if (irank == 0) is_active_buf = merge(1, 0, sbe%is_active)
         call comm_bcast(is_active_buf, icomm, 0)
-        
-        ! Element-wise comparison replaces the verbose do-loop
         sbe%is_active = (is_active_buf == 1)
-        
         deallocate(is_active_buf)
     end if
 
-    ! 6. Build active_idx array
+    ! 5. Derive the active-band count from the (now identical) mask on EVERY rank.
+    sbe%n_active_bands = count(sbe%is_active)
+
+    ! 5a. Cross-rank consistency guard (compiler-agnostic: only MPI_Allreduce +
+    !     Fortran error stop). A non-synchronized distributed start can hand a
+    !     lagging rank a stale/partial mask; catch that here with a clean,
+    !     collective abort and an actionable message instead of a lone segfault
+    !     deep in the time loop. min == max  <=>  all ranks agree on the count.
+    block
+        integer :: n_hi, n_lo
+        n_hi =  sbe%n_active_bands
+        n_lo = -sbe%n_active_bands
+        call comm_get_max(n_hi, icomm)
+        call comm_get_max(n_lo, icomm)
+        n_lo = -n_lo
+        if (n_hi /= n_lo) then
+            if (irank == 0) then
+                write(*, '(a)')          '# ERROR: frozen-core active-band set differs across MPI ranks.'
+                write(*, '(a,i0,a,i0,a)') '#        n_active_bands range over ranks = [', n_lo, ', ', n_hi, '].'
+                write(*, '(a)')          '#        Cause: non-synchronized distributed start or a failed'
+                write(*, '(a)')          '#        broadcast of the frozen-core mask. Re-run; if it recurs,'
+                write(*, '(a)')          '#        check the launcher pins all ranks before the solver init.'
+            end if
+            call comm_sync_all(icomm)
+            error stop 'frozen-core active-band set inconsistent across MPI ranks'
+        end if
+    end block
+
+    ! 6. Build active_idx (1..n_active -> global band index) from the mask.
     if (sbe%n_active_bands > 0) then
         allocate(sbe%active_idx(sbe%n_active_bands))
         count_active = 0
@@ -523,10 +551,17 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
                 sbe%active_idx(count_active) = ib
             end if
         end do
+        ! Belt-and-suspenders: the mask walk MUST consume exactly n_active_bands
+        ! slots. If it does not, the mask was mutated between step 5 and here --
+        ! abort rather than propagate an out-of-range active_idx.
+        if (count_active /= sbe%n_active_bands) then
+            write(*, '(a,i0,a,i0,a)') '# ERROR: active_idx fill (', count_active, &
+                ') /= n_active_bands (', sbe%n_active_bands, ') -- corrupt frozen-core mask.'
+            error stop 'frozen-core active_idx inconsistent with mask'
+        end if
     else
-        ! Modern Fortran handles zero-sized arrays natively. 
-        ! If downstream legacy code crashes on size 0, revert to allocate(sbe%active_idx(1))
-        allocate(sbe%active_idx(0))  
+        ! Modern Fortran handles zero-sized arrays natively.
+        allocate(sbe%active_idx(0))
     end if
 
     ! =========================================================================
