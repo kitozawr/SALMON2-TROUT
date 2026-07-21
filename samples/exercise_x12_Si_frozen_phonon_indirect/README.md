@@ -54,6 +54,79 @@ cp Si_prim_sbe_nex.data off_nex.data ; cp Si_prim_sbe_nex_k_real.data off_nkr.da
 python3 phonon_analysis.py         # -> phonon_assisted_demo.png
 ```
 
+## Running the 9×9×9 production benchmark (SLURM / `sbatch`)
+
+The 4³ default above resolves the physics but samples the indirect **X-valley**
+shell only coarsely. The Keldysh-bracket verdict (`rate_benchmark.py`,
+`calibration_scan.py`) wants the **9³ = 729 k-point** grid. A ready SLURM script
+is provided: **[`run_9x9x9_lomonosov.sbatch`](run_9x9x9_lomonosov.sbatch)** —
+edit the marked lines and submit with `sbatch run_9x9x9_lomonosov.sbatch`.
+
+### What changes from 4³ → 9³ (only the grid)
+
+Two dedicated input files ship with the grid already set to `9,9,9`:
+
+| step | file | `theory` | `num_kgrid` |
+|---|---|---|---|
+| 1. ground state | `Si_prim_epm_gs_9x9x9.inp` | `epm` | `9, 9, 9` |
+| 2. real time | `Si_frozen_phonon_rt_9x9x9.inp` | `sbe` | `9, 9, 9` |
+
+**`num_kgrid` is the only line that differs from the 4³ pair.** `nelec` (8),
+`nstate` (16) and `al` MUST be identical between the GS and RT step — the SBE
+reads `Si_prim_{k,eigen,tm}.data` written by the GS, so a mismatch is rejected.
+(To scale a *different* exercise, edit `num_kgrid(1:3)` in **both** its GS and
+RT `.inp` — nothing else.)
+
+### How SALMON takes the input under `sbatch` — there is **no `-i` flag**
+
+SALMON reads its namelist from **stdin**, so in the batch script you pipe the
+`.inp` in:
+
+```bash
+srun ./salmon < Si_frozen_phonon_rt_9x9x9.inp > rt.log
+```
+
+Only **MPI rank 0** reads stdin — it copies the namelist to `.namelist.tmp`,
+which every rank then reads (the parsed values are also broadcast). Practical
+consequences:
+
+- **There is no command-line input argument.** `srun ./salmon Si_..._rt.inp`
+  does nothing useful; it must be the stdin redirect `< file`.
+- **Run from a shared-filesystem directory** (your `scratch`): rank 0 writes
+  `.namelist.tmp` and the GS `*.data`, and the other nodes read them back. Your
+  crashing path `Z:\...\projects\Si_TROUT_100kV` is fine as long as every node
+  mounts it.
+- Two SBE runs in the **same directory** overwrite each other's
+  `Si_prim_sbe_*.data`; the script `cp`s the outputs to `on_*`/`off_*` between
+  steps (and if you launch several fields at once, give each its own subdir).
+
+### How many MPI ranks
+
+729 k-points are split across ranks **evenly (±1 each)** — `nproc` does **not**
+have to divide 729. Rules of thumb:
+
+- Use **`nproc ≤ 729`** (more ranks than k-points leaves ranks idle and is
+  wasteful — with the fix below it is safe, just pointless).
+- For perfect balance pick a **divisor of 729 = 3⁶**: **27** (27 k/rank),
+  **81** (9 k/rank), or **243** (3 k/rank). The template uses **81**.
+- The inter-k ring does `nproc` communication hops per step, so very large
+  `nproc` trades compute for communication; 27–81 is the sweet spot here.
+- Hybrid MPI×OpenMP works too (the ring gather is OpenMP-parallel): e.g. 27 MPI
+  ranks × `OMP_NUM_THREADS` cores each.
+
+### ⚠️ Build from the fixed code first
+
+The 9³ multi-node run is exactly the one that segfaulted on Lomonosov-2 (rank 29
+of 42, in `compute_coulomb_selfenergy_ring`, at the first step) while the same
+input ran on the Intel-oneAPI mini-cluster. That was a **non-synchronized
+distributed-start** race in the frozen-core broadcast and the field-file read,
+now fixed (wiki/00 decisions-log, 2026-07-21). **Rebuild** on Lomonosov-2 from
+`develop-2.0.0` (with this fix merged) before the production run — the fix is
+compiler-agnostic (plain `MPI_Allreduce`/`MPI_Bcast`/`MPI_Barrier`), so it
+behaves the same under OpenMPI+gfortran and Intel MPI. If a genuinely
+inconsistent start still occurs you now get a clean, collective `error stop`
+with a diagnostic instead of a lone-rank SIGSEGV.
+
 ## What you should see (`phonon_assisted_demo.png`)
 
 | | eph OFF (field only) | eph ON (phonon) |
