@@ -363,6 +363,9 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     integer, allocatable :: itbl_min(:), itbl_max(:)
     real(8) :: eigen_ev, fermi_energy_ev
     integer :: homo_idx, lumo_idx
+    integer :: ik_gamma
+    real(8) :: dmin, dk
+    real(8), allocatable :: eig_gamma(:)
     logical :: lprint
     type(s_material_params) :: mp
     character(20) :: ii_form_eff
@@ -468,35 +471,55 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     end if
     lumo_idx = homo_idx + 1
 
+    ! 1b. Anchor the frozen-core window at the GAMMA point, NOT at k-index 1.
+    !     The band structure is complex and the k-ordering is grid-dependent: on
+    !     a 9^3 MP grid k=1 is the CORNER (-4/9,-4/9,-4/9), not Gamma, so keying
+    !     the window off "the first k-point" is fragile. Every rank finds Gamma
+    !     the same way -- the reduced-coordinate point closest to the origin
+    !     (exactly (0,0,0) on odd grids) -- from the REPLICATED gs%kpoint, so
+    !     ik_gamma is identical on all ranks.
+    ik_gamma = 1
+    dmin = huge(1d0)
+    do ik = 1, sbe%nk
+        dk = gs%kpoint(1, ik)**2 + gs%kpoint(2, ik)**2 + gs%kpoint(3, ik)**2
+        if (dk < dmin) then
+            dmin = dk
+            ik_gamma = ik
+        end if
+    end do
+
+    ! 1c. Distribute the Gamma-point band energies to EVERY rank ("gather all /
+    !     разошлёт Г точку на всех"): rank 0 copies gs%eigen(:, ik_gamma) and
+    !     broadcasts the nb-number reference vector. The ENTIRE window is then
+    !     derived from this single, bit-identical vector, so the active-band set
+    !     ("линии") is the same on every rank by construction -- no per-rank or
+    !     per-k divergence, whatever the band complexity.
+    allocate(eig_gamma(1:sbe%nb))
+    if (irank == 0) eig_gamma(1:sbe%nb) = gs%eigen(1:sbe%nb, ik_gamma)
+    call comm_bcast(eig_gamma, icomm, 0)
+
     ! gs%eigen is stored in atomic units (Hartree). Convert to eV here so the
     ! frozen-core window thresholds (frozen_core/free_threshold_ev, genuine eV
-    ! inputs) are compared in eV as named, and the diagnostic labels are honest.
-    ! This only affects which bands are flagged active and the printout; the
-    ! dynamics always use gs%eigen in a.u. directly.
-    fermi_energy_ev = ((gs%eigen(homo_idx, 1) + gs%eigen(lumo_idx, 1)) * 0.5d0) * au_ev
+    ! inputs) are compared in eV as named. The dynamics always use gs%eigen in
+    ! a.u. directly; only the active-band selection and the printout use eV.
+    fermi_energy_ev = ((eig_gamma(homo_idx) + eig_gamma(lumo_idx)) * 0.5d0) * au_ev
 
     ! 2. Initialize active bands array
     allocate(sbe%is_active(1:sbe%nb))
     sbe%is_active = .false.
     sbe%n_active_bands = 0
 
-    ! 3. Determine the active-band mask on EVERY rank independently. gs%eigen is
-    !    fully REPLICATED (init_sbe_gs_info broadcasts it to every rank before we
-    !    are called), and the frozen-core window is a global, k-independent
-    !    property, so each rank computes the identical mask from its own copy --
-    !    there is NO mask broadcast to corrupt. (The earlier compute-on-root +
-    !    broadcast-the-mask design added a collective whose failure on a
-    !    non-synchronized distributed start silently zeroed / truncated the mask;
-    !    computing locally removes that failure mode. The guard in 5a then
-    !    VERIFIES all ranks agreed, catching any gs%eigen replication failure.)
+    ! 3. Build the active-band mask from the broadcast Gamma reference on every
+    !    rank. Identical input vector -> identical mask; the guard in 5a verifies.
     do ib = 1, sbe%nb
-        eigen_ev = gs%eigen(ib, 1) * au_ev
+        eigen_ev = eig_gamma(ib) * au_ev
         ! Note: Ensure frozen_core_threshold_ev is negative if it represents a window below E_F
         if (eigen_ev > fermi_energy_ev + frozen_core_threshold_ev .and. &
             eigen_ev < fermi_energy_ev + frozen_free_threshold_ev) then
             sbe%is_active(ib) = .true.
         end if
     end do
+    deallocate(eig_gamma)
 
     ! 4. Derive the active-band count from the mask (single source of truth).
     sbe%n_active_bands = count(sbe%is_active)
@@ -1163,12 +1186,15 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
         write(*, '(a, f8.2, a)') '  frozen_core_threshold_ev = ', frozen_core_threshold_ev, ' eV'
         write(*, '(a, f8.2, a)') '  frozen_free_threshold_ev = ', frozen_free_threshold_ev, ' eV'
         write(*, '(a, f12.4, a)') '  Fermi energy (eV)      = ', fermi_energy_ev, ' eV'
+        write(*, '(a, i6, a, 3f8.4, a)') '  Gamma reference: k-point ', ik_gamma, &
+            ' at (', gs%kpoint(1, ik_gamma), gs%kpoint(2, ik_gamma), gs%kpoint(3, ik_gamma), &
+            ') [reduced]'
         write(*, '(a, i4, a, i4)') '  n_active_bands         = ', sbe%n_active_bands, ' / ', sbe%nb
         write(*, '(a)') '----------------------------------------'
-        write(*, '(a)') '  Band energies relative to Fermi level:'
-        
+        write(*, '(a)') '  Band energies (at Gamma) relative to Fermi level:'
+
         do ib = 1, min(sbe%nb, 100)  ! Print first 100 bands
-            eigen_ev = gs%eigen(ib, 1) * au_ev
+            eigen_ev = gs%eigen(ib, ik_gamma) * au_ev
             write(*, '(a, i3, a, f10.4, a, f8.2, a, l1)') &
                 '    Band ', ib, ': E = ', eigen_ev, ' eV, E-E_F = ', &
                 (eigen_ev - fermi_energy_ev), ' eV, active = ', sbe%is_active(ib)
