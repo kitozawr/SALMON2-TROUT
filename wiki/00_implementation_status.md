@@ -4,6 +4,8 @@
 
 Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #44 into `develop-2.0.0`); (2) new materials — **GaAs, Si/Si_cb, wurtzite CdS, monolayer graphene** — each a validated Python EPM reference + cited CPTP dissipation channels. The maintainer drives one bounded increment per session ("continue"). Test grid: **4×4×4 (or 5×5×5), scalar (no spinor)**. Current test count: **22/22** (`python3 tests/run_all.py`).
 
+> **Running on the supercomputer (Lomonosov-2, SLURM + OpenMPI + gfortran): see [`wiki/11_supercomputer_lomonosov2.md`](11_supercomputer_lomonosov2.md)** — the shared reference for cluster runs (environment, `sbatch` recipe, how to read a healthy run banner, the MPI failure catalog, and the per-run log). This is the page we talk through for every HPC run.
+
 ---
 
 ## ✅ CLOSED (2026-07-20) — universal virtual/real carrier separation

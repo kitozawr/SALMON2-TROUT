@@ -1,0 +1,207 @@
+# Supercomputer runs — Lomonosov-2 (SLURM, OpenMPI + gfortran)
+
+Shared reference for running SALMON-TROUT on the maintainer's HPC. This is the
+page we talk through for every cluster run: the environment, the job recipe, how
+to tell a healthy run from a broken one, and the failure catalog we have already
+worked through. Keep it current — add each new machine, each new gotcha.
+
+> **Two machines, one code.** The mini-cluster uses **Intel oneAPI (ifort +
+> Intel MPI + MKL)**; Lomonosov-2 uses **OpenMPI 4.0.5 + gfortran (gcc-9.1) +
+> MKL**. All MPI code in TROUT is compiler-agnostic (plain `MPI_Bcast` /
+> `MPI_Allreduce` / `MPI_Barrier`), so a run that is correct on one must be
+> correct on the other. When it is not, the cause is the **environment or a
+> stale binary**, not the physics — see the failure catalog.
+
+---
+
+## 0. The golden rules (read before every run)
+
+1. **Rebuild clean after every `git pull`/merge.** `rm -rf build/` (or `make
+   clean`) then reconfigure + build. Fortran `.mod`/`.o` staleness has already
+   cost us a full debugging cycle (a "0 active bands" result that was
+   *impossible* from the merged source — it was an un-rebuilt `trout2`).
+2. **SALMON reads the input from STDIN**, not a flag: `mpirun ./trout2 <
+   input.inp`. Only rank 0 reads stdin (it copies the namelist to
+   `.namelist.tmp`, which every rank then reads).
+3. **Run from shared scratch.** Rank 0 writes `.namelist.tmp` and the GS
+   `*_k/_eigen/_tm.data`; every node reads them back. The working directory must
+   be visible to all nodes (Lustre scratch).
+4. **Check the run banner** (Section 4) before trusting any output.
+
+---
+
+## 1. Machine profile — Lomonosov-2
+
+| | |
+|---|---|
+| Scheduler | SLURM (`sbatch`, `srun`/`mpirun`) |
+| Compute node | 14 cores (set `--ntasks-per-node=14`) |
+| Compiler | gfortran, **gcc-9.1** (`/opt/software/gcc-9.1`) |
+| MPI | **OpenMPI 4.0.5** (`/opt/mpi/openmpi-4.0.5-gcc`) |
+| BLAS/LAPACK | Intel **MKL** 2019.5 (GNU threading layer) |
+| Binary | built as `trout2` in the run dir |
+
+Backtraces are gfortran-mangled (`__bloch_solver_ssbe_MOD_...`) — that is how you
+confirm a crash log is from the Lomonosov build, not the Intel one.
+
+---
+
+## 2. Environment (the working `sbatch` preamble)
+
+This is the environment block that runs correctly on Lomonosov-2 (from the
+maintainer's job script). Keep it in the sbatch, above the `mpirun` lines:
+
+```bash
+export LC_ALL=C
+export LANG=C
+export MKL_THREADING_LAYER=GNU
+export PATH="/opt/software/gcc-9.1/bin:/opt/mpi/openmpi-4.0.5-gcc/bin:$PATH"
+
+export MKLROOT=/opt/intel/compilers_and_libraries_2019.5.281/linux/mkl
+export LD_LIBRARY_PATH="$MKLROOT/lib/intel64:$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/opt/software/gcc-9.1/lib64"
+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/opt/mpi/openmpi-4.0.5-gcc/lib:/opt/mpi/openmpi-4.0.5-gcc/lib64"
+
+export MKL_DYNAMIC=FALSE
+export OMP_DYNAMIC=FALSE
+export OMPI_MCA_opal_warn_on_missing_libcuda=0   # no GPU on these nodes
+export OMPI_MCA_opal_cuda_support=0
+export MKL_DEBUG_CPU_TYPE=5                        # AVX2 codepath on the Westmere-labelled build
+export MKL_CBWR=COMPATIBLE
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export MKL_NUM_THREADS=1                           # MPI does the parallelism; keep MKL serial
+export MKL_DISABLE_FAST_MM=1
+ulimit -s unlimited                                # large automatic arrays live on the stack
+```
+
+Notes:
+- `MKL_NUM_THREADS=1` + one MPI rank per core is the safe default; hybrid
+  MPI×OpenMP is possible (the ring gathers are OpenMP-parallel) via
+  `--cpus-per-task > 1` and letting `OMP_NUM_THREADS` follow it.
+- `ulimit -s unlimited` matters: several SBE routines use automatic arrays sized
+  by `nstate`/`nk`.
+
+---
+
+## 3. Job recipe
+
+The ready script is
+[`samples/exercise_x12_Si_frozen_phonon_indirect/run_9x9x9_lomonosov.sbatch`](../samples/exercise_x12_Si_frozen_phonon_indirect/run_9x9x9_lomonosov.sbatch).
+Skeleton:
+
+```bash
+#SBATCH --partition=compute
+#SBATCH --nodes=6
+#SBATCH --ntasks-per-node=14
+#SBATCH --cpus-per-task=1
+#SBATCH --time=02:00:00
+
+# ... environment block from Section 2 ...
+cd "${SLURM_SUBMIT_DIR}"
+
+# (1) ground state — per-k independent, cheap; one rank is plenty
+mpirun ./trout2 < Si_prim_epm_gs_9x9x9.inp > gs_9.log
+
+# (2) real time, eph ON
+mpirun ./trout2 < Si_frozen_phonon_rt_9x9x9.inp > on_9.log
+cp Si_prim_sbe_nex.data on_nex.data; cp Si_prim_sbe_nex_k_real.data on_nkr.data
+
+# (3) real time, eph OFF (reference) — sed-flip the two eph switches
+sed "s/yn_sbe_eph               = 'y'/yn_sbe_eph               = 'n'/;\
+     s/yn_sbe_eph_acoustic      = 'y'/yn_sbe_eph_acoustic      = 'n'/" \
+    Si_frozen_phonon_rt_9x9x9.inp > off_9.inp
+mpirun ./trout2 < off_9.inp > off_9.log
+cp Si_prim_sbe_nex.data off_nex.data; cp Si_prim_sbe_nex_k_real.data off_nkr.data
+```
+
+The GS step **must finish before** the RT step (RT reads its `*_k/_eigen/_tm.data`).
+Two SBE runs in the same dir overwrite each other's `Si_prim_sbe_*.data` — the
+`cp` between steps captures each; for parallel field points give each its own
+subdir.
+
+### MPI rank count
+`nproc` from `--nodes × --ntasks-per-node`. k-points are split across ranks
+**evenly (±1)** by `split_num`, so `nproc` need **not** divide `nk`.
+- Use **`nproc ≤ nk`** (more ranks than k-points idles ranks).
+- For perfect balance pick a divisor: `nk = 9³ = 729 = 3⁶` → **27 / 81 / 243**.
+- The inter-k ring does `nproc` communication hops/step, so 27–81 is the sweet
+  spot at 9³; huge `nproc` trades compute for communication.
+
+---
+
+## 4. Reading a healthy run banner
+
+A correct RT run prints (rank 0 stdout → `on_9.log`):
+
+```
+   k-points =    729,   bands =   16,   active =    7
+  Fermi energy (eV)      =      11.8901 eV
+  Gamma reference: k-point    365 at (  0.0000  0.0000  0.0000) [reduced]
+  n_active_bands         =    7 /   16
+ ...
+   <step>  <t[fs]>  <Jx Jy Jz>   <electrons>   <energy>
+```
+and ends with `end SALMON`.
+
+**The five things to verify:**
+1. `Gamma reference: k-point N at (0,0,0)` — the frozen-core window is anchored
+   at Γ. On an **odd** grid (9³) the coords must be exactly `(0,0,0)`; on an even
+   grid (4³) it is the nearest-to-Γ point (small non-zero coords, expected).
+2. `n_active_bands = N / M` with `N ≥ 2`. For Si at Γ with the `−3/+6 eV` window
+   it is **7/16** (VBM triplet Γ₂₅′ + CB manifold). A `0/16` or a `< 2` count now
+   aborts with a diagnostic — if you ever see `0/16` *proceed*, the binary is
+   pre-fix (stale).
+3. **`electrons = 8.000` at every step** (Si, nelec=8). The frozen-window ring is
+   trace-exact; drift means a real bug.
+4. `end SALMON` at the tail (no `SIGSEGV`, no `N processes killed`).
+5. The **VG basis-edge** line on stderr (Section 6) — physics convergence, not a
+   crash, but it gates whether the *absolute* yield is trustworthy.
+
+---
+
+## 5. Failure catalog (what we hit, and the fix)
+
+| Symptom in the log | Root cause | Fix |
+|---|---|---|
+| `SIGSEGV` in `compute_coulomb_selfenergy_ring` at step 1, one rank | frozen-core count/mask broadcast disagreed on a non-synchronized start → `active_idx` out of bounds | PR #93: derive count from the mask, cross-rank consistency guard |
+| `n_active_bands = 24/24` but per-band flags show only 8 active | same broadcast disagreement | PR #93 |
+| intermittent field-file read errors / segfault reading `file_input1` | every rank opened the same text file on shared FS; a lagging/partial file gave a short read | PR #93: rank 0 reads once, `comm_bcast(Ac_ext_t)`; iostat guards |
+| `n_active_bands = 0/16`, correct band energies printed, then `5 processes killed` | **stale binary** (impossible from the merged source) | **clean rebuild** (`rm -rf build/`); PR #94 also removes the mask broadcast and anchors at Γ so it cannot recur silently |
+| window keyed off the wrong k (k=1 is the grid corner, not Γ, on 9³) | window was built from `gs%eigen(:,1)` | PR #94: find Γ = nearest-to-origin k, broadcast its energies, build the window from that (identical on all ranks) |
+
+The throughline: on a distributed start these were **compiler-agnostic** MPI
+issues, all fixed with standard collectives. If a *new* multi-node-only symptom
+appears, first rule out the stale binary, then check whether the run banner's Γ
+reference and `n_active_bands` agree with a serial run of the same input.
+
+---
+
+## 6. Physics convergence — the VG basis edge (`P_top`)
+
+Separate from correctness: the RT monitor prints, on stderr,
+```
+WARNING: VG basis edge reached -- P_top = 1.16E-02 > 1.0E-03 (top band 8).
+Increase N_b (nstate) and re-check convergence.
+```
+when population reaches the **top of the active window**. It means the band
+budget is too small for this field, so the **absolute** `nex` is an *upper
+estimate* (carriers pile at the window edge instead of dispersing higher). See
+`wiki/06_vg_basis_nb_convergence.md`.
+
+- The **on/off contrast** and the **distributions** (which k, which band) stay
+  robust even with the warning — both runs share the same basis.
+- For a converged **absolute** yield (needed for the Keldysh-bracket verdict):
+  raise `nstate` (e.g. 24) and/or widen `frozen_free_threshold_ev`, run 2–3
+  values, and confirm `nex` plateaus and the `P_top` warning clears.
+
+---
+
+## 7. Run log (this project)
+
+| Date | Grid | Ranks | Result |
+|---|---|---|---|
+| 2026-07-21 | 9³ (729 k) | ~84 (6×14) | ✅ GS→ON→OFF complete; Γ ref = k365 (0,0,0); `n_active_bands = 7/16`; electrons = 8.000; **nex(eph ON)/nex(OFF) = ×231** (phonon-assisted indirect Γ→X). ⚠️ `P_top ≈ 1.2e-2` throughout → absolute nex (1.6e22 cm⁻³) is an upper estimate; needs an N_b-convergence sweep before the bracket verdict. |
+
+Append each production run here (grid, ranks, active count, electron
+conservation, the physics number, and any warning) so the cluster history lives
+with the code.
