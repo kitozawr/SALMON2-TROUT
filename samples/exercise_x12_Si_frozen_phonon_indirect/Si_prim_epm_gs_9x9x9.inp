@@ -1,0 +1,40 @@
+!########################################################################################!
+! Si PRIMITIVE-CELL EPM ground state (step 1/2) -- 9x9x9 PRODUCTION grid.                    !
+!----------------------------------------------------------------------------------------!
+! Identical to Si_prim_epm_gs.inp EXCEPT num_kgrid = 9,9,9 (729 k-points), the production    !
+! grid for the Keldysh-bracket benchmark. Writes Si_prim_k/_eigen/_tm.data read by the SBE   !
+! step. nelec / nstate / al MUST match the RT step (Si_frozen_phonon_rt_9x9x9.inp).          !
+!                                                                                          !
+! Run FIRST (see run_9x9x9_lomonosov.sbatch). Cheap: the EPM diagonalizes each k-point       !
+! independently, so the GS step is a few seconds even at 9^3.                                !
+!########################################################################################!
+
+&calculation
+    theory = 'epm'
+/
+
+&control
+    sysname = 'Si_prim'
+/
+
+&units
+    unit_system = 'au'
+/
+
+&system
+    yn_periodic = 'y'
+    al(1:3) = 10.26d0, 10.26d0, 10.26d0        ! Si a = 5.431 Angstrom
+    nelec  = 8                                  ! 2 atoms x 4 valence e- -> 4 filled bands
+    nstate = 16                                 ! 4 valence + 12 conduction (VG headroom for the frozen unitary)
+/
+
+&kgrid
+    num_kgrid(1:3) = 9, 9, 9                    ! PRODUCTION grid: 9^3 = 729 k-points
+/
+
+&epm
+    epm_material            = 'Si'
+    epm_lattice_constant_au = 10.26d0
+    epm_pw_cutoff_ry        = 27.0d0
+    epm_cell                = 'primitive'
+/

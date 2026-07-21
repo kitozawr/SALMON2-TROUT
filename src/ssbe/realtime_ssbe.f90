@@ -66,7 +66,21 @@ subroutine main_realtime_ssbe(icomm)
     ! slot early -- the field was shifted by one dt and slot nt+1 was left
     ! uninitialized (a dA/dt spike in the last step). i=-1 (t=-dt) fills as 0.
     allocate(Ac_ext_t(1:3, -1:nt+1))
-    call calc_Ac_ext_t(0.0d0, dt, -1, nt+1, Ac_ext_t)
+    Ac_ext_t(:, :) = 0.0d0
+    ! MPI-safe external-field construction. Only the root rank builds the pulse
+    ! (which, for ae_shape='input', OPENS AND READS file_input1); the whole
+    ! trajectory is then broadcast to every rank. This removes the N-way race in
+    ! which all ranks simultaneously read the same text file from a shared
+    ! filesystem: on a distributed machine a lagging or partially-staged file
+    ! hands some ranks a short/empty read (n_dat small -> out-of-bounds in the
+    ! interpolator) while others succeed, so the driven field silently diverges
+    ! across ranks or one rank segfaults. Reading once and broadcasting makes the
+    ! field bit-identical everywhere and confines any file error to a single,
+    ! diagnosable rank. The barrier pins all ranks before the read so a
+    ! non-synchronized start cannot race ahead of the root's open.
+    call comm_sync_all(icomm)
+    if (irank == 0) call calc_Ac_ext_t(0.0d0, dt, -1, nt+1, Ac_ext_t)
+    call comm_bcast(Ac_ext_t, icomm, 0)
 
     ! Field-scale audit line (one-time): the peak |A|, the peak |E| = -dA/dt,
     ! and the peak crystal-momentum excursion. file_input1 pulses MUST be in the

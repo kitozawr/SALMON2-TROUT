@@ -361,7 +361,7 @@ End Subroutine calc_E_ext
 subroutine add_Ac_from_file(filename, t0, delta_t, is, ie, Ac_ext_t)
   use read_rtdata_file, only: count_rows_from_rtdata_file, load_Ac_from_rtdata_file, load_Ac_from_rtdata_file_Ac_tot
   implicit none
-  character(256), intent(in) :: filename
+  character(*), intent(in) :: filename
   real(8),intent(in) :: t0
   real(8),intent(in) :: delta_t
   integer,intent(in) :: is, ie
