@@ -127,6 +127,36 @@ subdir.
 - The inter-k ring does `nproc` communication hops/step, so 27–81 is the sweet
   spot at 9³; huge `nproc` trades compute for communication.
 
+#### Recommended node counts for 9³ (14-core nodes)
+
+Since `14·N` never divides `729 = 3⁶` (no factors of 2 or 7), cap `mpirun -np`
+to a **divisor** for perfect ±0 k-balance (a few idle cores is fine):
+
+| `mpirun -np` | nodes (14 cores) | k/rank | when |
+|---|---|---|---|
+| 27 | 2 | 27 | economical, longer walltime |
+| **81** | **6** | **9** | **balanced default** |
+| 243 | 18 | 3 | faster turnaround (Coulomb/ring-heavy) |
+
+Above ~52 nodes (`729` ranks = 1 k/rank) is the ceiling — the `O(nproc)` ring
+hops dominate well before that. Running all `14·N` ranks (e.g. 84 on 6 nodes)
+also works, with a minor ±1 imbalance; `-np 81` is just cleaner.
+
+#### Coulomb HF cost — can it be off?
+
+`yn_sbe_coulomb='y'` (Σ^HF dynamic-gap renormalization) is an `O(nk²)`-per-step
+all-gather (frozen over dt) — the single most expensive term at 9³. It **can be
+turned off** (`yn_sbe_coulomb='n'`):
+- **Physically safe at LOW carrier density** (weak fields / small `nex`, e.g. a
+  ~100 kV/cm THz pulse): the density-driven gap shift is negligible → drop it
+  for a large speedup.
+- **Keep it ON for high density** (strong fields, near-degenerate plasma), where
+  the bandgap renormalization matters — or use the cheap stand-in
+  `yn_sbe_bgr_threshold='y'` (II threshold only).
+- Turning Coulomb off does **not** disable the ring (e-ph/II/Auger ride
+  `yn_sbe_superres`). Those gathers are themselves `O(nk²)`/step, so the node
+  guidance above still applies unless you also cut channels.
+
 ---
 
 ## 3b. Checkpoint & restart (long / walltime-limited runs)
@@ -208,6 +238,43 @@ final-state quantities and any `_k` snapshot at/after the resume are unaffected.
   the expected `it0`.
 - `electrons = 8.000` from the first resumed step (the density matrix carried the
   correct trace across the restart).
+
+---
+
+## 3c. Time step (dt) — by material
+
+The binding constraint on `dt` is **not the field** (THz pulses are slow) but the
+**interband coherence at the direct gap** (and the active-band energy spread).
+The velocity-gauge CF4 propagator diagonalises the instantaneous Hamiltonian, so
+it is *exact* for a static H; the per-step error comes from the field rotating
+the Houston basis over `dt`. Resolve the fastest interband beat:
+
+> **dt ≲ (2πħ / E_gap^direct) / 10**   (ħ = 0.6582 eV·fs)
+
+| material | direct gap E₀ (Γ) | interband period 2πħ/E₀ | recommended `dt` (moderate field) |
+|---|---|---|---|
+| GaAs | 1.42 eV | 2.9 fs | ~0.15–0.20 fs (6–8 a.u.) |
+| CdS | 2.55 eV | 1.6 fs | ~0.12 fs (5 a.u.) |
+| **Si** | ~3.4 eV (E₀′, Γ₂₅′→Γ₁₅) | 1.2 fs | **~0.10 fs (4 a.u.)** |
+| graphene | 0 (gapless Dirac) | bandwidth-limited | ~0.05 fs (2 a.u.) or finer |
+
+**Validated numerically for Si** (weak 100 kV/cm THz, clean VG, 4³, all 24 bands,
+to the field peak): the **current** converges already at `dt = 0.25 fs` (~1 %),
+but the **absorbed energy / nex** is under-resolved at 0.25 fs (it comes out with
+the *wrong sign*) and converges only at `dt ≈ 0.1 fs`. So:
+- **Carrier / absorption studies (`nex`):** use `dt ≈ 0.1 fs` for Si (scale by
+  the gap for other materials, per the table).
+- **Linear current / conductivity only:** `dt = 0.25 fs` is acceptable.
+
+Caveats:
+- **Stronger fields drive faster dynamics** → reduce `dt` proportionally (halve
+  near tunneling / ≥ few MV/cm).
+- **graphene is gapless** → always the smallest `dt` (no gap protection; the
+  highest active band + the field-driven cone crossing set it).
+- **Dissipation rarely binds `dt`** (`ν_sat⁻¹ ~ 8 fs ≫ dt`); the ring CPTP
+  limiter warns and auto-scales if a step's scattering flux is too large.
+- The values above are **starting points** — confirm with a **2× `dt` halving**
+  on your field until `nex`/current stop changing (as done for Si above).
 
 ---
 
