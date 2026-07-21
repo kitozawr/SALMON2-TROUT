@@ -77,6 +77,16 @@ reads `Si_prim_{k,eigen,tm}.data` written by the GS, so a mismatch is rejected.
 (To scale a *different* exercise, edit `num_kgrid(1:3)` in **both** its GS and
 RT `.inp` — nothing else.)
 
+> **Γ-anchored frozen window (9³).** The frozen-core window is built from the
+> **Γ point** (the reduced-coordinate k closest to the origin — exactly (0,0,0)
+> on the odd 9³ grid, `k-point 365`), identical on every MPI rank, not from
+> whichever k happens to be index 1. At Γ, Si shows its clean gap-edge
+> degeneracies (the VBM triplet Γ₂₅′ + the CB manifold), so the −3/+6 eV window
+> selects **7 active bands** (VBM 2–4 + CB 5–8, Fermi ≈ 11.89 eV) — the correct
+> gap-edge set. The run banner prints `Gamma reference: k-point … at (0,0,0)`
+> and `n_active_bands = 7 / 16`; a window that selects `< 2` bands aborts with a
+> diagnostic (Fermi + window bounds) instead of an opaque crash.
+
 ### How SALMON takes the input under `sbatch` — there is **no `-i` flag**
 
 SALMON reads its namelist from **stdin**, so in the batch script you pipe the
