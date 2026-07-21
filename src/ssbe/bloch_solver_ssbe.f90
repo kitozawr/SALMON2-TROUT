@@ -362,7 +362,6 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     integer :: ik, ib, nk_proc, irank, nproc, ierr, count_active
     integer, allocatable :: itbl_min(:), itbl_max(:)
     real(8) :: eigen_ev, fermi_energy_ev
-    integer, allocatable :: is_active_buf(:)
     integer :: homo_idx, lumo_idx
     logical :: lprint
     type(s_material_params) :: mp
@@ -481,46 +480,33 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     sbe%is_active = .false.
     sbe%n_active_bands = 0
 
-    ! 3. Determine active bands on the root rank only. The frozen-core window is
-    !    a global, k-independent property, so it is computed once and the MASK is
-    !    broadcast -- NEVER a separately-transmitted count (see step 5).
-    if (irank == 0) then
-        do ib = 1, sbe%nb
-            eigen_ev = gs%eigen(ib, 1) * au_ev
-            ! Note: Ensure frozen_core_threshold_ev is negative if it represents a window below E_F
-            if (eigen_ev > fermi_energy_ev + frozen_core_threshold_ev .and. &
-                eigen_ev < fermi_energy_ev + frozen_free_threshold_ev) then
-                sbe%is_active(ib) = .true.
-            end if
-        end do
-    end if
+    ! 3. Determine the active-band mask on EVERY rank independently. gs%eigen is
+    !    fully REPLICATED (init_sbe_gs_info broadcasts it to every rank before we
+    !    are called), and the frozen-core window is a global, k-independent
+    !    property, so each rank computes the identical mask from its own copy --
+    !    there is NO mask broadcast to corrupt. (The earlier compute-on-root +
+    !    broadcast-the-mask design added a collective whose failure on a
+    !    non-synchronized distributed start silently zeroed / truncated the mask;
+    !    computing locally removes that failure mode. The guard in 5a then
+    !    VERIFIES all ranks agreed, catching any gs%eigen replication failure.)
+    do ib = 1, sbe%nb
+        eigen_ev = gs%eigen(ib, 1) * au_ev
+        ! Note: Ensure frozen_core_threshold_ev is negative if it represents a window below E_F
+        if (eigen_ev > fermi_energy_ev + frozen_core_threshold_ev .and. &
+            eigen_ev < fermi_energy_ev + frozen_free_threshold_ev) then
+            sbe%is_active(ib) = .true.
+        end if
+    end do
 
-    ! 4. Broadcast the active MASK (as an integer buffer -- portable across the
-    !    MPI logical layout of any compiler). This mask is the SINGLE source of
-    !    truth: both the count (step 5) and the index table (step 6) are DERIVED
-    !    from it on every rank, so they can never disagree with the mask. The
-    !    previous code broadcast the count SEPARATELY from the mask; if the two
-    !    collectives ever delivered inconsistent data to a rank (a non-synchronized
-    !    distributed start, a partial broadcast), active_idx was sized by the count
-    !    but filled from the mask, leaving uninitialised tail entries -> garbage
-    !    band indices -> the ring self-energy read rho() out of bounds and
-    !    segfaulted on that one rank.
-    if (sbe%nb > 0) then
-        allocate(is_active_buf(1:sbe%nb))
-        if (irank == 0) is_active_buf = merge(1, 0, sbe%is_active)
-        call comm_bcast(is_active_buf, icomm, 0)
-        sbe%is_active = (is_active_buf == 1)
-        deallocate(is_active_buf)
-    end if
-
-    ! 5. Derive the active-band count from the (now identical) mask on EVERY rank.
+    ! 4. Derive the active-band count from the mask (single source of truth).
     sbe%n_active_bands = count(sbe%is_active)
 
     ! 5a. Cross-rank consistency guard (compiler-agnostic: only MPI_Allreduce +
-    !     Fortran error stop). A non-synchronized distributed start can hand a
-    !     lagging rank a stale/partial mask; catch that here with a clean,
-    !     collective abort and an actionable message instead of a lone segfault
-    !     deep in the time loop. min == max  <=>  all ranks agree on the count.
+    !     Fortran error stop). Every rank built the mask from its OWN replicated
+    !     gs%eigen; if any rank's copy differs (a failed gs broadcast on a
+    !     non-synchronized start), the counts diverge -- catch it here with a
+    !     clean, collective abort instead of a lone segfault deep in the time
+    !     loop. min == max  <=>  all ranks agree on the count.
     block
         integer :: n_hi, n_lo
         n_hi =  sbe%n_active_bands
@@ -533,13 +519,33 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
                 write(*, '(a)')          '# ERROR: frozen-core active-band set differs across MPI ranks.'
                 write(*, '(a,i0,a,i0,a)') '#        n_active_bands range over ranks = [', n_lo, ', ', n_hi, '].'
                 write(*, '(a)')          '#        Cause: non-synchronized distributed start or a failed'
-                write(*, '(a)')          '#        broadcast of the frozen-core mask. Re-run; if it recurs,'
-                write(*, '(a)')          '#        check the launcher pins all ranks before the solver init.'
+                write(*, '(a)')          '#        broadcast of gs%eigen. Re-run; if it recurs, check the'
+                write(*, '(a)')          '#        launcher pins all ranks before the solver init.'
             end if
             call comm_sync_all(icomm)
             error stop 'frozen-core active-band set inconsistent across MPI ranks'
         end if
     end block
+
+    ! 5b. A frozen window that selects fewer than two bands (no valence OR no
+    !     conduction level) cannot support any dynamics: the mean active level
+    !     spacing is zero (division), the ring has nothing to scatter, and the
+    !     run dies downstream with an opaque "process killed". Abort here with an
+    !     actionable message and the numbers that produced the empty window.
+    if (sbe%n_active_bands < 2) then
+        if (irank == 0) then
+            write(*, '(a,i0,a)') '# ERROR: frozen-core window selected ', sbe%n_active_bands, &
+                ' active band(s) -- need >= 2 (>= 1 valence + >= 1 conduction).'
+            write(*, '(a,f10.4,a)') '#        Fermi (from k-point 1) = ', fermi_energy_ev, ' eV.'
+            write(*, '(a,f10.4,a,f10.4,a)') '#        active window = [', &
+                fermi_energy_ev + frozen_core_threshold_ev, ', ', &
+                fermi_energy_ev + frozen_free_threshold_ev, '] eV.'
+            write(*, '(a)') '#        Widen frozen_core_threshold_ev / frozen_free_threshold_ev, or check'
+            write(*, '(a)') '#        that the GS *_eigen.data is the intended file (units / k-ordering).'
+        end if
+        call comm_sync_all(icomm)
+        error stop 'frozen-core window selected < 2 active bands (empty/degenerate window)'
+    end if
 
     ! 6. Build active_idx (1..n_active -> global band index) from the mask.
     if (sbe%n_active_bands > 0) then
