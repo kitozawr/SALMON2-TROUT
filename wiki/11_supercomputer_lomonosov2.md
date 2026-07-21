@@ -278,6 +278,66 @@ Caveats:
 
 ---
 
+## 3d. Performance tuning (measured levers)
+
+Where the wall-clock time goes, and which knobs actually move it. Measured on
+**Si, 4³, weak 100 kV/cm THz** (`100.txt`), 1200 steps, `dt = 0.25 fs`,
+**Coulomb off**:
+
+| channels | nstate | s/step | rel. speed | `nex` [cm⁻³] |
+|---|---|---|---|---|
+| full (eph+ac+II+Auger+holes+eeh) | 24 | 0.216 | 1.0× | 3.48×10²¹ |
+| full | 16 | 0.200 | 1.08× | 3.47×10²¹ |
+| full | 12 | 0.196 | 1.10× | 3.46×10²¹ |
+| **eph+ac only** | 24 | 0.044 | **4.9×** | 1.83×10²¹ |
+| **eph+ac only** | 16 | 0.029 | **7.4×** | 1.83×10²¹ |
+
+### Cost model (what scales how)
+- **Unitary** (velocity-gauge CF4, `cf4_unitary_step`) runs on the **full
+  `nstate` basis**: `O(nstate³ · nk)` per step. (Frozen-core shrinks only the
+  *dissipators*, not the unitary — see §4.)
+- **Ring dissipators** (e-ph, II, Auger, hole-II) draw the partner from the
+  whole BZ: `O(nk² · n_active²)` per step, one pass **per channel**.
+- So at a fixed grid the ring share **grows as `nk²`** while the unitary grows as
+  `nk` — the ring dominates more and more with grid size.
+
+### The two levers
+
+**1. Channel set — the dominant cost, but NOT free here.** Dropping
+`II + Auger + ii_holes + eeh` (keeping `eph + acoustic`) is **~80 % of the
+per-step time at 4³** (0.216 → 0.044 s/step, **4.9×**) — and **larger at 9³**,
+where the ring is a bigger share (ring ∝ nk²). **But at this field these
+channels are not inert:** `nex` drops **3.48 → 1.83×10²¹ (~1.9×)** — they carry
+about half the generation. So this is a **physics decision**, not a free
+speedup:
+- For a **100 kV/cm THz** field, impact ionization (threshold field ~MV/cm) is
+  physically questionable; the ~2× it adds here is plausibly the long
+  multi-cycle pulse + the `ν_sat` calibration inflating it (the "absolute yield
+  is an upper estimate" caveat, wiki/00 / x12). **Scrutinise whether II/Auger
+  belong at your field.** If the study is **phonon-assisted generation only**,
+  `eph + ac` gives the 5–7× speedup honestly.
+- If II/Auger *are* part of the physics, keep them and pay the cost (or cut the
+  grid / dt instead).
+
+**2. `nstate` — physically ~free, modest speed gain.** `nex` is already
+**basis-converged at `nstate = 12`** (3.46 vs 3.48×10²¹ at 24) for this weak
+field, so lowering it (with a matching GS) costs no physics — it only removes VG
+headroom a *stronger* field would need. But the **speedup is modest with full
+channels** (24 → 12 = only ~10 %, ring-dominated) and larger only once the ring
+channels are off (eph-only 24 → 16 = ~35 %). At 9³ the ring dominates further,
+so `nstate` helps full-channel runs even less. Verify `nex(nstate)` and keep it
+as low as basis-sufficiency allows, but don't expect big gains while II/Auger
+are on.
+
+### Ranking for a 9³ production run (Coulomb already off)
+1. **Channel set** — decide II/Auger on physical grounds (biggest lever; ring ∝ nk²).
+2. **Grid `nk`** — ring ∝ nk²; 7³ vs 9³ ≈ 4.5× on the ring (X-valley coarser).
+3. **`dt`** — the largest your observable allows (§3c: ~0.1 fs for `nex`, 0.25 fs current-only).
+4. **`nstate`** — lower to basis-sufficiency (free physics, modest speed).
+5. **`out_projection_k_step`** — k-resolved output is I/O ∝ nk; write it less often.
+
+---
+
 ## 4. Reading a healthy run banner
 
 A correct RT run prints (rank 0 stdout → `on_9.log`):
