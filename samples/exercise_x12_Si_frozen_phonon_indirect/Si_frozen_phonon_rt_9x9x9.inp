@@ -78,4 +78,7 @@
   yn_sbe_auger             = 'n'
   yn_sbe_eeh               = 'n'
   yn_sbe_coulomb           = 'n'
+  ! ---- B4 checkpoint / restart (walltime-limited HPC runs; see wiki/11 §3b) ----
+  sbe_checkpoint_step       = 0      ! write SYSNAME_sbe_ckpt_r*.bin every N steps (0 = off); e.g. 500
+  yn_sbe_checkpoint_restart = 'n'    ! set 'y' on the RESUBMIT to resume (same nproc + same input!)
 /
