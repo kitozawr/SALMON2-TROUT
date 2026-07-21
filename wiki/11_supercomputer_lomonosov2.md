@@ -129,6 +129,88 @@ subdir.
 
 ---
 
+## 3b. Checkpoint & restart (long / walltime-limited runs)
+
+A production RT run can outlast the queue's walltime. The B4 checkpoint lets a
+run resume the physics state (the density matrix) from where it stopped instead
+of starting over.
+
+### The two inputs (`&sbe`)
+
+| input | default | meaning |
+|---|---|---|
+| `sbe_checkpoint_step` | `0` (off) | write a checkpoint **every N time steps**. Each rank streams its own state to `SYSNAME_sbe_ckpt_r<rank>.bin`. |
+| `yn_sbe_checkpoint_restart` | `'n'` | `'y'` = at startup, **resume** from the checkpoint set instead of starting at t=0. |
+
+### What is in a checkpoint
+
+Per MPI rank, one binary stream file `SYSNAME_sbe_ckpt_rNNNNN.bin`
+(`NNNNN` = 5-digit rank), **overwritten in place** each checkpoint (only the
+latest survives — it is not a history). It holds:
+- the step index `it` and the accumulated `energy`,
+- the per-channel ledgers (`led_dn`, `led_de`),
+- this rank's local density-matrix block `rho(:, :, ik_min:ik_max)`,
+- the Houston branch `X_branch(:, ik_min:ik_max)` (if the run tracks it).
+
+The **field is NOT saved** — it is recomputed deterministically from the input
+each step, so nothing else is needed to continue exactly.
+
+### How to use it — the two-phase resubmit
+
+1. **First run:** set `sbe_checkpoint_step = 500` (say) and keep
+   `yn_sbe_checkpoint_restart = 'n'`. The run writes `*_sbe_ckpt_r*.bin` every
+   500 steps.
+2. **If it is killed** (walltime, node failure): resubmit the **same input**
+   with `yn_sbe_checkpoint_restart = 'y'` (leave `sbe_checkpoint_step` on so it
+   keeps checkpointing). On startup rank 0 prints:
+   ```
+   # B4: resumed from checkpoint, continuing at step <it0>
+   ```
+   and the run continues from the last checkpointed step to `nt`.
+
+In the x12 sbatch this is a one-line `sed` on the RT input, e.g.:
+```bash
+# resume variant of the RT input
+sed "s/yn_sbe_checkpoint_restart = 'n'/yn_sbe_checkpoint_restart = 'y'/" \
+    Si_frozen_phonon_rt_9x9x9.inp > Si_..._rt_resume.inp
+mpirun ./trout2 < Si_..._rt_resume.inp > on_9_resume.log
+```
+(If `sbe_checkpoint_step` is not already in your input, add both lines to `&sbe`;
+they are absent by default.)
+
+### Hard constraints (all must match between the original run and the resume)
+
+- **Same number of MPI ranks.** Each `.bin` holds only that rank's `ik_min:ik_max`
+  k-block, and the partition depends on `nproc`. A different rank count reads the
+  wrong slab → wrong physics (or a read error). This is the #1 rule.
+- **Same input** — grid (`num_kgrid`), `nstate`, `dt`, the field, and the channel
+  set. The field is recomputed, so any field/`dt`/grid change desynchronises the
+  resume.
+- **Same working directory** (shared scratch): the `.bin` files must be found
+  where they were written. `yn_sbe_checkpoint_restart='y'` with no checkpoint
+  file present is a hard `error stop` ("checkpoint file missing").
+- The `.bin` is a raw per-rank memory dump — **not portable** across a different
+  machine/compiler/endianness. Resume on the same build.
+
+### ⚠️ Output-file caveat (important for analysis)
+
+On restart the time-series outputs (`SYSNAME_sbe_rt.data`, `_sbe_nex.data`,
+`_sbe_channels.data`, …) are **reopened for writing (truncated)** and then
+written only for the `t=0` block and steps `it0 … nt`. **The rows for steps
+`1 … it0-1` are lost from those files** even though the physics state resumed
+correctly. If you need the *complete* `nex(t)` / current time series across a
+restart, **rename or copy the `*.data` files before resubmitting**, then stitch
+the pre- and post-resume files together (drop the duplicated `t=0` row). The
+final-state quantities and any `_k` snapshot at/after the resume are unaffected.
+
+### Verifying a resume
+- The banner line `# B4: resumed from checkpoint, continuing at step <it0>` with
+  the expected `it0`.
+- `electrons = 8.000` from the first resumed step (the density matrix carried the
+  correct trace across the restart).
+
+---
+
 ## 4. Reading a healthy run banner
 
 A correct RT run prints (rank 0 stdout → `on_9.log`):
