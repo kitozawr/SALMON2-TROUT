@@ -92,11 +92,17 @@ Keldysh `exp(−B/√I)`" diagnosis was **wrong** — it was read off an unconve
 *diabatic* `nelec` (that column is the reversible A²(t) dressing, ~2.5×10²¹, and
 is dt-flat to 4 digits — do NOT use it to judge convergence).
 
-**Under re-test (dissipative propagation).** The earlier "+ e-ph → ~10²²,
-huge Auger" figures were also taken at `dt = 0.25 fs`. Whether the ring
-dissipators still over-generate once the coherent seed is dt-converted is being
-re-measured (dt = 0.25 vs 0.05 with e-ph+II+Auger ON). Until that lands, treat
-the dissipative absolute yields below as provisional.
+**SECOND (measured 2026-07-23): the dissipative "+ e-ph → ~10²², huge Auger" is a
+SEPARATE, dt-DIVERGENT dissipator pathology — `dt` does NOT fix it (wiki/06 §6-iv).**
+With the full ring ON (e-ph+II+Auger, `4³`, frozen window), `nex_proj` is pumped to
+**~10²² at any `dt`, and refining `dt` makes it WORSE**: dt=0.25 → 1.3×10²² / Auger
+−59 e⁻/cell; dt=0.05 → 3.6×10²² / Auger **−24 900** (electrons=8.000 throughout — not
+a trace leak). So the ×10⁶ huge-Auger is **not** the coherent dt artifact above and is
+**not curable by `dt`**: the ring realifies the reversible A²(t) dressing *per scattering
+event*, un-normalized by `dt`, so more steps ⇒ more spurious carriers. The real fix must
+exclude the dressing from the collision source (Option-A, `yn_sbe_dressed_ref`) and/or
+rate-normalize the per-step realification. Treat sub-gap dissipative absolute yields as
+unreliable regardless of `dt` until then.
 
 **Consequences / recommendations:**
 - **`dt`:** converge it on the **non-adiabatic real-carrier** measure

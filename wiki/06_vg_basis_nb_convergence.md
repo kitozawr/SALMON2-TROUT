@@ -168,6 +168,34 @@ dt-insensitive. The right panel shows the mechanism: at dt = 0.25 the spurious p
 > `&sbe`, a sub-gap THz field, and scan `dt` — read `_sbe_nex_nonad.data` col 2/3, not
 > `_sbe_nex.data`.
 
+### (iv) With dissipators ON, the over-generation is a SEPARATE, dt-DIVERGENT pathology
+
+The clean-kernel `dt` cure above does **not** carry over to the dissipative run — the
+opposite is true. Same field/material, `4³`, `nstate=16`, frozen window, full ring
+(e-ph + acoustic + II + Auger), to 1000 fs:
+
+| `dt` [fs] | `nex_proj` (diss ON) | cumulative ring-Auger [e⁻/cell] |
+|---|---|---|
+| 0.25 | 1.3×10²² (×10⁶) | −59 |
+| 0.05 | 3.6×10²² (×10⁶) | **−24 900** |
+
+![dissipator dt-divergence](figures/vg_dissipator_dt_divergence.png)
+
+The green curve is the **clean VG at the same dt=0.05** (~10¹⁶ = physical). Turning the
+dissipators on pumps `nex_proj` to **~10²² at any `dt`, and refining `dt` makes it worse**
+(nex ~×2, Auger churn **×420**); electrons = 8.000 throughout (trace is conserved — this is
+*not* a trace leak). **Mechanism:** the ring/frozen-sector CP-decoherence realifies the
+reversible A²(t) dressing **per scattering event** (wiki/00, the "collision-assisted
+generation" note), and that per-step realification is **not rate-normalized (∝ dt)** — so
+more steps (smaller `dt`) ⇒ more spurious real carriers ⇒ more Auger (∝ n²).
+
+**Consequence.** Two independent over-generation layers with *opposite* `dt` behaviour:
+the **coherent** one is cured by `dt ≤ 0.05 fs`; the **dissipative** one is a separate bug
+that `dt` cannot fix (it worsens it). The real fix must exclude the reversible dressing from
+the collision source (the Option-A direction, `yn_sbe_dressed_ref`) **and/or** rate-normalize
+the per-step realification so the ledger converges as `dt → 0`. Until then, sub-gap dissipative
+absolute yields are unreliable regardless of `dt` — see the wiki/04 flag box.
+
 ---
 
 ## 7. References
