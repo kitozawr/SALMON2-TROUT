@@ -70,6 +70,51 @@
 | yn_sbe_dressed_ref | — | 'n' | **Option A** (wiki/10 §3A/8.10): the ring channels measure carriers against the **field-rotated ground state** — the rotation background Δ₀ (trace-neutral, →0 at A=0) is subtracted from the Houston populations, so neither the frozen nor the adiabatic reversible limit feeds the collisions. Needs `yn_sbe_superres='y'`; independent of, and multiplicative with, the colmem flags. |
 | yn_sbe_colmem_pop | — | 'n' | **population-sector** memory (wiki/10 §8.8): the ring collision kernels (e-ph/II/Auger) + the free-carrier screen/FD fit read the **memory-filtered** populations f̃ = filter[f] (same cited phonon lines; a constant f is a machine-exact fixed point ⇒ calibrated rates untouched; the A²(t) dressing breathing filters out of the collision source — the time-domain ICFE). Same prerequisites/guards as `yn_sbe_colmem`; the two sectors toggle independently. |
 
+### ⚠️ Flag recommendations by field regime (validity limits)
+
+**The frozen-window velocity-gauge SBE over-generates carriers in the deep
+sub-gap, weak-field regime (Keldysh γ ≫ 1).** Measured on the maintainer's THz
+field (Si, ~100 kV/cm, 4³, `nex_dref` = the Option-A real-carrier column of
+`_sbe_nex_nonad.data`; density is dt-converged — 0.10 fs ≡ 0.25 fs):
+
+| model level | real density | vs theory (< 10¹⁶ cm⁻³) |
+|---|---|---|
+| clean VG (no dissipation) | ~10¹⁹ | **~10³** |
+| + e-ph (phonon-assisted generation) | ~9×10²¹ | ~10⁶ |
+| + all three filters (dref+colmem+colmem_pop) | trims only ~30 % | still ~10⁶ |
+
+Two layers, neither cured by the session's filters:
+1. **Even the clean unitary is ~10³ too high** — at γ ≫ 1 real interband
+   transitions are *exponentially* (Keldysh/tunneling `exp(−B/√I)`) suppressed;
+   the frozen-window VG generation is a *power law*, so it overshoots at the
+   source, before any dissipation. The `dressed_ref`/`colmem`/`colmem_pop`
+   filters remove the reversible **dressing/coherence/rotation** sectors (they
+   cut the fabricated *generation rate & I-exponent*, wiki/10 §8.6–8.10) but do
+   **not** restore the exponential suppression.
+2. **e-ph adds ~10³ more** by converting the field-driven population into real
+   carriers; the filters trim this only ~30 % (measured).
+
+**Consequences / recommendations:**
+- **Treat the absolute `nex` as an UPPER BOUND** below ~1 MV/cm (γ ≳ 1). The
+  *distributions* (which k, which band, cooling) are robust; the *absolute
+  yield* is not. For a quantitative yield in this regime a genuine Keldysh /
+  tunneling generation term is required (not a Markovian ring correction), or
+  restrict the SBE to γ ≲ 1.
+- **Disable impact ionization and Auger at ≲ MV/cm:** `yn_sbe_impact_ionization
+  = 'n'`, `yn_sbe_auger = 'n'`. They are density-driven (II ∝ n, **Auger ∝ n²**);
+  on the ×10⁶-inflated density the ring Auger churns enormously (the observed
+  −2900 e⁻/cell cumulative on 9³) — it is *not a bug and creates no carriers*
+  (turning it off *raises* `nex`, since Auger only recombines), but the II
+  threshold is ~MV/cm, so both channels are physically negligible here and only
+  amplify the fabrication. Keep them only where γ ≲ 1 / E ≳ MV/cm.
+- **Watch the real density, not the full `nex`:** use column 3 (`nex_dref`,
+  Option-A) of `_sbe_nex_nonad.data` — it is the density the ring dissipators
+  see and the one the density-dependent rates (e-ph ν, screening, FD fit,
+  Auger n²) key off.
+- **`dt`:** the density is dt-converged at 0.25 fs; use ~0.1 fs only when the
+  absorbed **energy** matters (wiki/11 §3c). It is *not* the cause of the
+  over-estimate.
+
 ## &epm parameters ✅
 | Parameter | Units | Default | Description |
 |---|---|---|---|
