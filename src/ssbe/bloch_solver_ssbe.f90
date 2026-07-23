@@ -10,7 +10,8 @@ module bloch_solver_ssbe
     public :: s_sbe_bloch_solver, init_sbe_bloch_solver, calc_current_bloch, &
               dt_evolve_bloch_cf4, calc_trace, calc_energy, calc_bloch_population_k, &
               calc_unfolded_population_k, calc_diabatic_population_k, &
-              calc_diabatic_unfolded_population_k, calc_intraband_current_houston
+              calc_diabatic_unfolded_population_k, calc_intraband_current_houston, &
+              calc_nex_nonad
 
     type s_sbe_bloch_solver
         !k-points for real-time SBE calculation
@@ -3321,6 +3322,86 @@ subroutine calc_diabatic_population_k(sbe, ib_target, pop_k, icomm)
     call comm_summation(pop_local, pop_k, sbe%nk, icomm)
     deallocate(pop_local)
 end subroutine calc_diabatic_population_k
+
+
+! NON-ADIABATIC (real) excited density: the excitation measured against the
+! INSTANTANEOUS DRESSED ground state, i.e. the population that leaks into the
+! dressed CONDUCTION states. Per k we diagonalise the active-window velocity-
+! gauge Hamiltonian H_VG(k, A(t)) = H_0 + A.p (+ Sigma^HF) -> dressed eigenstates
+! (ZHEEV, ascending energy: the lowest nv_act are the dressed valence), transform
+! rho into that basis, and sum the diagonal over the dressed conduction states.
+!
+! This is exactly zero when the system follows the field adiabatically (rho = the
+! dressed ground state), so it DROPS the reversible virtual "dressing" (the A^2(t)
+! breathing that the fixed-basis conduction sum _sbe_nex.data carries, ~5x at the
+! pulse peak) and reports only the genuinely non-adiabatic promoted carriers.
+! Returned as the BZ-averaged count per cell (the caller divides by the cell
+! volume to get a density, matching _sbe_nex.data).
+function calc_nex_nonad(sbe, gs, Ac, icomm) result(nex)
+    use eigen_lapack, only: eigen_zheev
+    use communication, only: comm_summation
+    implicit none
+    type(s_sbe_bloch_solver), intent(in) :: sbe
+    type(s_sbe_gs_info),      intent(in) :: gs
+    real(8),                  intent(in) :: Ac(3)
+    integer,                  intent(in) :: icomm
+    real(8) :: nex
+
+    integer :: nba, nv, ik, i, j, in, im, c
+    real(8) :: tmp1, tmp, acc
+    real(8),    allocatable :: evals(:), p_k_full(:, :, :), eigen_a(:)
+    complex(8), allocatable :: H(:, :), W(:, :), t1(:, :), t2(:, :), rho_a(:, :)
+
+    nba = sbe%n_active_bands
+    nv  = sbe%nv_act
+    nex = 0d0
+    ! Need at least one dressed valence and one dressed conduction level.
+    if (nba < 1 .or. nv < 1 .or. nv >= nba) return
+
+    tmp1 = 0d0
+    !$omp parallel default(shared) &
+    !$omp    private(ik, i, j, in, im, c, acc, evals, H, W, t1, t2, rho_a, p_k_full, eigen_a)
+    allocate(evals(nba), H(nba, nba), W(nba, nba), t1(nba, nba), t2(nba, nba), rho_a(nba, nba))
+    allocate(p_k_full(sbe%nb, sbe%nb, 3), eigen_a(nba))
+    !$omp do reduction(+: tmp1)
+    do ik = sbe%ik_min, sbe%ik_max
+        p_k_full(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
+        if (sbe%flag_vnl_correction) &
+            p_k_full(:, :, :) = p_k_full(:, :, :) + gs%rvnl_tm_matrix(:, :, :, ik)
+        do i = 1, nba
+            eigen_a(i) = gs%eigen(sbe%active_idx(i), ik)
+        end do
+        do j = 1, nba
+            im = sbe%active_idx(j)
+            do i = 1, nba
+                in = sbe%active_idx(i)
+                H(i, j) = Ac(1) * p_k_full(in, im, 1) &
+                        + Ac(2) * p_k_full(in, im, 2) &
+                        + Ac(3) * p_k_full(in, im, 3)
+                rho_a(i, j) = sbe%rho(in, im, ik)
+            end do
+        end do
+        do i = 1, nba
+            H(i, i) = H(i, i) + eigen_a(i)
+        end do
+        if (sbe%flag_coulomb) H(:, :) = H(:, :) + sbe%sigma_hf(:, :, ik)
+        ! H = W diag(evals) W^dagger, evals ascending -> dressed valence = 1..nv
+        call eigen_zheev(H, evals, W)
+        ! rho_dressed = W^dagger rho_a W ; sum the dressed-conduction diagonal
+        call ZGEMM('C', 'N', nba, nba, nba, cmplx(1d0, 0d0, 8), W,  nba, rho_a, nba, cmplx(0d0, 0d0, 8), t1, nba)
+        call ZGEMM('N', 'N', nba, nba, nba, cmplx(1d0, 0d0, 8), t1, nba, W,     nba, cmplx(0d0, 0d0, 8), t2, nba)
+        acc = 0d0
+        do c = nv + 1, nba
+            acc = acc + real(t2(c, c))
+        end do
+        tmp1 = tmp1 + acc * gs%kweight(ik)
+    end do
+    !$omp end do
+    deallocate(evals, H, W, t1, t2, rho_a, p_k_full, eigen_a)
+    !$omp end parallel
+    call comm_summation(tmp1, tmp, icomm)
+    nex = tmp / sum(gs%kweight)
+end function calc_nex_nonad
 
 
 ! Population of the PHYSICAL lowest conduction band (CB1) of each folded

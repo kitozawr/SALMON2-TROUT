@@ -22,9 +22,9 @@ subroutine main_realtime_ssbe(icomm)
     real(8) :: t, E(3), jmat(3)
     real(8), allocatable :: Ac_ext_t(:, :)
     integer :: it
-    real(8) :: energy, tr_all, tr_vb
+    real(8) :: energy, tr_all, tr_vb, nex_nonad
     integer :: nproc, irank, ierr
-    integer :: fh_sbe_rt, fh_sbe_rt_energy, fh_sbe_nex, fh_sbe_nex_k
+    integer :: fh_sbe_rt, fh_sbe_rt_energy, fh_sbe_nex, fh_sbe_nex_nonad, fh_sbe_nex_k
     integer :: fh_sbe_channels, it0, ck_unit
     logical :: ck_exists
     character(256) :: ck_file
@@ -145,6 +145,18 @@ subroutine main_realtime_ssbe(icomm)
         fh_sbe_nex = get_filehandle()
         open(unit=fh_sbe_nex, file=trim(base_directory)//trim(sysname)//"_sbe_nex.data", action="write")
         call write_sbe_nex_header(fh_sbe_nex)
+        ! SYSNAME_sbe_nex_nonad.data: NON-ADIABATIC (real) excited density only --
+        ! the population in the instantaneous DRESSED conduction states (measured
+        ! against the dressed ground state), which drops the reversible A^2(t)
+        ! virtual "dressing" that _sbe_nex.data carries (~5x at the pulse peak).
+        fh_sbe_nex_nonad = get_filehandle()
+        open(unit=fh_sbe_nex_nonad, &
+            & file=trim(base_directory)//trim(sysname)//"_sbe_nex_nonad.data", action="write")
+        write(fh_sbe_nex_nonad, '(a)') "# Non-adiabatic (real) excited-carrier density"
+        write(fh_sbe_nex_nonad, '(a)') "# nex_nonad: population in the instantaneous dressed conduction states"
+        write(fh_sbe_nex_nonad, '(a)') "#   (= 0 for adiabatic following; drops the reversible A^2(t) dressing"
+        write(fh_sbe_nex_nonad, '(a)') "#    that _sbe_nex.data includes). electrons = holes for pair creation."
+        write(fh_sbe_nex_nonad, '(a)') "# 1:time[fs]  2:nex_nonad[cm^-3]  3:nex_nonad[cm^-3]"
         ! SYSNAME_sbe_nex_k.data (instantaneous Houston-basis LCB population)
         fh_sbe_nex_k = get_filehandle()
         open(unit=fh_sbe_nex_k, file=trim(base_directory)//trim(sysname)//"_sbe_nex_k.data", action="write")
@@ -316,8 +328,12 @@ subroutine main_realtime_ssbe(icomm)
         if (mod(it, out_projection_step) == 0) then
             tr_all = calc_trace(sbe, gs, nstate_sbe(1), icomm)
             tr_vb = calc_trace(sbe, gs, nb_vb, icomm)
+            ! Non-adiabatic (real) excitation in the instantaneous dressed basis
+            ! (collective over k); drops the reversible A^2(t) dressing.
+            nex_nonad = calc_nex_nonad(sbe, gs, Ac_ext_t(:, it), icomm)
             if (irank == 0) then
                 call write_sbe_nex_line(fh_sbe_nex, t, (tr_all - tr_vb) / gs%volume, (nelec - tr_vb) / gs%volume)
+                call write_sbe_nex_line(fh_sbe_nex_nonad, t, nex_nonad / gs%volume, nex_nonad / gs%volume)
             end if
         end if
 
@@ -378,6 +394,7 @@ subroutine main_realtime_ssbe(icomm)
                 flush(fh_sbe_rt)
                 flush(fh_sbe_rt_energy)
                 flush(fh_sbe_nex)
+                flush(fh_sbe_nex_nonad)
                 flush(fh_sbe_nex_k)
                 flush(fh_sbe_nex_k_real)
                 if (gs%have_unfold) then
@@ -397,6 +414,7 @@ subroutine main_realtime_ssbe(icomm)
         close(fh_sbe_rt)
         close(fh_sbe_rt_energy)
         close(fh_sbe_nex)
+        close(fh_sbe_nex_nonad)
         close(fh_sbe_nex_k)
         close(fh_sbe_nex_k_real)
         if (gs%have_unfold) then
