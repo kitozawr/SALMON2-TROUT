@@ -3335,35 +3335,47 @@ end subroutine calc_diabatic_population_k
 ! dressed ground state), so it DROPS the reversible virtual "dressing" (the A^2(t)
 ! breathing that the fixed-basis conduction sum _sbe_nex.data carries, ~5x at the
 ! pulse peak) and reports only the genuinely non-adiabatic promoted carriers.
-! Returned as the BZ-averaged count per cell (the caller divides by the cell
-! volume to get a density, matching _sbe_nex.data).
-function calc_nex_nonad(sbe, gs, Ac, icomm) result(nex)
+!
+! Returns TWO BZ-averaged counts per cell (the caller divides by the cell volume
+! to get a density, matching _sbe_nex.data):
+!   nex_proj = sum over the dressed CONDUCTION diagonal of W^dag rho W. This still
+!              carries the field-rotated-GS leakage of the field-free ground state
+!              into the dressed conduction manifold.
+!   nex_dref = the SAME dressed-conduction sum with that leakage removed via the
+!              Option-A dressed-reference delta0 (dressed_ref_delta), clamped to
+!              [0, occ] per (band,k) -- EXACTLY the carrier measure the ring
+!              dissipators see (wiki/10 sec.3A). This is the density that drives
+!              the density-dependent rates (e-ph nu, screening, FD fit), so it is
+!              the physically relevant "real carrier" tracer.
+subroutine calc_nex_nonad(sbe, gs, Ac, icomm, nex_proj, nex_dref)
     use eigen_lapack, only: eigen_zheev
     use communication, only: comm_summation
+    use sbe_superres_ssbe, only: dressed_ref_delta
     implicit none
-    type(s_sbe_bloch_solver), intent(in) :: sbe
-    type(s_sbe_gs_info),      intent(in) :: gs
-    real(8),                  intent(in) :: Ac(3)
-    integer,                  intent(in) :: icomm
-    real(8) :: nex
+    type(s_sbe_bloch_solver), intent(in)  :: sbe
+    type(s_sbe_gs_info),      intent(in)  :: gs
+    real(8),                  intent(in)  :: Ac(3)
+    integer,                  intent(in)  :: icomm
+    real(8),                  intent(out) :: nex_proj, nex_dref
 
     integer :: nba, nv, ik, i, j, in, im, c
-    real(8) :: tmp1, tmp, acc
-    real(8),    allocatable :: evals(:), p_k_full(:, :, :), eigen_a(:)
+    real(8) :: acc_p, acc_d, fd, dsum(2), gsum(2)
+    real(8),    allocatable :: evals(:), p_k_full(:, :, :), eigen_a(:), dref(:)
     complex(8), allocatable :: H(:, :), W(:, :), t1(:, :), t2(:, :), rho_a(:, :)
 
     nba = sbe%n_active_bands
     nv  = sbe%nv_act
-    nex = 0d0
+    nex_proj = 0d0
+    nex_dref = 0d0
     ! Need at least one dressed valence and one dressed conduction level.
     if (nba < 1 .or. nv < 1 .or. nv >= nba) return
 
-    tmp1 = 0d0
+    dsum(:) = 0d0
     !$omp parallel default(shared) &
-    !$omp    private(ik, i, j, in, im, c, acc, evals, H, W, t1, t2, rho_a, p_k_full, eigen_a)
+    !$omp    private(ik, i, j, in, im, c, acc_p, acc_d, fd, evals, H, W, t1, t2, rho_a, p_k_full, eigen_a, dref)
     allocate(evals(nba), H(nba, nba), W(nba, nba), t1(nba, nba), t2(nba, nba), rho_a(nba, nba))
-    allocate(p_k_full(sbe%nb, sbe%nb, 3), eigen_a(nba))
-    !$omp do reduction(+: tmp1)
+    allocate(p_k_full(sbe%nb, sbe%nb, 3), eigen_a(nba), dref(nba))
+    !$omp do reduction(+: dsum)
     do ik = sbe%ik_min, sbe%ik_max
         p_k_full(:, :, :) = gs%p_tm_matrix(:, :, :, ik)
         if (sbe%flag_vnl_correction) &
@@ -3387,21 +3399,28 @@ function calc_nex_nonad(sbe, gs, Ac, icomm) result(nex)
         if (sbe%flag_coulomb) H(:, :) = H(:, :) + sbe%sigma_hf(:, :, ik)
         ! H = W diag(evals) W^dagger, evals ascending -> dressed valence = 1..nv
         call eigen_zheev(H, evals, W)
-        ! rho_dressed = W^dagger rho_a W ; sum the dressed-conduction diagonal
+        ! rho_dressed = W^dagger rho_a W ; its diagonal is the dressed occupation
         call ZGEMM('C', 'N', nba, nba, nba, cmplx(1d0, 0d0, 8), W,  nba, rho_a, nba, cmplx(0d0, 0d0, 8), t1, nba)
         call ZGEMM('N', 'N', nba, nba, nba, cmplx(1d0, 0d0, 8), t1, nba, W,     nba, cmplx(0d0, 0d0, 8), t2, nba)
-        acc = 0d0
+        ! Option-A dressed-reference delta0 (same call the ring uses).
+        call dressed_ref_delta(nba, nv, sbe%occ_max, W, dref)
+        acc_p = 0d0
+        acc_d = 0d0
         do c = nv + 1, nba
-            acc = acc + real(t2(c, c))
+            fd = real(t2(c, c))
+            acc_p = acc_p + fd
+            acc_d = acc_d + min(max(fd - dref(c), 0d0), sbe%occ_max)
         end do
-        tmp1 = tmp1 + acc * gs%kweight(ik)
+        dsum(1) = dsum(1) + acc_p * gs%kweight(ik)
+        dsum(2) = dsum(2) + acc_d * gs%kweight(ik)
     end do
     !$omp end do
-    deallocate(evals, H, W, t1, t2, rho_a, p_k_full, eigen_a)
+    deallocate(evals, H, W, t1, t2, rho_a, p_k_full, eigen_a, dref)
     !$omp end parallel
-    call comm_summation(tmp1, tmp, icomm)
-    nex = tmp / sum(gs%kweight)
-end function calc_nex_nonad
+    call comm_summation(dsum, gsum, 2, icomm)
+    nex_proj = gsum(1) / sum(gs%kweight)
+    nex_dref = gsum(2) / sum(gs%kweight)
+end subroutine calc_nex_nonad
 
 
 ! Population of the PHYSICAL lowest conduction band (CB1) of each folded

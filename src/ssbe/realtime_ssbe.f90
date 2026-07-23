@@ -22,8 +22,11 @@ subroutine main_realtime_ssbe(icomm)
     real(8) :: t, E(3), jmat(3)
     real(8), allocatable :: Ac_ext_t(:, :)
     integer :: it
-    real(8) :: energy, tr_all, tr_vb, nex_nonad
+    real(8) :: energy, tr_all, tr_vb, nex_nonad, nex_nonad_A
     integer :: nproc, irank, ierr
+    logical :: is_ckrst          ! checkpoint-restart mode: append to outputs, no headers/t=0
+    character(8) :: ost          ! open status  : 'replace' (fresh) / 'unknown' (restart)
+    character(8) :: opos         ! open position: 'rewind'  (fresh) / 'append'  (restart)
     integer :: fh_sbe_rt, fh_sbe_rt_energy, fh_sbe_nex, fh_sbe_nex_nonad, fh_sbe_nex_k
     integer :: fh_sbe_channels, it0, ck_unit
     logical :: ck_exists
@@ -132,73 +135,103 @@ subroutine main_realtime_ssbe(icomm)
     if (sbe%n_active_bands > 0) ib_top = sbe%active_idx(sbe%n_active_bands)
     allocate(pop_top_k(1:nk))
 
+    ! Output-file open mode. On a checkpoint restart (yn_sbe_checkpoint_restart='y')
+    ! the run resumes mid-trajectory, so APPEND to the existing .data files (and
+    ! skip the headers + the t=0 block) instead of truncating them -- otherwise the
+    ! pre-checkpoint rows would be lost. A fresh run truncates (status='replace').
+    is_ckrst = (yn_sbe_checkpoint_restart == 'y')
+    if (is_ckrst) then
+        ost  = 'unknown'
+        opos = 'append'
+    else
+        ost  = 'replace'
+        opos = 'rewind'
+    end if
+
     if (irank == 0) then
         ! SYSNAME_sbe_rt.data
         fh_sbe_rt = get_filehandle()
-        open(unit=fh_sbe_rt, file=trim(base_directory)//trim(sysname)//"_sbe_rt.data", action="write")
-        call write_sbe_rt_header(fh_sbe_rt)
+        open(unit=fh_sbe_rt, file=trim(base_directory)//trim(sysname)//"_sbe_rt.data", &
+            & action="write", status=trim(ost), position=trim(opos))
+        if (.not. is_ckrst) call write_sbe_rt_header(fh_sbe_rt)
         ! SYSNAME_sbe_rt_energy.data
         fh_sbe_rt_energy = get_filehandle()
-        open(unit=fh_sbe_rt_energy, file=trim(base_directory)//trim(sysname)//"_sbe_rt_energy.data", action="write")
-        call write_sbe_rt_energy_header(fh_sbe_rt_energy)
+        open(unit=fh_sbe_rt_energy, file=trim(base_directory)//trim(sysname)//"_sbe_rt_energy.data", &
+            & action="write", status=trim(ost), position=trim(opos))
+        if (.not. is_ckrst) call write_sbe_rt_energy_header(fh_sbe_rt_energy)
         ! SYSNAME_sbe_nex.data
         fh_sbe_nex = get_filehandle()
-        open(unit=fh_sbe_nex, file=trim(base_directory)//trim(sysname)//"_sbe_nex.data", action="write")
-        call write_sbe_nex_header(fh_sbe_nex)
-        ! SYSNAME_sbe_nex_nonad.data: NON-ADIABATIC (real) excited density only --
-        ! the population in the instantaneous DRESSED conduction states (measured
-        ! against the dressed ground state), which drops the reversible A^2(t)
-        ! virtual "dressing" that _sbe_nex.data carries (~5x at the pulse peak).
+        open(unit=fh_sbe_nex, file=trim(base_directory)//trim(sysname)//"_sbe_nex.data", &
+            & action="write", status=trim(ost), position=trim(opos))
+        if (.not. is_ckrst) call write_sbe_nex_header(fh_sbe_nex)
+        ! SYSNAME_sbe_nex_nonad.data: NON-ADIABATIC (real) excited density. Two
+        ! measures against the instantaneous DRESSED basis (both = 0 for adiabatic
+        ! following, dropping the reversible A^2(t) dressing that _sbe_nex.data
+        ! carries): col 2 = dressed-conduction projection; col 3 = the Option-A
+        ! dressed-reference (delta0-subtracted, clamped) density the RING
+        ! dissipators actually see -> what drives the density-dependent rates.
         fh_sbe_nex_nonad = get_filehandle()
         open(unit=fh_sbe_nex_nonad, &
-            & file=trim(base_directory)//trim(sysname)//"_sbe_nex_nonad.data", action="write")
-        write(fh_sbe_nex_nonad, '(a)') "# Non-adiabatic (real) excited-carrier density"
-        write(fh_sbe_nex_nonad, '(a)') "# nex_nonad: population in the instantaneous dressed conduction states"
-        write(fh_sbe_nex_nonad, '(a)') "#   (= 0 for adiabatic following; drops the reversible A^2(t) dressing"
-        write(fh_sbe_nex_nonad, '(a)') "#    that _sbe_nex.data includes). electrons = holes for pair creation."
-        write(fh_sbe_nex_nonad, '(a)') "# 1:time[fs]  2:nex_nonad[cm^-3]  3:nex_nonad[cm^-3]"
+            & file=trim(base_directory)//trim(sysname)//"_sbe_nex_nonad.data", &
+            & action="write", status=trim(ost), position=trim(opos))
+        if (.not. is_ckrst) then
+            write(fh_sbe_nex_nonad, '(a)') "# Non-adiabatic (real) excited-carrier density (dressed basis)"
+            write(fh_sbe_nex_nonad, '(a)') "# nex_proj: dressed-conduction population (still carries some dressing)"
+            write(fh_sbe_nex_nonad, '(a)') "# nex_dref: Option-A dressed-reference (delta0-subtracted, clamped) --"
+            write(fh_sbe_nex_nonad, '(a)') "#           the real-carrier density the ring dissipators see"
+            write(fh_sbe_nex_nonad, '(a)') "# 1:time[fs]  2:nex_proj[cm^-3]  3:nex_dref[cm^-3]"
+        end if
         ! SYSNAME_sbe_nex_k.data (instantaneous Houston-basis LCB population)
         fh_sbe_nex_k = get_filehandle()
-        open(unit=fh_sbe_nex_k, file=trim(base_directory)//trim(sysname)//"_sbe_nex_k.data", action="write")
-        call write_sbe_nex_k_header(fh_sbe_nex_k, nk)
+        open(unit=fh_sbe_nex_k, file=trim(base_directory)//trim(sysname)//"_sbe_nex_k.data", &
+            & action="write", status=trim(ost), position=trim(opos))
+        if (.not. is_ckrst) call write_sbe_nex_k_header(fh_sbe_nex_k, nk)
         ! SYSNAME_sbe_nex_k_real.data: REAL carriers only (fixed-basis diabatic
         ! LCB occupation, k-resolved n_ex) -- no reversible A^2(t) virtual breathing
         fh_sbe_nex_k_real = get_filehandle()
         open(unit=fh_sbe_nex_k_real, &
-            & file=trim(base_directory)//trim(sysname)//"_sbe_nex_k_real.data", action="write")
-        call write_sbe_nex_k_real_header(fh_sbe_nex_k_real, nk)
+            & file=trim(base_directory)//trim(sysname)//"_sbe_nex_k_real.data", &
+            & action="write", status=trim(ost), position=trim(opos))
+        if (.not. is_ckrst) call write_sbe_nex_k_real_header(fh_sbe_nex_k_real, nk)
         ! C1: per-channel dissipation ledger (ring channels; cumulative)
         fh_sbe_channels = get_filehandle()
-        open(unit=fh_sbe_channels, file=trim(base_directory)//trim(sysname)//"_sbe_channels.data", action="write")
-        write(fh_sbe_channels, '(a)') '# C1 per-channel ledger (CUMULATIVE, per cell): ring channels only'
-        write(fh_sbe_channels, '(a)') '# dN = conduction-population change (pairs created > 0), dE [Ha]'
-        write(fh_sbe_channels, '(a)') '# t[au]  dN_eph dE_eph  dN_ii dE_ii  dN_auger dE_auger  dN_rana dE_rana'
+        open(unit=fh_sbe_channels, file=trim(base_directory)//trim(sysname)//"_sbe_channels.data", &
+            & action="write", status=trim(ost), position=trim(opos))
+        if (.not. is_ckrst) then
+            write(fh_sbe_channels, '(a)') '# C1 per-channel ledger (CUMULATIVE, per cell): ring channels only'
+            write(fh_sbe_channels, '(a)') '# dN = conduction-population change (pairs created > 0), dE [Ha]'
+            write(fh_sbe_channels, '(a)') '# t[au]  dN_eph dE_eph  dN_ii dE_ii  dN_auger dE_auger  dN_rana dE_rana'
+        end if
         ! SYSNAME_sbe_nex_k_unfold.data: populations of PHYSICAL primitive
         ! bands at the unfolded primitive k-points (only with an unfold map)
         if (gs%have_unfold) then
             fh_sbe_nex_k_unfold = get_filehandle()
             open(unit=fh_sbe_nex_k_unfold, &
-                & file=trim(base_directory)//trim(sysname)//"_sbe_nex_k_unfold.data", action="write")
-            call write_sbe_nex_k_unfold_header(fh_sbe_nex_k_unfold, nk)
+                & file=trim(base_directory)//trim(sysname)//"_sbe_nex_k_unfold.data", &
+                & action="write", status=trim(ost), position=trim(opos))
+            if (.not. is_ckrst) call write_sbe_nex_k_unfold_header(fh_sbe_nex_k_unfold, nk)
             ! REAL-carrier unfolded twin
             fh_sbe_nex_k_unfold_real = get_filehandle()
             open(unit=fh_sbe_nex_k_unfold_real, &
-                & file=trim(base_directory)//trim(sysname)//"_sbe_nex_k_unfold_real.data", action="write")
-            call write_sbe_nex_k_unfold_header(fh_sbe_nex_k_unfold_real, nk)
+                & file=trim(base_directory)//trim(sysname)//"_sbe_nex_k_unfold_real.data", &
+                & action="write", status=trim(ost), position=trim(opos))
+            if (.not. is_ckrst) call write_sbe_nex_k_unfold_header(fh_sbe_nex_k_unfold_real, nk)
         else
             ! Primitive cell (no unfold map): four gap-edge diabatic populations
             ! (VB-1, VB, CB1, CB2) per k, so --spectral can colour all four bands.
             fh_sbe_nex_k_lev_real = get_filehandle()
             open(unit=fh_sbe_nex_k_lev_real, &
-                & file=trim(base_directory)//trim(sysname)//"_sbe_nex_k_lev_real.data", action="write")
-            call write_sbe_nex_k_lev_header(fh_sbe_nex_k_lev_real, nk)
+                & file=trim(base_directory)//trim(sysname)//"_sbe_nex_k_lev_real.data", &
+                & action="write", status=trim(ost), position=trim(opos))
+            if (.not. is_ckrst) call write_sbe_nex_k_lev_header(fh_sbe_nex_k_lev_real, nk)
         end if
         ! SYSNAME_sbe_intra_current.data: intra-band (Houston) current
         if (yn_out_intraband_current == 'y') then
             fh_sbe_intra_current = get_filehandle()
             open(unit=fh_sbe_intra_current, &
-                & file=trim(base_directory)//trim(sysname)//"_sbe_intra_current.data", action="write")
-            call write_sbe_intra_current_header(fh_sbe_intra_current)
+                & file=trim(base_directory)//trim(sysname)//"_sbe_intra_current.data", &
+                & action="write", status=trim(ost), position=trim(opos))
+            if (.not. is_ckrst) call write_sbe_intra_current_header(fh_sbe_intra_current)
         end if
         ! Stdout logs:
         write(*, "(a)") " time-step time[fs] Current(xyz)[a.u.]                     electrons   Total energy[au]"
@@ -209,31 +242,34 @@ subroutine main_realtime_ssbe(icomm)
     ! are zero at equilibrium, but the 4-level file must carry the REAL diabatic
     ! occupations (valence FULL, conduction empty) so the carrier (hole/electron)
     ! colour scale is not poisoned by a spurious t=0 "hole" -- compute them
-    ! (collective) before the irank-0 write.
-    if (.not. gs%have_unfold) then
-        call calc_diabatic_population_k(sbe, ib_lcb-2, pop_k_real, icomm); pop4(1,:) = pop_k_real
-        call calc_diabatic_population_k(sbe, ib_lcb-1, pop_k_real, icomm); pop4(2,:) = pop_k_real
-        call calc_diabatic_population_k(sbe, ib_lcb,   pop_k_real, icomm); pop4(3,:) = pop_k_real
-        call calc_diabatic_population_k(sbe, ib_lcb+1, pop_k_real, icomm); pop4(4,:) = pop_k_real
-    end if
-    if (irank == 0) then
-        pop_k = 0.0d0
-        call write_sbe_nex_k_block(fh_sbe_nex_k, 0.0d0, nk, gs%kpoint, pop_k)
-        call write_sbe_nex_k_block(fh_sbe_nex_k_real, 0.0d0, nk, gs%kpoint, pop_k)
-        flush(fh_sbe_nex_k)
-        flush(fh_sbe_nex_k_real)
+    ! (collective) before the irank-0 write. Skipped on a checkpoint restart:
+    ! the t=0 block is already in the (appended) file.
+    if (.not. is_ckrst) then
         if (.not. gs%have_unfold) then
-            call write_sbe_nex_k_lev_block(fh_sbe_nex_k_lev_real, 0.0d0, nk, gs%kpoint, pop4)
-            flush(fh_sbe_nex_k_lev_real)
+            call calc_diabatic_population_k(sbe, ib_lcb-2, pop_k_real, icomm); pop4(1,:) = pop_k_real
+            call calc_diabatic_population_k(sbe, ib_lcb-1, pop_k_real, icomm); pop4(2,:) = pop_k_real
+            call calc_diabatic_population_k(sbe, ib_lcb,   pop_k_real, icomm); pop4(3,:) = pop_k_real
+            call calc_diabatic_population_k(sbe, ib_lcb+1, pop_k_real, icomm); pop4(4,:) = pop_k_real
         end if
-        if (gs%have_unfold) then
-            pop_lev_k = 0.0d0
-            call write_sbe_nex_k_unfold_block(fh_sbe_nex_k_unfold, 0.0d0, nk, &
-                & gs%kpoint, gs%unfold_offset, pop_lev_k, gs%n_coset)
-            call write_sbe_nex_k_unfold_block(fh_sbe_nex_k_unfold_real, 0.0d0, nk, &
-                & gs%kpoint, gs%unfold_offset, pop_lev_k, gs%n_coset)
-            flush(fh_sbe_nex_k_unfold)
-            flush(fh_sbe_nex_k_unfold_real)
+        if (irank == 0) then
+            pop_k = 0.0d0
+            call write_sbe_nex_k_block(fh_sbe_nex_k, 0.0d0, nk, gs%kpoint, pop_k)
+            call write_sbe_nex_k_block(fh_sbe_nex_k_real, 0.0d0, nk, gs%kpoint, pop_k)
+            flush(fh_sbe_nex_k)
+            flush(fh_sbe_nex_k_real)
+            if (.not. gs%have_unfold) then
+                call write_sbe_nex_k_lev_block(fh_sbe_nex_k_lev_real, 0.0d0, nk, gs%kpoint, pop4)
+                flush(fh_sbe_nex_k_lev_real)
+            end if
+            if (gs%have_unfold) then
+                pop_lev_k = 0.0d0
+                call write_sbe_nex_k_unfold_block(fh_sbe_nex_k_unfold, 0.0d0, nk, &
+                    & gs%kpoint, gs%unfold_offset, pop_lev_k, gs%n_coset)
+                call write_sbe_nex_k_unfold_block(fh_sbe_nex_k_unfold_real, 0.0d0, nk, &
+                    & gs%kpoint, gs%unfold_offset, pop_lev_k, gs%n_coset)
+                flush(fh_sbe_nex_k_unfold)
+                flush(fh_sbe_nex_k_unfold_real)
+            end if
         end if
     end if
 
@@ -329,11 +365,12 @@ subroutine main_realtime_ssbe(icomm)
             tr_all = calc_trace(sbe, gs, nstate_sbe(1), icomm)
             tr_vb = calc_trace(sbe, gs, nb_vb, icomm)
             ! Non-adiabatic (real) excitation in the instantaneous dressed basis
-            ! (collective over k); drops the reversible A^2(t) dressing.
-            nex_nonad = calc_nex_nonad(sbe, gs, Ac_ext_t(:, it), icomm)
+            ! (collective over k): col 2 = dressed-conduction projection, col 3 =
+            ! the Option-A dressed-reference density the ring dissipators see.
+            call calc_nex_nonad(sbe, gs, Ac_ext_t(:, it), icomm, nex_nonad, nex_nonad_A)
             if (irank == 0) then
                 call write_sbe_nex_line(fh_sbe_nex, t, (tr_all - tr_vb) / gs%volume, (nelec - tr_vb) / gs%volume)
-                call write_sbe_nex_line(fh_sbe_nex_nonad, t, nex_nonad / gs%volume, nex_nonad / gs%volume)
+                call write_sbe_nex_line(fh_sbe_nex_nonad, t, nex_nonad / gs%volume, nex_nonad_A / gs%volume)
             end if
         end if
 
