@@ -20,7 +20,11 @@ What is plotted
                              --fmax-thz / --stft-window-fs / --stft-hop to tune).
                              True THz resolution needs a ps-scale run.
   *_sbe_rt_energy.data   : total energy vs time
-  *_sbe_nex.data         : excited electron count vs time
+  *_sbe_nex.data         : excited electron count vs time (FULL, incl. dressing)
+  *_sbe_nex_nonad.data   : NON-ADIABATIC (real) excited density -- dressed-frame
+                           conduction population; drops the reversible A^2(t)
+                           virtual dressing. A full-vs-non-adiabatic overlay
+                           (twin Y-axes + shared log) is emitted automatically.
   *_sbe_nex_k_real.data  : per-k REAL-carrier LCB population (fixed-basis
                              diabatic n_ex, no A^2 breathing) -- the default
                              carrier map: snapshots + time-k maps. With
@@ -309,6 +313,78 @@ def plot_rt_file(filepath, output_dir, downsample=1, dpi=150):
     time_name, time = cols[0], data[:, 0]
     for j in range(1, min(len(cols), data.shape[1])):
         _plot_xy(time, data[:, j], time_name, cols[j], output_dir, dpi=dpi)
+
+
+def plot_nex_comparison(nex_file, output_dir, dpi=150):
+    """Overlay the FULL excited density (_sbe_nex.data, which includes the
+    reversible A^2(t) virtual 'dressing') against the NON-ADIABATIC real density
+    (_sbe_nex_nonad.data, the population in the instantaneous dressed conduction
+    states). Two panels: linear with twin Y-axes (the curves live on very
+    different scales during the pulse), and a shared log axis. The shaded gap
+    between them is the reversible dressing that is NOT real carriers."""
+    nonad_file = nex_file.parent / nex_file.name.replace('_sbe_nex.data',
+                                                         '_sbe_nex_nonad.data')
+    if not nonad_file.exists():
+        return
+
+    def _read(fp):
+        d = np.loadtxt(fp, comments='#')
+        if d.ndim == 1:
+            d = d.reshape(1, -1)
+        return d[:, 0], d[:, 1]
+
+    try:
+        t, full = _read(nex_file)
+        tn, non = _read(nonad_file)
+    except Exception as exc:
+        print(f"  (skip) nex comparison: {exc}")
+        return
+    n = min(len(t), len(tn))
+    if n < 2:
+        return
+    t, full, non = t[:n], full[:n], non[:n]
+
+    C_FULL, C_NON = '#1f77b4', '#d62728'
+    fig, (a1, a2) = plt.subplots(2, 1, figsize=(10, 8))
+
+    # -- top: linear, twin Y-axes --
+    l1, = a1.plot(t, full, color=C_FULL, lw=1.2,
+                  label=r'full n$_{ex}$ (incl. dressing)')
+    fill = a1.fill_between(t, non, full, color=C_FULL, alpha=0.12,
+                           label='reversible dressing (not real)')
+    a1.set_ylabel(r'full n$_{ex}$ [cm$^{-3}$]', color=C_FULL)
+    a1.tick_params(axis='y', labelcolor=C_FULL)
+    a1b = a1.twinx()
+    l2, = a1b.plot(t, non, color=C_NON, lw=1.5,
+                   label='non-adiabatic (real)')
+    a1b.set_ylabel(r'non-adiabatic n$_{ex}$ [cm$^{-3}$]', color=C_NON)
+    a1b.tick_params(axis='y', labelcolor=C_NON)
+    a1.set_xlabel('time [fs]')
+    a1.set_title('Excited density: full vs non-adiabatic (twin Y-axes)')
+    a1.grid(True, alpha=0.3, ls='--')
+    a1.legend(handles=[l1, fill, l2], loc='upper left', fontsize=9)
+
+    # -- bottom: shared log axis --
+    a2.semilogy(t, np.clip(full, 1e-30, None), color=C_FULL, lw=1.2,
+                label='full (incl. dressing)')
+    a2.semilogy(t, np.clip(non, 1e-30, None), color=C_NON, lw=1.5,
+                label='non-adiabatic (real)')
+    a2.set_xlabel('time [fs]')
+    a2.set_ylabel(r'n$_{ex}$ [cm$^{-3}$]  (log)')
+    a2.set_title('Same, shared log scale')
+    a2.grid(True, which='both', alpha=0.3, ls='--')
+    a2.legend(loc='lower right', fontsize=9)
+    ip = int(np.argmax(full))
+    ratio = full[ip] / max(non[ip], 1e-30)
+    a2.annotate(f'peak full / non-ad = {ratio:.1f}x',
+                xy=(t[ip], max(full[ip], 1e-30)), fontsize=9, ha='center',
+                va='bottom', color='0.2')
+
+    fig.tight_layout()
+    out = output_dir / (nex_file.name.replace('.data', '') + '_vs_nonad.png')
+    fig.savefig(out, dpi=dpi, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  saved {out.name}")
 
 
 # ===========================================================================
@@ -2578,10 +2654,14 @@ def main():
         for f in sorted(input_dir.glob('*_sbe_channels.data')):
             found_any = True
             plot_channels(f, output_dir, dpi=args.dpi)
-        for pattern in ('*_sbe_rt.data', '*_sbe_rt_energy.data', '*_sbe_nex.data'):
+        for pattern in ('*_sbe_rt.data', '*_sbe_rt_energy.data', '*_sbe_nex.data',
+                        '*_sbe_nex_nonad.data'):
             for f in sorted(input_dir.glob(pattern)):
                 found_any = True
                 plot_rt_file(f, output_dir, downsample=args.downsample, dpi=args.dpi)
+        # full vs non-adiabatic overlay (twin Y-axes + shared log scale)
+        for f in sorted(input_dir.glob('*_sbe_nex.data')):
+            plot_nex_comparison(f, output_dir, dpi=args.dpi)
 
         # Optical conductivity sigma(w)=J(w)/E(w) from the current/field columns
         if not args.no_conductivity:
