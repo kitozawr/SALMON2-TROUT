@@ -72,48 +72,52 @@
 
 ### ⚠️ Flag recommendations by field regime (validity limits)
 
-**The frozen-window velocity-gauge SBE over-generates carriers in the deep
-sub-gap, weak-field regime (Keldysh γ ≫ 1).** Measured on the maintainer's THz
-field (Si, ~100 kV/cm, 4³, `nex_dref` = the Option-A real-carrier column of
-`_sbe_nex_nonad.data`; density is dt-converged — 0.10 fs ≡ 0.25 fs):
+**FIRST: the clean-VG sub-gap "over-generation" was a TIME-STEP artifact
+(corrected 2026-07-23 — see wiki/06 §6).** On the maintainer's DAST THz field
+(Si primitive, ~100 kV/cm, 3.3 THz, γ_K ≈ 5.7), driving `dt` down at fixed basis
+collapses the real-carrier density and converges it to the theory bound:
 
-| model level | real density | vs theory (< 10¹⁶ cm⁻³) |
+| `dt` [fs] | clean-VG real density `nex_proj` | vs theory (< 10¹⁶ cm⁻³) |
 |---|---|---|
-| clean VG (no dissipation) | ~10¹⁹ | **~10³** |
-| + e-ph (phonon-assisted generation) | ~9×10²¹ | ~10⁶ |
-| + all three filters (dref+colmem+colmem_pop) | trims only ~30 % | still ~10⁶ |
+| 0.25 | 5.5×10¹⁷ | **×55** |
+| 0.10 | 1.5×10¹⁶ | ×1.5 |
+| 0.05 | 1.3×10¹⁶ | ×1.3 (converged) |
+| 0.02 | 1.4×10¹⁶ | ×1.4 |
 
-Two layers, neither cured by the session's filters:
-1. **Even the clean unitary is ~10³ too high** — at γ ≫ 1 real interband
-   transitions are *exponentially* (Keldysh/tunneling `exp(−B/√I)`) suppressed;
-   the frozen-window VG generation is a *power law*, so it overshoots at the
-   source, before any dissipation. The `dressed_ref`/`colmem`/`colmem_pop`
-   filters remove the reversible **dressing/coherence/rotation** sectors (they
-   cut the fabricated *generation rate & I-exponent*, wiki/10 §8.6–8.10) but do
-   **not** restore the exponential suppression.
-2. **e-ph adds ~10³ more** by converting the field-driven population into real
-   carriers; the filters trim this only ~30 % (measured).
+So the earlier "clean unitary is ×10³ too high / a power law instead of the
+Keldysh `exp(−B/√I)`" diagnosis was **wrong** — it was read off an unconverged
+`dt = 0.25 fs`. At `dt ≤ 0.05 fs` the clean velocity gauge **reproduces the
+< 10¹⁶ bound** and is flat from N_b ≈ 8. The CF4 stays unitary (electrons =
+8.000) at coarse `dt`, so the error is invisible in the trace and in the
+*diabatic* `nelec` (that column is the reversible A²(t) dressing, ~2.5×10²¹, and
+is dt-flat to 4 digits — do NOT use it to judge convergence).
+
+**Under re-test (dissipative propagation).** The earlier "+ e-ph → ~10²²,
+huge Auger" figures were also taken at `dt = 0.25 fs`. Whether the ring
+dissipators still over-generate once the coherent seed is dt-converted is being
+re-measured (dt = 0.25 vs 0.05 with e-ph+II+Auger ON). Until that lands, treat
+the dissipative absolute yields below as provisional.
 
 **Consequences / recommendations:**
-- **Treat the absolute `nex` as an UPPER BOUND** below ~1 MV/cm (γ ≳ 1). The
-  *distributions* (which k, which band, cooling) are robust; the *absolute
-  yield* is not. For a quantitative yield in this regime a genuine Keldysh /
-  tunneling generation term is required (not a Markovian ring correction), or
-  restrict the SBE to γ ≲ 1.
+- **`dt`:** converge it on the **non-adiabatic real-carrier** measure
+  (`nex_proj`/`nex_dref`, cols 2/3 of `_sbe_nex_nonad.data`) — **use `dt ≤ 0.05
+  fs`** for the Si ~14 eV band spread (`0.1` ~10 % high, `0.25` ×40). Never judge
+  it on `_sbe_nex.data` (diabatic, dressing-dominated, dt-flat). This is the
+  single most important lever for the absolute yield at sub-gap THz.
+- **Treat the absolute `nex` as an UPPER BOUND** below ~1 MV/cm (γ ≳ 1) *until
+  the run is dt-converged as above*; the *distributions* (which k, which band,
+  cooling) are robust regardless.
 - **Disable impact ionization and Auger at ≲ MV/cm:** `yn_sbe_impact_ionization
-  = 'n'`, `yn_sbe_auger = 'n'`. They are density-driven (II ∝ n, **Auger ∝ n²**);
-  on the ×10⁶-inflated density the ring Auger churns enormously (the observed
-  −2900 e⁻/cell cumulative on 9³) — it is *not a bug and creates no carriers*
-  (turning it off *raises* `nex`, since Auger only recombines), but the II
-  threshold is ~MV/cm, so both channels are physically negligible here and only
-  amplify the fabrication. Keep them only where γ ≲ 1 / E ≳ MV/cm.
+  = 'n'`, `yn_sbe_auger = 'n'`. This holds on **physics** grounds independent of
+  the `dt` issue: they are density-driven (II ∝ n, **Auger ∝ n²**), the II
+  threshold is ~MV/cm, so both are physically negligible here — and on any
+  residual inflated density the ring Auger only churns (it recombines, creating
+  no carriers: turning it off *raises* `nex`). Keep them only where γ ≲ 1 /
+  E ≳ MV/cm.
 - **Watch the real density, not the full `nex`:** use column 3 (`nex_dref`,
-  Option-A) of `_sbe_nex_nonad.data` — it is the density the ring dissipators
-  see and the one the density-dependent rates (e-ph ν, screening, FD fit,
-  Auger n²) key off.
-- **`dt`:** the density is dt-converged at 0.25 fs; use ~0.1 fs only when the
-  absorbed **energy** matters (wiki/11 §3c). It is *not* the cause of the
-  over-estimate.
+  Option-A) of `_sbe_nex_nonad.data` — the density the ring dissipators see and
+  the one the density-dependent rates (e-ph ν, screening, FD fit, Auger n²)
+  key off.
 
 ## &epm parameters ✅
 | Parameter | Units | Default | Description |
