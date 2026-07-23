@@ -317,66 +317,71 @@ def plot_rt_file(filepath, output_dir, downsample=1, dpi=150):
 
 def plot_nex_comparison(nex_file, output_dir, dpi=150):
     """Overlay the FULL excited density (_sbe_nex.data, which includes the
-    reversible A^2(t) virtual 'dressing') against the NON-ADIABATIC real density
-    (_sbe_nex_nonad.data, the population in the instantaneous dressed conduction
-    states). Two panels: linear with twin Y-axes (the curves live on very
-    different scales during the pulse), and a shared log axis. The shaded gap
-    between them is the reversible dressing that is NOT real carriers."""
+    reversible A^2(t) virtual 'dressing') against the two NON-ADIABATIC real
+    densities from _sbe_nex_nonad.data: col 2 = dressed-conduction projection,
+    col 3 = the Option-A dressed-reference (delta0-subtracted, clamped) density
+    the ring dissipators actually see. Two panels: linear with twin Y-axes (the
+    curves live on very different scales during the pulse), and a shared log
+    axis. The shaded gap is the reversible dressing that is NOT real carriers."""
     nonad_file = nex_file.parent / nex_file.name.replace('_sbe_nex.data',
                                                          '_sbe_nex_nonad.data')
     if not nonad_file.exists():
         return
 
-    def _read(fp):
-        d = np.loadtxt(fp, comments='#')
+    try:
+        f = np.loadtxt(nex_file, comments='#')
+        d = np.loadtxt(nonad_file, comments='#')
+        if f.ndim == 1:
+            f = f.reshape(1, -1)
         if d.ndim == 1:
             d = d.reshape(1, -1)
-        return d[:, 0], d[:, 1]
-
-    try:
-        t, full = _read(nex_file)
-        tn, non = _read(nonad_file)
+        t, full = f[:, 0], f[:, 1]
+        tn, proj = d[:, 0], d[:, 1]
+        dref = d[:, 2] if d.shape[1] > 2 else d[:, 1]
     except Exception as exc:
         print(f"  (skip) nex comparison: {exc}")
         return
     n = min(len(t), len(tn))
     if n < 2:
         return
-    t, full, non = t[:n], full[:n], non[:n]
+    t, full, proj, dref = t[:n], full[:n], proj[:n], dref[:n]
 
-    C_FULL, C_NON = '#1f77b4', '#d62728'
+    C_FULL, C_PROJ, C_DREF = '#1f77b4', '#d62728', '#2ca02c'
     fig, (a1, a2) = plt.subplots(2, 1, figsize=(10, 8))
 
-    # -- top: linear, twin Y-axes --
+    # -- top: linear, twin Y-axes (full on the left, non-adiabatic on the right) --
     l1, = a1.plot(t, full, color=C_FULL, lw=1.2,
                   label=r'full n$_{ex}$ (incl. dressing)')
-    fill = a1.fill_between(t, non, full, color=C_FULL, alpha=0.12,
+    fill = a1.fill_between(t, dref, full, color=C_FULL, alpha=0.10,
                            label='reversible dressing (not real)')
     a1.set_ylabel(r'full n$_{ex}$ [cm$^{-3}$]', color=C_FULL)
     a1.tick_params(axis='y', labelcolor=C_FULL)
     a1b = a1.twinx()
-    l2, = a1b.plot(t, non, color=C_NON, lw=1.5,
-                   label='non-adiabatic (real)')
-    a1b.set_ylabel(r'non-adiabatic n$_{ex}$ [cm$^{-3}$]', color=C_NON)
-    a1b.tick_params(axis='y', labelcolor=C_NON)
+    l2, = a1b.plot(t, proj, color=C_PROJ, lw=1.3,
+                   label='non-adiabatic: dressed-conduction')
+    l3, = a1b.plot(t, dref, color=C_DREF, lw=1.6,
+                   label='non-adiabatic: Option-A (ring sees this)')
+    a1b.set_ylabel(r'non-adiabatic n$_{ex}$ [cm$^{-3}$]')
     a1.set_xlabel('time [fs]')
     a1.set_title('Excited density: full vs non-adiabatic (twin Y-axes)')
     a1.grid(True, alpha=0.3, ls='--')
-    a1.legend(handles=[l1, fill, l2], loc='upper left', fontsize=9)
+    a1.legend(handles=[l1, fill, l2, l3], loc='upper left', fontsize=8)
 
     # -- bottom: shared log axis --
     a2.semilogy(t, np.clip(full, 1e-30, None), color=C_FULL, lw=1.2,
                 label='full (incl. dressing)')
-    a2.semilogy(t, np.clip(non, 1e-30, None), color=C_NON, lw=1.5,
-                label='non-adiabatic (real)')
+    a2.semilogy(t, np.clip(proj, 1e-30, None), color=C_PROJ, lw=1.3,
+                label='non-adiabatic: dressed-conduction')
+    a2.semilogy(t, np.clip(dref, 1e-30, None), color=C_DREF, lw=1.6,
+                label='non-adiabatic: Option-A (ring sees this)')
     a2.set_xlabel('time [fs]')
     a2.set_ylabel(r'n$_{ex}$ [cm$^{-3}$]  (log)')
     a2.set_title('Same, shared log scale')
     a2.grid(True, which='both', alpha=0.3, ls='--')
-    a2.legend(loc='lower right', fontsize=9)
+    a2.legend(loc='lower right', fontsize=8)
     ip = int(np.argmax(full))
-    ratio = full[ip] / max(non[ip], 1e-30)
-    a2.annotate(f'peak full / non-ad = {ratio:.1f}x',
+    ratio = full[ip] / max(dref[ip], 1e-30)
+    a2.annotate(f'peak full / Option-A = {ratio:.0f}x',
                 xy=(t[ip], max(full[ip], 1e-30)), fontsize=9, ha='center',
                 va='bottom', color='0.2')
 
@@ -2536,6 +2541,11 @@ def main():
                         help='Skip band structure even if *_k.data exists')
     parser.add_argument('--no-rt', action='store_true',
                         help='Skip all RT / nex plots')
+    parser.add_argument('--no-data-copy', action='store_true',
+                        help='Do not snapshot the source *.data into output/data/ '
+                             '(by default a copy is made so a later solver re-run, '
+                             'which overwrites the run-dir *.data, cannot clobber '
+                             'the data this plot set was made from)')
     parser.add_argument('--log-cmap', action='store_true',
                         default=CMAP_LOG_SCALE,
                         help='Use logarithmic colormap scaling for 2-D population '
@@ -2647,6 +2657,27 @@ def main():
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Tidy layout: the main line plots (fields A/E, currents, nex, conductivity)
+    # stay in the output root; the k-space / Brillouin-zone evolution maps go into
+    # a kspace/ subfolder so the root is not swamped by per-time-step frames.
+    kdir = output_dir / 'kspace'
+    kdir.mkdir(parents=True, exist_ok=True)
+
+    # Snapshot the source *.data into output/data/ so a later re-run of the solver
+    # (which overwrites the run-dir *.data in place, and truncates them on a
+    # non-restart) does not clobber the results this plot set was made from.
+    if not args.no_data_copy:
+        ddir = output_dir / 'data'
+        ddir.mkdir(parents=True, exist_ok=True)
+        import shutil as _shutil
+        for df in sorted(input_dir.glob('*.data')):
+            try:
+                dst = ddir / df.name
+                if df.resolve() != dst.resolve():
+                    _shutil.copy2(df, dst)
+            except Exception as exc:
+                print(f"  (skip data copy) {df.name}: {exc}")
+
     found_any = False
 
     # --- RT line files --------------------------------------------------
@@ -2688,7 +2719,7 @@ def main():
         real_uk = sorted(input_dir.glob('*_sbe_nex_k_unfold_real.data'))
         for f in real_k:
             found_any = True
-            plot_nex_k(f, output_dir, dpi=args.dpi,
+            plot_nex_k(f, kdir, dpi=args.dpi,
                        log_scale=args.log_cmap, snapshots=args.snapshots, real=True,
                        b_matrix=_bmatrix_for(f, '_sbe_nex_k_real.data'),
                        mark_valleys=args.valleys, bz3d=args.bz3d,
@@ -2697,7 +2728,7 @@ def main():
                        voxel_gamma=args.voxel_gamma)
         for f in real_uk:
             found_any = True
-            plot_nex_k(f, output_dir, dpi=args.dpi,
+            plot_nex_k(f, kdir, dpi=args.dpi,
                        log_scale=args.log_cmap, snapshots=args.snapshots,
                        unfold=True, real=True)
 
@@ -2706,13 +2737,13 @@ def main():
         if args.instantaneous or not real_k:
             for f in sorted(input_dir.glob('*_sbe_nex_k.data')):
                 found_any = True
-                plot_nex_k(f, output_dir, dpi=args.dpi,
+                plot_nex_k(f, kdir, dpi=args.dpi,
                            log_scale=args.log_cmap, snapshots=args.snapshots,
                            b_matrix=_bmatrix_for(f, '_sbe_nex_k.data'),
                            mark_valleys=args.valleys, bz3d=args.bz3d,
                        bz3d_voxel=args.bz3d_voxel, voxel_smooth=args.voxel_smooth)
                 if args.subtract_baseline:
-                    plot_nex_k(f, output_dir, dpi=args.dpi,
+                    plot_nex_k(f, kdir, dpi=args.dpi,
                                log_scale=args.log_cmap, snapshots=args.snapshots,
                                subtract_baseline=True)
 
@@ -2721,11 +2752,11 @@ def main():
         if args.instantaneous or not real_uk:
             for f in sorted(input_dir.glob('*_sbe_nex_k_unfold.data')):
                 found_any = True
-                plot_nex_k(f, output_dir, dpi=args.dpi,
+                plot_nex_k(f, kdir, dpi=args.dpi,
                            log_scale=args.log_cmap, snapshots=args.snapshots,
                            unfold=True)
                 if args.subtract_baseline:
-                    plot_nex_k(f, output_dir, dpi=args.dpi,
+                    plot_nex_k(f, kdir, dpi=args.dpi,
                                log_scale=args.log_cmap, snapshots=args.snapshots,
                                unfold=True, subtract_baseline=True)
 
@@ -2737,7 +2768,7 @@ def main():
                 stem = f.name[:-len(suffix)]
                 bpfile = f.parent / f'{stem}_bandpath.data'
                 if bpfile.exists():
-                    plot_unfold_spectral(f, bpfile, output_dir, dpi=args.dpi)
+                    plot_unfold_spectral(f, bpfile, kdir, dpi=args.dpi)
                 else:
                     print(f"  (skip spectral) {bpfile.name} not found "
                           f"(generate it with: epm_gaas_reference.py bandpath)")
@@ -2751,7 +2782,7 @@ def main():
                 stem = f.name[:-len(suffix)]
                 bpfile = f.parent / f'{stem}_bandpath.data'
                 if bpfile.exists():
-                    plot_primitive_spectral(f, bpfile, output_dir, dpi=args.dpi,
+                    plot_primitive_spectral(f, bpfile, kdir, dpi=args.dpi,
                                             occupation_mode=not args.spectral_excitation,
                                             autoscale=args.spectral_autoscale)
                 else:
@@ -2773,7 +2804,7 @@ def main():
                       + ("  (Gamma-A c-axis included)" if lat == 'wurtzite' else ""))
             try:
                 plot_band_structure(
-                    kf, ef, output_dir,
+                    kf, ef, kdir,
                     path_labels=args.band_path,
                     energy_range_ev=tuple(args.energy_range),
                     dpi=args.dpi, spin_sum=args.spin_sum,
@@ -2786,7 +2817,7 @@ def main():
             found_any = True
             try:
                 plot_band_dat(
-                    bf, output_dir,
+                    bf, kdir,
                     energy_range_ev=tuple(args.energy_range),
                     dpi=args.dpi, vbm_index=args.band_vbm)
             except Exception as exc:
@@ -2797,7 +2828,7 @@ def main():
             found_any = True
             try:
                 plot_bandpath(
-                    bf, output_dir,
+                    bf, kdir,
                     energy_range_ev=tuple(args.energy_range),
                     dpi=args.dpi)
             except Exception as exc:
