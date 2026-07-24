@@ -53,6 +53,19 @@ into the calculation directory (or use `-i DIR -o OUTDIR`) and run. It scans for
   coloured by occupation (valence full=1 at t=0, depleting; conduction
   filling); `--spectral-excitation` colours by excitation instead. Needs
   `SYSNAME_bandpath.data` (the EPM/`dft_band` emit it);
+* `--levels`: plot the **level-resolved diabatic populations** from
+  `SYSNAME_sbe_nex_k_lev_real.data` — the BZ-averaged occupation `f` of **each
+  recorded band vs time** (valence blue, conduction red) plus the final per-band
+  bar (`<stem>_levels.png`). The **number of bands is set in the SBE input** by
+  **`sbe_out_nlev`** (`&sbe`): default `4` = the gap-edge `VB-1, VB, CB1, CB2`;
+  `N > 0` = `floor(N/2)` top-valence + the rest bottom-conduction, centred on the
+  gap and clamped to `nstate`; `<= 0` = **all `nstate` bands**. The file header
+  records the exact band indices (`band ib0 .. ib1`, `VBM = band n`), and the
+  plotter reads any column count — so a run with `sbe_out_nlev=12` (or `0`) writes
+  and plots that many levels with no other change. (The 4-band `--spectral` colour
+  decoration still expects the default 4-level file; for `sbe_out_nlev≠4` the
+  spectral movie colours CB1 only and points you here.) Cadence follows
+  `out_projection_k_step` (the file is nk-scaled — written sparsely);
 * band-structure plots from `SYSNAME_k.data`+`_eigen.data` and from `band.dat`
   (`theory='dft_band'`), energies shifted to VBM = 0 (`--band-vbm IDX` to
   override the half-filling default). **The high-symmetry path is auto-selected

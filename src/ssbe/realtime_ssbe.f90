@@ -46,7 +46,8 @@ subroutine main_realtime_ssbe(icomm)
     real(8), allocatable :: pop_lev_k(:, :, :)
     real(8), allocatable :: pop_k_real(:)
     real(8), allocatable :: pop_lev_k_real(:, :, :)
-    real(8), allocatable :: pop4(:, :)            ! 4 gap-edge diabatic levels (primitive)
+    real(8), allocatable :: poplev(:, :)          ! nlev_out gap-centred diabatic levels (primitive)
+    integer :: nlev_out, ib0_out, il             ! sbe_out_nlev: count + first band index
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
@@ -124,7 +125,25 @@ subroutine main_realtime_ssbe(icomm)
     ib_lcb = nb_vb + 1
     allocate(pop_k(1:nk), pop_k_real(1:nk))
     if (gs%have_unfold) allocate(pop_lev_k(1:4, 1:4, 1:nk), pop_lev_k_real(1:4, 1:4, 1:nk))
-    if (.not. gs%have_unfold) allocate(pop4(1:4, 1:nk))   ! primitive 4-level output
+    ! Level-resolved (primitive) output: sbe_out_nlev gap-centred diabatic bands.
+    ! <=0 -> all sbe%nb bands; N>0 -> floor(N/2) top valence + the rest conduction,
+    ! centred on the gap edge ib_lcb, clamped to the [1, sbe%nb] band range.
+    if (.not. gs%have_unfold) then
+        if (sbe_out_nlev <= 0) then
+            ib0_out  = 1
+            nlev_out = sbe%nb
+        else
+            ib0_out  = ib_lcb - sbe_out_nlev / 2
+            nlev_out = sbe_out_nlev
+            if (ib0_out < 1) then
+                nlev_out = nlev_out - (1 - ib0_out)
+                ib0_out  = 1
+            end if
+            if (ib0_out + nlev_out - 1 > sbe%nb) nlev_out = sbe%nb - ib0_out + 1
+            if (nlev_out < 1) nlev_out = 1
+        end if
+        allocate(poplev(1:nlev_out, 1:nk))
+    end if
 
     ! Highest band carried into the dynamics (top of the active subspace) -- the
     ! VG basis edge. We monitor its peak adiabatic occupation P_top as the cheap
@@ -223,7 +242,8 @@ subroutine main_realtime_ssbe(icomm)
             open(unit=fh_sbe_nex_k_lev_real, &
                 & file=trim(base_directory)//trim(sysname)//"_sbe_nex_k_lev_real.data", &
                 & action="write", status=trim(ost), position=trim(opos))
-            if (.not. is_ckrst) call write_sbe_nex_k_lev_header(fh_sbe_nex_k_lev_real, nk)
+            if (.not. is_ckrst) call write_sbe_nex_k_lev_header(fh_sbe_nex_k_lev_real, nk, &
+                & nlev_out, ib0_out, ib_lcb - 1)
         end if
         ! SYSNAME_sbe_intra_current.data: intra-band (Houston) current
         if (yn_out_intraband_current == 'y') then
@@ -246,10 +266,10 @@ subroutine main_realtime_ssbe(icomm)
     ! the t=0 block is already in the (appended) file.
     if (.not. is_ckrst) then
         if (.not. gs%have_unfold) then
-            call calc_diabatic_population_k(sbe, ib_lcb-2, pop_k_real, icomm); pop4(1,:) = pop_k_real
-            call calc_diabatic_population_k(sbe, ib_lcb-1, pop_k_real, icomm); pop4(2,:) = pop_k_real
-            call calc_diabatic_population_k(sbe, ib_lcb,   pop_k_real, icomm); pop4(3,:) = pop_k_real
-            call calc_diabatic_population_k(sbe, ib_lcb+1, pop_k_real, icomm); pop4(4,:) = pop_k_real
+            do il = 1, nlev_out
+                call calc_diabatic_population_k(sbe, ib0_out + il - 1, pop_k_real, icomm)
+                poplev(il, :) = pop_k_real
+            end do
         end if
         if (irank == 0) then
             pop_k = 0.0d0
@@ -258,7 +278,7 @@ subroutine main_realtime_ssbe(icomm)
             flush(fh_sbe_nex_k)
             flush(fh_sbe_nex_k_real)
             if (.not. gs%have_unfold) then
-                call write_sbe_nex_k_lev_block(fh_sbe_nex_k_lev_real, 0.0d0, nk, gs%kpoint, pop4)
+                call write_sbe_nex_k_lev_block(fh_sbe_nex_k_lev_real, 0.0d0, nk, gs%kpoint, poplev, nlev_out)
                 flush(fh_sbe_nex_k_lev_real)
             end if
             if (gs%have_unfold) then
@@ -388,12 +408,12 @@ subroutine main_realtime_ssbe(icomm)
             ! Primitive cell: 4 gap-edge diabatic populations (VB-1, VB, CB1, CB2)
             ! for the --spectral 4-band colouring (uses pop_k_real as scratch).
             if (.not. gs%have_unfold) then
-                pop4 = 0d0
-                call calc_diabatic_population_k(sbe, ib_lcb-2, pop_k_real, icomm); pop4(1,:) = pop_k_real
-                call calc_diabatic_population_k(sbe, ib_lcb-1, pop_k_real, icomm); pop4(2,:) = pop_k_real
-                call calc_diabatic_population_k(sbe, ib_lcb,   pop_k_real, icomm); pop4(3,:) = pop_k_real
-                call calc_diabatic_population_k(sbe, ib_lcb+1, pop_k_real, icomm); pop4(4,:) = pop_k_real
-                if (irank == 0) call write_sbe_nex_k_lev_block(fh_sbe_nex_k_lev_real, t, nk, gs%kpoint, pop4)
+                poplev = 0d0
+                do il = 1, nlev_out
+                    call calc_diabatic_population_k(sbe, ib0_out + il - 1, pop_k_real, icomm)
+                    poplev(il, :) = pop_k_real
+                end do
+                if (irank == 0) call write_sbe_nex_k_lev_block(fh_sbe_nex_k_lev_real, t, nk, gs%kpoint, poplev, nlev_out)
             end if
             ! Physical (unfolded) CB1 populations per primitive BZ point
             if (gs%have_unfold) then
@@ -467,7 +487,7 @@ subroutine main_realtime_ssbe(icomm)
     deallocate(pop_top_k)
     if (allocated(pop_lev_k)) deallocate(pop_lev_k)
     if (allocated(pop_lev_k_real)) deallocate(pop_lev_k_real)
-    if (allocated(pop4)) deallocate(pop4)
+    if (allocated(poplev)) deallocate(poplev)
 
     return
 end subroutine main_realtime_ssbe

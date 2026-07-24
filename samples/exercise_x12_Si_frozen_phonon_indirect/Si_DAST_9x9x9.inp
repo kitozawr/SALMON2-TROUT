@@ -1,0 +1,96 @@
+!########################################################################################!
+! Si SBE (step 2/2) -- driven by the REAL DAST 100 kV/cm THz field, 9x9x9 production grid. !
+!----------------------------------------------------------------------------------------!
+! Same frozen-core indirect physics as Si_frozen_phonon_rt_9x9x9.inp, but driven by the   !
+! maintainer's measured DAST transient (DAST_100kV_red.txt) instead of the synthetic       !
+! Acos2 pulse -- the server run. Ties together:                                            !
+!   * FIELD : DAST_100kV_red.txt (x-pol, peak ~100 kV/cm, 3.36 THz) in A_eV_fs units.      !
+!             Swap to DAST_singlecycle_100kV.txt (clean single cycle, 285 fs) for a fast   !
+!             end-to-end pass, or run only PART of the 3.27 ps DAST via checkpointing.     !
+!   * STEP  : dt = 0.05 fs -- REQUIRED for a trustworthy nex_proj (coarser over-generates  !
+!             the dressed population; wiki/06 sec.6). Read the TRUE carriers from           !
+!             Si_prim_sbe_nex_nonad.data col 2 (nex_proj), NOT the dressed nelec.           !
+!   * nb    : nstate = 16 (matches the 9^3 GS; 100 kV/cm is weak THz, gamma_K~6 -> 16-20).  !
+!   * MASK  : frozen-core window + yn_sbe_full_dressed='y' = cost-preserving source mask    !
+!             (e-ph AND II/Auger; wiki/11 sec.3d). Widen the window for a stronger field.   !
+!   * LEVELS: sbe_out_nlev writes N gap-centred diabatic bands per k                        !
+!             (Si_prim_sbe_nex_k_lev_real.data); plot with `plot_sbe_results.py --levels`.  !
+!                                                                                          !
+!   # step 1/2 (once): ../../build/salmon < Si_prim_epm_gs_9x9x9.inp > gs.log              !
+!   # step 2/2       : srun ../../build/salmon < Si_DAST_9x9x9.inp > rt.log                !
+!   #   resume       : set yn_sbe_checkpoint_restart='y' -> every .data (incl. nex_nonad)   !
+!   #                  APPENDS (no headers, no lost rows).                                  !
+!   # plots          : python3 ../../plot_sbe_results.py -i . -o plots --levels --spectral  !
+!########################################################################################!
+
+&calculation
+  theory = 'sbe'
+/
+
+&control
+  sysname = 'Si_prim'
+/
+
+&units
+  unit_system = 'A_eV_fs'              ! the DAST field file is A[A.eV.fs] vs t[fs]
+/
+
+&system
+  yn_periodic  = 'y'
+  al_vec1(1:3) = 0.0000000d0, 2.7146791d0, 2.7146791d0   ! Si FCC primitive (a=10.26 Bohr)
+  al_vec2(1:3) = 2.7146791d0, 0.0000000d0, 2.7146791d0
+  al_vec3(1:3) = 2.7146791d0, 2.7146791d0, 0.0000000d0
+  nelec  = 8
+  nstate = 16                          ! nb: MUST match the 9^3 GS step
+/
+
+&kgrid
+  num_kgrid(1:3) = 9, 9, 9             ! MUST match the GS; resolves the indirect X-valley
+/
+
+&tgrid
+  dt = 0.05d0                          ! step: <=0.05 fs for nex_proj (see header)
+  nt = 65478                           ! full DAST = 3273.9 fs / 0.05 (use checkpointing);
+                                       ! DAST_singlecycle = 5689 steps (285 fs)
+/
+
+&emfield
+  ae_shape1   = 'input'
+  file_input1 = 'DAST_100kV_red.txt'   ! or 'DAST_singlecycle_100kV.txt'
+/
+
+&analysis
+  out_projection_step   = 200          ! nex(t) cadence (I/O grows with nk at 9^3)
+  out_projection_k_step = 2000         ! k-resolved / level-resolved maps: sparse
+  yn_out_intraband_current = 'y'
+/
+
+&epm
+  epm_material = 'Si'
+/
+
+&sbe
+  ! ---- MASK (cost-preserving frozen window) --------------------------------
+  yn_sbe_full_dressed      = 'y'       ! full-basis dressed projection (never truncate nex)
+  frozen_core_threshold_ev = -10.0d0   ! active window [Fermi-10, Fermi+10] eV; widen for
+  frozen_free_threshold_ev =  10.0d0   ! stronger fields (all-active = -100/+100)
+  ! ---- LEVELS (level-resolved diabatic output) -----------------------------
+  sbe_out_nlev             = 8         ! write 8 gap-centred bands/k (<=0 = all nstate); --levels
+  ! ---- RING + all dissipators ON -------------------------------------------
+  yn_sbe_superres          = 'y'
+  yn_sbe_eph               = 'y'
+  yn_sbe_eph_acoustic      = 'y'
+  sbe_eph_temperature_k    = 300.0d0
+  yn_sbe_impact_ionization = 'y'
+  yn_sbe_ii_holes          = 'y'       ! MUST pair with impact_ionization
+  sbe_ii_phassist          = 1.0d0
+  yn_sbe_auger             = 'y'       ! ring Auger (needs II on)
+  yn_sbe_eeh               = 'y'
+  sbe_decoh_temperature_k  = 300.0d0
+  sbe_decoh_tau_m_fs       = 30.0d0
+  yn_sbe_bgr_threshold     = 'y'       ! Sigma^HF OFF below (guard)
+  yn_sbe_coulomb           = 'n'
+  ! ---- checkpoint (mandatory for the full 3.27 ps run) ---------------------
+  sbe_checkpoint_step      = 2000
+  yn_sbe_checkpoint_restart = 'n'      ! 'y' to resume; all .data append
+/
