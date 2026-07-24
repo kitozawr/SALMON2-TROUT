@@ -1116,21 +1116,38 @@ contains
     ! a.u.t^-1] is returned for the tau_r diagnostic print.
     ! =====================================================================
     subroutine rana_auger_dpop(nk, nba, eval, f, occ_max, iv, ic, area, kT, vf, &
-                               eps_r, tau, dpop, rnet_out)
+                               eps_r, tau, dpop, rnet_out, e_src_lo, e_src_hi)
         implicit none
         integer, intent(in)  :: nk, nba, iv, ic
         real(8), intent(in)  :: eval(nba, nk), f(nba, nk), occ_max, area, kT, vf, eps_r, tau
         real(8), intent(out) :: dpop(nba, nk), rnet_out
+        ! Cost-preserving full-basis mask (see ii_interk_dpop). This mean-field
+        ! channel is O(nk*nba) (no O(nk^2) source loop), so the window restores
+        ! no cost here -- it is threaded for INTERFACE uniformity and semantic
+        ! consistency: when a frozen active window is set, the pair population is
+        ! only drained from / filled into in-window states (trace-exact within
+        ! the window). The bulk R07 rate itself (n2d/p2d) stays the physical
+        ! full-basis density. No-op when absent (default all-active; graphene
+        ! always runs all-active, so this path is dormant there).
+        real(8), intent(in), optional :: e_src_lo, e_src_hi
         real(8) :: n2d, p2d, mu_c, mu_v, rrec, rgen, rnet
         real(8) :: avail, room, dn_lin, cap, dn
         real(8) :: ec_bar, ev_bar, e_rel, we, sw, dn2, wgt
         integer :: a, ik
+        logical :: do_mask
+        logical, allocatable :: inwin(:, :)
         real(8), parameter :: n_eps = 1d-14
 
         dpop = 0d0
         rnet_out = 0d0
         if (iv < 1 .or. ic > nba .or. ic <= iv) return
         if (area <= 0d0 .or. kT <= 0d0 .or. vf <= 0d0) return
+
+        do_mask = present(e_src_lo) .and. present(e_src_hi)
+        if (do_mask) then
+            allocate(inwin(nba, nk))
+            inwin(:, :) = (eval(:, :) >= e_src_lo .and. eval(:, :) <= e_src_hi)
+        end if
 
         ! Gathered CB electron / VB hole sheet densities [a.u.^-2].
         n2d = sum(f(ic:nba, :)) / (dble(nk) * area)
@@ -1154,13 +1171,23 @@ contains
         if (rnet > 0d0) then
             ! net RECOMBINATION: remove electrons from the CB (~f), fill VB
             ! holes (~room). avail/room in the same population units.
-            avail = sum(f(ic:nba, :))
-            room  = dble(iv) * occ_max * dble(nk) - sum(f(1:iv, :))
+            if (do_mask) then
+                avail = sum(f(ic:nba, :),           mask=inwin(ic:nba, :))
+                room  = sum(occ_max - f(1:iv, :),   mask=inwin(1:iv, :))
+            else
+                avail = sum(f(ic:nba, :))
+                room  = dble(iv) * occ_max * dble(nk) - sum(f(1:iv, :))
+            end if
         else
             ! net GENERATION (carrier multiplication): remove from the VB,
             ! promote into empty CB phase space.
-            avail = sum(f(1:iv, :))
-            room  = dble(nba - ic + 1) * occ_max * dble(nk) - sum(f(ic:nba, :))
+            if (do_mask) then
+                avail = sum(f(1:iv, :),             mask=inwin(1:iv, :))
+                room  = sum(occ_max - f(ic:nba, :), mask=inwin(ic:nba, :))
+            else
+                avail = sum(f(1:iv, :))
+                room  = dble(nba - ic + 1) * occ_max * dble(nk) - sum(f(ic:nba, :))
+            end if
         end if
         cap = min(avail, room)
         if (cap < n_eps) return
@@ -1169,18 +1196,22 @@ contains
         if (rnet > 0d0) then
             do ik = 1, nk
                 do a = ic, nba
+                    if (do_mask) then; if (.not. inwin(a, ik)) cycle; end if
                     dpop(a, ik) = dpop(a, ik) - dn * f(a, ik) / avail
                 end do
                 do a = 1, iv
+                    if (do_mask) then; if (.not. inwin(a, ik)) cycle; end if
                     dpop(a, ik) = dpop(a, ik) + dn * (occ_max - f(a, ik)) / room
                 end do
             end do
         else
             do ik = 1, nk
                 do a = 1, iv
+                    if (do_mask) then; if (.not. inwin(a, ik)) cycle; end if
                     dpop(a, ik) = dpop(a, ik) - dn * f(a, ik) / avail
                 end do
                 do a = ic, nba
+                    if (do_mask) then; if (.not. inwin(a, ik)) cycle; end if
                     dpop(a, ik) = dpop(a, ik) + dn * (occ_max - f(a, ik)) / room
                 end do
             end do
@@ -1204,12 +1235,18 @@ contains
                  3d0 * (maxval(eval(ic:nba,:)) - minval(eval(ic:nba,:))) &
                      / dble(max((nba - ic + 1) * nk, 1)))
         if (rnet > 0d0) then
-            ec_bar = sum(eval(ic:nba,:) * f(ic:nba,:)) / max(avail, n_eps)
-            ev_bar = sum(eval(1:iv,:) * (occ_max - f(1:iv,:))) / max(room, n_eps)
+            if (do_mask) then
+                ec_bar = sum(eval(ic:nba,:) * f(ic:nba,:), mask=inwin(ic:nba,:)) / max(avail, n_eps)
+                ev_bar = sum(eval(1:iv,:) * (occ_max - f(1:iv,:)), mask=inwin(1:iv,:)) / max(room, n_eps)
+            else
+                ec_bar = sum(eval(ic:nba,:) * f(ic:nba,:)) / max(avail, n_eps)
+                ev_bar = sum(eval(1:iv,:) * (occ_max - f(1:iv,:))) / max(room, n_eps)
+            end if
             e_rel  = ec_bar - ev_bar
             sw = 0d0
             do ik = 1, nk
                 do a = ic, nba
+                    if (do_mask) then; if (.not. inwin(a, ik)) cycle; end if
                     sw = sw + (occ_max - f(a,ik)) &
                             * exp(-0.5d0*((eval(a,ik) - (ec_bar + e_rel))/we)**2)
                 end do
@@ -1219,6 +1256,7 @@ contains
             if (dn2 > n_eps .and. sw > n_eps) then
                 do ik = 1, nk
                     do a = ic, nba
+                        if (do_mask) then; if (.not. inwin(a, ik)) cycle; end if
                         wgt = (occ_max - f(a,ik)) &
                             * exp(-0.5d0*((eval(a,ik) - (ec_bar + e_rel))/we)**2)
                         dpop(a,ik) = dpop(a,ik) - dn2 * f(a,ik) / avail &
@@ -1229,12 +1267,18 @@ contains
         else
             ! generation: created CB electrons land ~room-weighted (ec_bar) and
             ! the absorbed energy e_rel comes from electrons near ec_bar+e_rel.
-            ec_bar = sum(eval(ic:nba,:) * (occ_max - f(ic:nba,:))) / max(room, n_eps)
-            ev_bar = sum(eval(1:iv,:) * f(1:iv,:)) / max(avail, n_eps)
+            if (do_mask) then
+                ec_bar = sum(eval(ic:nba,:) * (occ_max - f(ic:nba,:)), mask=inwin(ic:nba,:)) / max(room, n_eps)
+                ev_bar = sum(eval(1:iv,:) * f(1:iv,:), mask=inwin(1:iv,:)) / max(avail, n_eps)
+            else
+                ec_bar = sum(eval(ic:nba,:) * (occ_max - f(ic:nba,:))) / max(room, n_eps)
+                ev_bar = sum(eval(1:iv,:) * f(1:iv,:)) / max(avail, n_eps)
+            end if
             e_rel  = ec_bar - ev_bar
             sw = 0d0
             do ik = 1, nk
                 do a = ic, nba
+                    if (do_mask) then; if (.not. inwin(a, ik)) cycle; end if
                     sw = sw + f(a,ik) &
                             * exp(-0.5d0*((eval(a,ik) - (ec_bar + e_rel))/we)**2)
                 end do
@@ -1243,6 +1287,7 @@ contains
             if (dn2 > n_eps .and. sw > n_eps) then
                 do ik = 1, nk
                     do a = ic, nba
+                        if (do_mask) then; if (.not. inwin(a, ik)) cycle; end if
                         wgt = f(a,ik) &
                             * exp(-0.5d0*((eval(a,ik) - (ec_bar + e_rel))/we)**2)
                         dpop(a,ik) = dpop(a,ik) - dn2 * wgt / sw &
@@ -1251,6 +1296,7 @@ contains
                 end do
             end if
         end if
+        if (do_mask) deallocate(inwin)
     end subroutine rana_auger_dpop
 
     ! Bulk plasmon frequency squared [a.u.]: omega_p^2 = 4 pi n/(eps_inf m*).
@@ -1617,7 +1663,7 @@ contains
     subroutine ii_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
                               pref, expo, iv, ic, kidx, kn, klut, &
                               bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dpop, &
-                              i1_lo, i1_hi, opts)
+                              i1_lo, i1_hi, opts, e_src_lo, e_src_hi)
         implicit none
         integer, intent(in)  :: nk, nba, iv, ic, kidx(3, nk), kn(3), klut(0:nk-1)
         real(8), intent(in)  :: eval(nba, nk), f(nba, nk), occ_max, a2half
@@ -1626,6 +1672,14 @@ contains
         real(8), intent(out) :: dpop(nba, nk)
         integer, intent(in), optional :: i1_lo, i1_hi
         type(t_ring_opts), intent(in), optional :: opts
+        ! Cost-preserving full-basis mask: skip a hot SOURCE (electron ih in
+        ! [ic,nba] or deep hole ih in [1,iv]) whose Houston energy eval(ih,i1)
+        ! is outside [e_src_lo, e_src_hi] (the frozen active window). The dressed
+        ! basis stays full; only the O(nk^2) 2-particle scattering is restricted
+        ! to in-window sources -- restores cost without the truncation
+        ! over-generation. No-op when the pair is absent (default all-active).
+        real(8), intent(in), optional :: e_src_lo, e_src_hi
+        logical :: do_mask
         integer :: i1, i1p, i2, ih, ipass, jj, m2p(3), d, i1s, i1e, nphl
         real(8) :: ekin, dd, g0, etgt, vq, df(3), shp, pauli, gpart, gamtot, out_tot, amt
         logical :: havetab
@@ -1637,6 +1691,7 @@ contains
         if (iv < 1 .or. ic > nba .or. ic <= iv) return
         i1s = 1;  if (present(i1_lo)) i1s = max(i1_lo, 1)
         i1e = nk; if (present(i1_hi)) i1e = min(i1_hi, nk)
+        do_mask = present(e_src_lo) .and. present(e_src_hi)
         call ring_opts_unpack(opts, havetab, vfloor, fk, pa, nphl, prefh, evbm, &
                               hwl, nbbl, wrell)
 
@@ -1648,6 +1703,9 @@ contains
         do i1 = i1s, i1e
             do ih = ic, nba
                 if (f(ih, i1) < occ_eps) cycle
+                if (do_mask) then
+                    if (eval(ih,i1) < e_src_lo .or. eval(ih,i1) > e_src_hi) cycle
+                end if
                 ekin = eval(ih, i1) - ecbm   ! a2half NOT restored (cancels vs shifted CBM; see e-ph note)
                 dd = ekin - eth
                 ! A5: Franz-Keldysh field softening -- softplus with the
@@ -1723,6 +1781,9 @@ contains
             do ih = 1, iv
                 room = occ_max - f(ih, i1)          ! deep-hole capacity
                 if (room < occ_eps) cycle
+                if (do_mask) then
+                    if (eval(ih,i1) < e_src_lo .or. eval(ih,i1) > e_src_hi) cycle
+                end if
                 ekin = evbm - eval(ih, i1)   ! a2half NOT restored (cancels vs shifted VBM)
                 dd = ekin - eth
                 if (fk > 0d0) dd = fk * log(1d0 + exp(min(dd / fk, 4d1)))
@@ -1800,7 +1861,7 @@ contains
     subroutine auger_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
                                  pref, expo, iv, ic, kidx, kn, klut, &
                                  bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dpop, &
-                                 i1_lo, i1_hi, opts)
+                                 i1_lo, i1_hi, opts, e_src_lo, e_src_hi)
         implicit none
         integer, intent(in)  :: nk, nba, iv, ic, kidx(3, nk), kn(3), klut(0:nk-1)
         real(8), intent(in)  :: eval(nba, nk), f(nba, nk), occ_max, a2half
@@ -1809,6 +1870,13 @@ contains
         real(8), intent(out) :: dpop(nba, nk)
         integer, intent(in), optional :: i1_lo, i1_hi
         type(t_ring_opts), intent(in), optional :: opts
+        ! Cost-preserving full-basis mask (see ii_interk_dpop): skip the hot
+        ! recombination SOURCE -- the promoted-to state ih in [ic,nba] (forward
+        ! Auger) or the deep valence electron ih in [1,iv] (reverse hole-Auger)
+        ! -- when eval(ih,i1) is outside the frozen active window. No-op when
+        ! absent (default all-active).
+        real(8), intent(in), optional :: e_src_lo, e_src_hi
+        logical :: do_mask
         integer :: i1, i1p, i2, ih, ipass, jj, m2p(3), d, i1s, i1e, nphl
         real(8) :: ekin, dd, g0, etgt, vq, df(3), shp, pauli, gpart, gamtot, in_tot, amt, room
         logical :: havetab
@@ -1822,6 +1890,7 @@ contains
         if (maxval(f(ic:nba, :)) < occ_eps) return
         i1s = 1;  if (present(i1_lo)) i1s = max(i1_lo, 1)
         i1e = nk; if (present(i1_hi)) i1e = min(i1_hi, nk)
+        do_mask = present(e_src_lo) .and. present(e_src_hi)
         call ring_opts_unpack(opts, havetab, vfloor, fk, pa, nphl, prefh, evbm, &
                               hwl, nbbl, wrell)
 
@@ -1833,6 +1902,9 @@ contains
             do ih = ic, nba
                 room = occ_max - f(ih, i1)          ! empty hot-state phase space
                 if (room < occ_eps) cycle
+                if (do_mask) then
+                    if (eval(ih,i1) < e_src_lo .or. eval(ih,i1) > e_src_hi) cycle
+                end if
                 ekin = eval(ih, i1) - ecbm   ! a2half NOT restored (cancels vs shifted CBM; see e-ph note)
                 dd = ekin - eth
                 if (fk > 0d0) dd = fk * log(1d0 + exp(min(dd / fk, 4d1)))
@@ -1902,6 +1974,9 @@ contains
         do i1 = i1s, i1e
             do ih = 1, iv
                 if (f(ih, i1) < occ_eps) cycle      ! deep electron present
+                if (do_mask) then
+                    if (eval(ih,i1) < e_src_lo .or. eval(ih,i1) > e_src_hi) cycle
+                end if
                 ekin = evbm - eval(ih, i1)   ! a2half NOT restored (cancels vs shifted VBM)
                 dd = ekin - eth
                 if (fk > 0d0) dd = fk * log(1d0 + exp(min(dd / fk, 4d1)))

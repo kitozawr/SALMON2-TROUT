@@ -133,6 +133,34 @@ program test_rana_auger_cptp
         call bad('tau->inf overshoots min(avail, room)')
     if (minval(f + dpop) < -1d-12) call bad('tau->inf negative population')
 
+    ! ---- (7) cost-preserving energy-mask (interface uniformity) -----------
+    ! Rana is mean-field (no cost win), so the window is threaded only for a
+    ! uniform ring interface. It must: (a) reproduce the default when wide,
+    ! (b) be a no-op when it excludes every band, (c) stay trace-exact under a
+    ! partial window (drain/fill only in-window states).
+    block
+        real(8) :: dref(NBA, NK), dwide(NBA, NK), dwin(NBA, NK), rn
+        f(IC, :) = 0d0
+        do ik = 1, NK/4
+            f(IC, ik) = ftot_cb / dble(NK/4)
+        end do
+        f(IV, :) = OCC - ftot_cb / dble(NK)
+        call rana_auger_dpop(NK, NBA, eval, f, OCC, IV, IC, area, kT, V_F_AU, 10d0, &
+                             tau, dref, rn)
+        call rana_auger_dpop(NK, NBA, eval, f, OCC, IV, IC, area, kT, V_F_AU, 10d0, &
+                             tau, dwide, rn, e_src_lo=-1d30, e_src_hi=1d30)
+        if (maxval(abs(dwide - dref)) > 1d-12) call bad('mask wide window /= default')
+        ! window above every band (eval spans [-0.1, 0.3]) -> exact no-op
+        call rana_auger_dpop(NK, NBA, eval, f, OCC, IV, IC, area, kT, V_F_AU, 10d0, &
+                             tau, dwin, rn, e_src_lo=100d0, e_src_hi=200d0)
+        if (maxval(abs(dwin)) > 1d-14) call bad('mask excluding all states is not a no-op')
+        ! partial window (keep CB, drop the deepest VB) must stay trace-exact
+        call rana_auger_dpop(NK, NBA, eval, f, OCC, IV, IC, area, kT, V_F_AU, 10d0, &
+                             tau, dwin, rn, e_src_lo=-0.06d0, e_src_hi=1d30)
+        if (abs(sum(dwin)) > 1d-12 * max(sum(abs(dwin)), 1d-300)) &
+            call bad('mask: partial window broke trace conservation')
+    end block
+
     if (nfail == 0) then
         write(*,'(a)') 'PASS  (2D Rana Auger CPTP channel: trace, bounds, equilibrium '// &
                        'fixed point, R07 lifetime scale, saturation, empty no-op)'
