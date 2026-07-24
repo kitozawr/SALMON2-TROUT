@@ -62,6 +62,14 @@ module bloch_solver_ssbe
         real(8) :: bgr_coeff    = 1.9d-8 ! K [eV cm]
         integer :: homo_idx     = 0     ! HOMO band index (valence/conduction split)
         real(8) :: au_dens_cm3  = 0d0   ! a.u.^-3 -> cm^-3 number-density conversion
+        ! Cost-preserving mask for the FULL-basis dressed ring (yn_sbe_full_dressed):
+        ! the dressed projection is truncation-free (all bands), but the ring kernels
+        ! scatter only the dressed states whose energy is in the frozen-window range
+        ! [ring_e_lo, ring_e_hi] (a.u.) -- restores the O(nk^2 * n_active) cost while
+        ! keeping the correct (untruncated) dressed basis (wiki/06 sec.6).
+        logical :: ring_mask_on = .false.
+        real(8) :: ring_e_lo    = -1d30
+        real(8) :: ring_e_hi    =  1d30
         ! Dissipator sub-cycling (Part C8): split the dissipative half-step into
         ! diss_subcycle CPTP sub-steps when the collision rate is fast vs dt.
         real(8) :: eph_numax_au = 0d0   ! estimated peak e-ph rate [1/a.u.time]
@@ -328,6 +336,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     use communication, only: comm_get_groupinfo, comm_summation, comm_bcast, &
                              comm_get_max, comm_sync_all
     use salmon_global, only: frozen_core_threshold_ev, frozen_free_threshold_ev, &
+                             yn_sbe_full_dressed, &
                              sbe_decoh_temperature_k, sbe_decoh_tau_m_fs, yn_sbe_spinor, &
                              yn_sbe_impact_ionization, sbe_ii_prefactor, &
                              sbe_ii_threshold_ev, sbe_ii_ramp_ev, &
@@ -521,6 +530,35 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
         end if
     end do
     deallocate(eig_gamma)
+
+    ! 3b. FULL-BASIS dressed projection (default, wiki/06 sec.6): a NARROWED frozen
+    !     window truncates the ring's H_VG diagonalisation to the active subspace,
+    !     dropping the A.p coupling to the frozen bands -- the field-dressing that
+    !     belongs in the frozen bands then piles into the active conduction states
+    !     and the dissipators over-scatter it into real carriers (measured x10^4-10^6
+    !     over-generation at sub-gap THz; Si 4^3 all-active 2.2e18 vs frozen 1.2e22).
+    !     The reversible VG unitary already runs on the full basis; the DRESSED
+    !     PROJECTION the dissipators use must be truncation-free too. Default 'y'
+    !     forces the ring to the full band basis (all bands active for dissipation);
+    !     the narrowed frozen window is honoured only under the explicit opt-out
+    !     yn_sbe_full_dressed='n' (fast, but over-generates at sub-gap fields).
+    if (yn_sbe_full_dressed == 'y') then
+        ! Cost-preserving: keep the correct FULL dressed basis (is_active = all), but
+        ! if the user narrowed the frozen window, scatter only the dressed states in
+        ! that ENERGY range -- the ring kernels skip out-of-window sources, restoring
+        ! the O(nk^2 * n_active) cost without truncating the dressed projection.
+        if (.not. all(sbe%is_active)) then
+            sbe%ring_mask_on = .true.
+            sbe%ring_e_lo = (fermi_energy_ev + frozen_core_threshold_ev) / au_ev
+            sbe%ring_e_hi = (fermi_energy_ev + frozen_free_threshold_ev) / au_ev
+            if (irank == 0) &
+                write(*, '(a,f8.2,a,f8.2,a)') '# yn_sbe_full_dressed=y: FULL-basis dressed '// &
+                    'projection; ring dissipates only the [', &
+                    fermi_energy_ev + frozen_core_threshold_ev, ',', &
+                    fermi_energy_ev + frozen_free_threshold_ev, '] eV window (cost-preserving).'
+        end if
+        sbe%is_active(:) = .true.
+    end if
 
     ! 4. Derive the active-band count from the mask (single source of truth).
     sbe%n_active_bands = count(sbe%is_active)
@@ -2698,7 +2736,7 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
                          sbe%eph_n, sbe%eph_sigma_au, tau, dpop, gout, &
                          kidx=sbe%kmap_idx, kn=sbe%kmap_n, pol_tab=opts%vq_tab, &
                          pol_norm=pnorm, ip_polar=1, ac_tab=actab, ip_ac=ipac_use, &
-                         ib_scale=sbe%eph_ib_scale)
+                         ib_scale=sbe%eph_ib_scale, e_src_lo=sbe%ring_e_lo, e_src_hi=sbe%ring_e_hi)
             else
                 call eph_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
                          sbe%eph_ecbm_au, sbe%eph_evbm_au, sbe%eph_nph, &
@@ -2706,7 +2744,8 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
                          sbe%eph_nb(1:sbe%eph_nph), sbe%eph_nusat_au, sbe%eph_eps0_au, &
                          sbe%eph_n, sbe%eph_sigma_au, tau, dpop, gout, &
                          kidx=sbe%kmap_idx, kn=sbe%kmap_n, &
-                         ac_tab=actab, ip_ac=ipac_use, ib_scale=sbe%eph_ib_scale)
+                         ac_tab=actab, ip_ac=ipac_use, ib_scale=sbe%eph_ib_scale, &
+                         e_src_lo=sbe%ring_e_lo, e_src_hi=sbe%ring_e_hi)
             end if
         else
             call eph_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
@@ -2714,7 +2753,7 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
                      sbe%eph_hw(1:sbe%eph_nph), sbe%eph_wrel(1:sbe%eph_nph), &
                      sbe%eph_nb(1:sbe%eph_nph), sbe%eph_nusat_au, sbe%eph_eps0_au, &
                      sbe%eph_n, sbe%eph_sigma_au, tau, dpop, gout, &
-                     ib_scale=sbe%eph_ib_scale)
+                     ib_scale=sbe%eph_ib_scale, e_src_lo=sbe%ring_e_lo, e_src_hi=sbe%ring_e_hi)
         end if
         deallocate(actab)
         call ring_ledger(sbe, 1, nba, nk, ic, eval_all, dpop)
@@ -2823,6 +2862,7 @@ subroutine ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
     complex(8) :: rad(sbe%n_active_bands, sbe%n_active_bands)
     complex(8) :: Dk(sbe%n_active_bands, sbe%n_active_bands)
     complex(8) :: cvec(sbe%n_active_bands), ctmp
+    complex(8) :: rho0(sbe%n_active_bands, sbe%n_active_bands)  ! dressed background (Houston basis), Option A coherence sector
     real(8), allocatable :: fold_loc(:,:)
     logical, save :: limiter_printed = .false.
     real(8), parameter :: dtol = 1d-14
@@ -2922,11 +2962,33 @@ subroutine ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
             end if
             rad(a,a) = cmplx(fnew, 0d0, 8)
         end do
-        do b = 1, nba
-            do a = 1, nba
-                if (a /= b) rad(a,b) = rad(a,b) * damp(a) * damp(b)
+        ! Option A, COHERENCE sector (снятие одёжки): damp toward the reversible
+        ! dressed background rho0(a,b) = occ sum_{v<=nv} conj(W(v,a)) W(v,b) -- the
+        ! field-free GS carried into the instantaneous dressed (Houston) basis --
+        ! instead of toward 0. The static dressed_ref only subtracted the DIAGONAL
+        ! of rho0 (f0_a) from the population measure; the reversible dressing lives
+        ! equally in the OFF-DIAGONAL coherences, and damping those realifies it
+        ! (the dominant, dt-divergent fabrication -- wiki/06 sec.6-iv). Damping the
+        ! EXCESS coherence rad-rho0 preserves the reversible dressing exactly:
+        !   rho_ab -> rho0_ab + (rho_ab - rho0_ab) damp_a damp_b.
+        ! rho0 is Hermitian PSD with |rho0_ab|^2 <= f0_a f0_b, A->0 => W->1 =>
+        ! rho0 -> diag(occ,0) (off-diagonals vanish) => byte-identical to the old
+        ! damp-to-0 path. Trace untouched (diagonal not modified here).
+        if (sbe%flag_dressed_ref) then
+            call ZGEMM('C','N', nba,nba, min(sbe%nv_act,nba), &
+                       cmplx(sbe%occ_max,0d0,8), W,nba, W,nba, cmplx(0d0,0d0,8), rho0,nba)
+            do b = 1, nba
+                do a = 1, nba
+                    if (a /= b) rad(a,b) = rho0(a,b) + (rad(a,b) - rho0(a,b)) * damp(a) * damp(b)
+                end do
             end do
-        end do
+        else
+            do b = 1, nba
+                do a = 1, nba
+                    if (a /= b) rad(a,b) = rad(a,b) * damp(a) * damp(b)
+                end do
+            end do
+        end if
         ! ---- collisional-memory dephasing (wiki/10 sec. 8.6) -----------------
         ! Replaces the instantaneous exp(-(g_a+g_b) tau/2): the Houston-frame
         ! coherence drives auxiliary fields z_j (one per kernel line, decay
@@ -3363,8 +3425,17 @@ subroutine calc_nex_nonad(sbe, gs, Ac, icomm, nex_proj, nex_dref)
     real(8),    allocatable :: evals(:), p_k_full(:, :, :), eigen_a(:), dref(:)
     complex(8), allocatable :: H(:, :), W(:, :), t1(:, :), t2(:, :), rho_a(:, :)
 
-    nba = sbe%n_active_bands
-    nv  = sbe%nv_act
+    ! FULL-basis dressed projection (wiki/06 sec.6): diagonalise H_VG on ALL nb
+    ! bands, NOT the truncated frozen active window. Diagonalising on the active
+    ! subspace drops the A.p coupling to the frozen bands, so the field-dressing
+    ! that belongs in the frozen bands piles into the active conduction states and
+    ! inflates nex by ~x300 on a frozen window (measured: Si 4^3, frozen 8-band vs
+    ! all-active 16-band, same coherent rho -> 9.7e19 vs 3.3e17). The measure must
+    ! be truncation-free even when the DISSIPATORS act only on the active window.
+    ! (For an all-active run active_idx(i)=i and nv_act=homo_idx, so this is
+    !  byte-identical to the old active-window form.)
+    nba = sbe%nb
+    nv  = sbe%homo_idx
     nex_proj = 0d0
     nex_dref = 0d0
     ! Need at least one dressed valence and one dressed conduction level.
@@ -3381,12 +3452,12 @@ subroutine calc_nex_nonad(sbe, gs, Ac, icomm, nex_proj, nex_dref)
         if (sbe%flag_vnl_correction) &
             p_k_full(:, :, :) = p_k_full(:, :, :) + gs%rvnl_tm_matrix(:, :, :, ik)
         do i = 1, nba
-            eigen_a(i) = gs%eigen(sbe%active_idx(i), ik)
+            eigen_a(i) = gs%eigen(i, ik)
         end do
         do j = 1, nba
-            im = sbe%active_idx(j)
+            im = j
             do i = 1, nba
-                in = sbe%active_idx(i)
+                in = i
                 H(i, j) = Ac(1) * p_k_full(in, im, 1) &
                         + Ac(2) * p_k_full(in, im, 2) &
                         + Ac(3) * p_k_full(in, im, 3)

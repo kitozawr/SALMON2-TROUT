@@ -198,7 +198,55 @@ absolute yields are unreliable regardless of `dt` — see the wiki/04 flag box.
 
 ---
 
-## 7. References
+## 7. Band budget by field strength (1 MV/cm and above)
+
+Two independent reasons a stronger field needs more `nstate`, and both now bite
+the **same** knob because the dressed projection is full-basis (`yn_sbe_full_dressed`):
+
+1. **VG unitary sufficiency** (§2–3): the field shifts `k → k + A(t)`; the excursion
+   is `A_max / (2π/a)` of the BZ. Population must not reach the top band (`P_top`).
+2. **Dressed projection** (§6): the dissipators/measure diagonalise H_VG — with the
+   fix that uses **all `nstate` bands**, so `nstate` must also span the states the
+   field actually dresses. A too-small `nstate` now over-generates at the source,
+   not just at the readout.
+
+**The excursion scales linearly with E** (single-cycle THz: read `A_max` off the
+field file directly). For the Si primitive (`2π/a = 0.612 a.u.`) driven by the
+DAST 3.3 THz transient, scaling the measured `A_max = 0.070 a.u.` (at ~100 kV/cm):
+
+| peak E | `A_max/BZ` | regime | γ_K (Si, E_g 3.34 eV) | **start `nstate`** (Si, 4 val) |
+|---|---|---|---|---|
+| ~100 kV/cm | 0.12 | perturbative, sub-cycle | ≈ 6 | 16–20 (x08 headroom) |
+| **1 MV/cm** | **1.15** | sweeps a **full BZ**/half-cycle; ε_kin ~ few eV [Chefonov] | ≈ 0.6 (tunnelling onset) | **24–32** |
+| 3 MV/cm | 3.4 | multi-BZ, hot tail toward X | < 0.3 (tunnelling) | 40–48 |
+| ≥ 10 MV/cm | ≥ 11 | strongly non-perturbative | ≪ 1 | 48–64+, re-verify hard |
+
+These are **starting points, not converged values** — always confirm with the
+procedure below. The numbers assume a THz driver (large `A_max = E/ω`); a mid-IR/
+optical driver at the same E has a **smaller** `A_max` (higher ω) but reaches
+**higher energy** per photon, so the band budget must be re-checked separately (§3).
+
+**Procedure at high field (mandatory):**
+1. **Converge `dt` first** (§6 lesson): on the **non-adiabatic** measure
+   (`nex_proj`/`nex_dref`), never the diabatic `nelec`. At γ_K ≲ 1 the coherences
+   are faster — expect `dt ≤ 0.02–0.05 fs` (tighter than the ~0.05 fs of the weak
+   field; `wiki/11 §3c`).
+2. **`P_top < 1e-3`** at all times (criterion a). At 1 MV/cm+ the warning fires
+   readily — raise `nstate` until it clears.
+3. **`nstate` convergence at the converged `dt`** (criterion b): run e.g. 24/32/48,
+   require `nex_proj` to plateau (§6 shows it is *flat from N_b ≈ 8 only at weak
+   field*; a strong field needs many more before the plateau).
+4. Keep `yn_sbe_full_dressed = 'y'` — a narrowed frozen window truncates the
+   projection and re-introduces the over-generation exactly where the strong field
+   populates the high bands.
+
+**Cost note:** with the full-basis projection the ring scales `O(nk²·nstate²)`, so
+doubling `nstate` for a strong field is ~4× on the ring (`wiki/11 §3d`). Budget the
+grid/`dt`/channel set accordingly, or use the cost-preserving variant when it lands.
+
+---
+
+## 8. References
 - Variational upper-bound / interlacing of truncated eigenvalues: E. A. Hylleraas & B. Undheim, Z. Phys. 65, 759 (1930); J. K. L. MacDonald, Phys. Rev. 43, 830 (1933).
 - Velocity-gauge band-coupling and the need for many bands / gauge care: M. S. Wismer & V. S. Yakovlev, Phys. Rev. B 97, 144302 (2018); L. Yue & M. B. Gaarde, J. Opt. Soc. Am. B 39, 535 (2022).
 - Kane momentum matrix element / E_P for GaAs: E. O. Kane, J. Phys. Chem. Solids 1, 249 (1957); E_P ~ 25.7 eV, I. Vurgaftman, J. R. Meyer, L. R. Ram-Mohan, J. Appl. Phys. 89, 5815 (2001).

@@ -297,9 +297,21 @@ Where the wall-clock time goes, and which knobs actually move it. Measured on
   `nstate` basis**: `O(nstate³ · nk)` per step. (Frozen-core shrinks only the
   *dissipators*, not the unitary — see §4.)
 - **Ring dissipators** (e-ph, II, Auger, hole-II) draw the partner from the
-  whole BZ: `O(nk² · n_active²)` per step, one pass **per channel**.
+  whole BZ: `O(nk² · n_ring²)` per step, one pass **per channel**.
 - So at a fixed grid the ring share **grows as `nk²`** while the unitary grows as
   `nk` — the ring dominates more and more with grid size.
+
+> **⚠️ `n_ring` = the dissipated band count, and it changed with the dressed-
+> projection fix (`yn_sbe_full_dressed`, default `'y'`).** The default now
+> dissipates on the **full `nstate` basis** (`n_ring = nstate`) so the dressed
+> projection is truncation-free (wiki/06 §6 — a narrowed frozen window
+> over-generates carriers ×10⁴–10⁶ at sub-gap fields). Measured cost of the
+> default vs the old truncated path (`'n'`): **~2–3×** on the ring at 4³/16 bands
+> — much less than the naive `(nstate/n_active)²` because the e-ph kernel already
+> energy-prunes far-off-resonance partners (Gaussian `shp`). If you must recover
+> the old speed and accept the known over-generation, set `yn_sbe_full_dressed
+> = 'n'` (then `n_ring = n_active` again). A cost-preserving variant (diagonalise
+> full, dissipate only the active dressed block) is a planned follow-up.
 
 ### The two levers
 
@@ -335,6 +347,68 @@ are on.
 3. **`dt`** — the largest your observable allows (§3c: ~0.1 fs for `nex`, 0.25 fs current-only).
 4. **`nstate`** — lower to basis-sufficiency (free physics, modest speed).
 5. **`out_projection_k_step`** — k-resolved output is I/O ∝ nk; write it less often.
+
+---
+
+## 3e. OpenMP × MPI core split (hybrid layout)
+
+**Both levels parallelise the SAME loop — the k-points.** MPI splits `nk` across
+ranks (`split_range` → each rank owns `ik_min:ik_max`); OpenMP then parallelises
+that rank's k-loop (`!$omp do` over `ik`) across its threads. So the total
+k-parallelism is **`nproc × threads`**, and every core is doing whole k-points.
+
+**Total cores per node = `ntasks-per-node × OMP_NUM_THREADS`** must equal the
+14 physical cores (don't oversubscribe; SMT off).
+
+### Which way to split — the tradeoff
+
+| | more **MPI ranks** (fewer threads) | more **OpenMP threads** (fewer ranks) |
+|---|---|---|
+| ring communication | **worse** — the inter-k gather does **`O(nproc)`** hops/step (§3, wiki/06) | **better** — threads share memory, zero comm |
+| GS replication | each rank replicates `gs%p_tm_matrix` (`nstate²·nk·3` cplx) | one copy per rank ⇒ **less memory** |
+| scaling limit | ring comm saturates (see §3 `nproc` sweet spot) | memory-bandwidth bound + needs **k/rank ≥ threads** |
+| k-balance | must keep `nproc ≤ nk` and ideally `nproc | nk` | thread imbalance if a rank's k-count < threads |
+
+**The ring is the reason to favour OpenMP:** its cost is `O(nk²)` compute but the
+**communication is `O(nproc)`** — cutting ranks (moving that parallelism into
+threads) shrinks the comm without touching the compute. Push parallelism into
+OpenMP up to the point where either (a) the threads stop scaling (memory
+bandwidth — the CF4 `ZGEMM`s and the ring are bandwidth-heavy), or (b) a rank's
+`k/rank` drops below `threads` (idle threads).
+
+### Recommended layout (14-core nodes)
+
+- **One MPI rank per NUMA domain, OpenMP fills the domain.** Lomonosov-2's
+  14-core socket is one memory domain (verify with `numactl -H`): start with
+  **1 rank × 14 threads per node** (`--ntasks-per-node=1`, `OMP_NUM_THREADS=14`,
+  `--cpus-per-task=14`). If `numactl -H` shows **2 NUMA nodes of 7**, use
+  **2 ranks × 7 threads** and pin (`--cpus-per-task=7`, `OMP_PROC_BIND=close`,
+  `OMP_PLACES=cores`).
+- **Constraint check:** `k/rank = nk / nproc ≥ threads`. At 9³ = 729 with
+  1 rank/node: **27 nodes → 27 ranks × 14 = 378 cores**, k/rank = 27 ≥ 14 ✓,
+  ring hops = 27 (the §3 sweet spot). Fewer nodes → more k/rank (fine); more
+  nodes push `nproc` up (more ring comm) and eventually `k/rank < threads`.
+- **Balance:** keep `nproc` a divisor of `nk` (9³: 27 / 81 / 243) so k splits ±0.
+  1 rank/node gives `nproc = nnodes`, so **27 / 81 nodes** land on divisors.
+
+### Pick the thread count empirically (5-minute test, 1 node)
+
+The bandwidth knee is machine-specific — measure it once:
+
+```bash
+# same input, 1 node, short nt (e.g. 100 steps), sweep threads; ranks = 14/threads
+for T in 1 2 7 14; do
+  export OMP_NUM_THREADS=$T
+  mpirun -np $((14/T)) --bind-to core --map-by socket ../build/salmon < rt.inp > omp_$T.log
+  echo "threads=$T ranks=$((14/T)) s/step=$(grep -oE 'per step.*' omp_$T.log)"
+done
+```
+
+Take the **(ranks, threads)** with the best s/step. Typically OpenMP scales well
+to a full memory domain (7–14 threads) and then the `O(nproc)` ring comm makes
+the extra-ranks option lose — so the **fewest-ranks layout that still fills the
+node and keeps `k/rank ≥ threads` wins**. Re-check after any change to `nstate`,
+channel set, or grid (they shift the compute/comm balance).
 
 ---
 
