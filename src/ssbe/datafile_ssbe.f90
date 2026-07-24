@@ -172,28 +172,38 @@ end subroutine write_sbe_nex_k_real_header
 ! Four gap-edge diabatic populations per k (VB-1, VB, CB1, CB2) -- the primitive-
 ! cell analogue of the unfolded 4-level output, used by --spectral to colour all
 ! four bands (not just CB1).
-subroutine write_sbe_nex_k_lev_header(fh, nk)
+subroutine write_sbe_nex_k_lev_header(fh, nk, nlev, ib0, nvb)
     implicit none
-    integer, intent(in) :: fh, nk
-    write(fh,'(a)') "# REAL carriers: fixed-basis (diabatic) populations of the FOUR gap-edge"
-    write(fh,'(a)') "# bands per k-point -- VB-1, VB, CB1, CB2 (spins NOT summed; primitive cell)."
+    integer, intent(in) :: fh, nk, nlev, ib0, nvb
+    integer :: il, ib, col
+    write(fh,'(a)') "# REAL carriers: fixed-basis (diabatic) populations of a configurable"
+    write(fh,'(a,i0,a,i0,a,i0,a,i0,a)') "# set of ", nlev, " band(s) per k-point: band ", ib0, &
+        & " .. ", ib0 + nlev - 1, " (spins NOT summed; primitive cell). VBM = band ", nvb, "."
     write(fh,'(a,i0)') "# nk = ", nk
-    write(fh, '("#",99(1X,I0,":",A,"[",A,"]"))') &
-        & 1, "ik", "none", 2, "kx", "a.u.", 3, "ky", "a.u.", 4, "kz", "a.u.", &
-        & 5, "pop_vbm1", "none", 6, "pop_vb", "none", 7, "pop_cb1", "none", 8, "pop_cb2", "none"
+    ! columns: 1 ik, 2-4 kx/ky/kz, then one pop per band (labelled by its band index)
+    write(fh, '("#",4(1X,I0,":",A,"[",A,"]"))', advance='no') &
+        & 1, "ik", "none", 2, "kx", "a.u.", 3, "ky", "a.u.", 4, "kz", "a.u."
+    do il = 1, nlev
+        ib  = ib0 + il - 1
+        col = 4 + il
+        write(fh, '(1X,I0,":pop_b",I0,"[none]")', advance='no') col, ib
+    end do
+    write(fh, '(a)') ""
     return
 end subroutine write_sbe_nex_k_lev_header
 
 
-subroutine write_sbe_nex_k_lev_block(fh, t, nk, kpoint, pop4)
+subroutine write_sbe_nex_k_lev_block(fh, t, nk, kpoint, poplev, nlev)
     use inputoutput, only: t_unit_time
     implicit none
-    integer, intent(in) :: fh, nk
-    real(8), intent(in) :: t, kpoint(1:3, 1:nk), pop4(1:4, 1:nk)
+    integer, intent(in) :: fh, nk, nlev
+    real(8), intent(in) :: t, kpoint(1:3, 1:nk), poplev(1:nlev, 1:nk)
     integer :: ik
+    character(32) :: fmt
     write(fh, '(a,f16.8,a,a)') "# t = ", t * t_unit_time%conv, " ", trim(t_unit_time%name)
+    write(fmt, '(a,i0,a)') '(I6,', 3 + nlev, 'E18.10)'   ! kx/ky/kz + nlev populations
     do ik = 1, nk
-        write(fh, '(I6, 7E18.10)') ik, kpoint(1:3, ik), pop4(1:4, ik)
+        write(fh, fmt) ik, kpoint(1:3, ik), poplev(1:nlev, ik)
     end do
     write(fh, '(a)') ""
     return

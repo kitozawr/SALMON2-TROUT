@@ -1224,11 +1224,16 @@ def plot_nex_k(filepath, output_dir, dpi=150, log_scale=False, snapshots=False,
     if cb_sum:
         levfile = filepath.parent / filepath.name.replace('_sbe_nex_k', '_sbe_nex_k_lev')
         if levfile.exists():
-            cbsum_by_t = {round(lt, 6): pop4[:, 2] + pop4[:, 3]
-                          for lt, _lu, _lk, pop4 in _iter_nex_k_lev_blocks(levfile)}
+            # conduction columns = bands above the VBM. For the default gap-edge
+            # 4-level file that is cols 2,3 (CB1,CB2); for an arbitrary sbe_out_nlev
+            # file, derive the first conduction column from the header band layout.
+            ib0, nvb, _nl = _read_nex_k_lev_meta(levfile)
+            jcb = 2 if ib0 is None else max((nvb + 1) - ib0, 0)
+            cbsum_by_t = {round(lt, 6): pop[:, jcb:].sum(axis=1)
+                          for lt, _lu, _lk, pop in _iter_nex_k_lev_blocks(levfile)}
             tag += '_cbsum'
-            basis_label += ', CB1+CB2'
-            print(f"  --bz3d-cb-sum: population = CB1+CB2 from {levfile.name}")
+            basis_label += ', CB-sum'
+            print(f"  --bz3d-cb-sum: population = sum of conduction cols (>= {jcb}) from {levfile.name}")
         else:
             print(f"  (warn) --bz3d-cb-sum: {levfile.name} not found "
                   f"-- falling back to lowest-CB only")
@@ -1452,10 +1457,31 @@ def _map_primitive_population(qred, gridk, gpop, spacing, tol=1.3):
     return P
 
 
+def _read_nex_k_lev_meta(filepath):
+    """Parse the header of SYSNAME_sbe_nex_k_lev_real.data for the band layout.
+    Returns (ib0, nvb, nlev): first band index, VBM band index, band count.
+    Falls back to the legacy 4-level gap-edge layout if the header is old."""
+    import re
+    ib0 = nvb = nlev = None
+    for line in open(filepath):
+        if not line.startswith('#'):
+            break
+        m = re.search(r'set of\s+(\d+)\s+band.*?:\s*band\s+(\d+)\s*\.\.\s*(\d+)', line)
+        if m:
+            nlev = int(m.group(1)); ib0 = int(m.group(2))
+        m2 = re.search(r'VBM\s*=\s*band\s+(\d+)', line)
+        if m2:
+            nvb = int(m2.group(1))
+    if ib0 is None or nlev is None:          # legacy 4-level file (VB-1,VB,CB1,CB2)
+        return None, None, None
+    return ib0, nvb, nlev
+
+
 def _iter_nex_k_lev_blocks(filepath):
     """Stream SYSNAME_sbe_nex_k_lev_real.data: per time block yield
-    (t_val, t_unit, kpoints[nk,3], pop4[nk,4]) where pop4 columns are the diabatic
-    populations of VB-1, VB, CB1, CB2."""
+    (t_val, t_unit, kpoints[nk,3], pop[nk,nlev]) where pop columns are the diabatic
+    populations of the recorded bands (default gap-edge VB-1,VB,CB1,CB2; any count
+    when sbe_out_nlev is set). Reads ALL population columns (cols 5..end)."""
     t_val, t_unit, kk, pp = None, '', [], []
     for line in open(filepath):
         s = line.strip()
@@ -1469,11 +1495,62 @@ def _iter_nex_k_lev_blocks(filepath):
         if s.startswith('#') or not s:
             continue
         v = s.split()
-        if len(v) >= 8:
+        if len(v) >= 5:                       # ik, kx, ky, kz, >=1 population
             kk.append([float(v[1]), float(v[2]), float(v[3])])
-            pp.append([float(v[4]), float(v[5]), float(v[6]), float(v[7])])
+            pp.append([float(x) for x in v[4:]])
     if t_val is not None and kk:
         yield t_val, t_unit, np.array(kk), np.array(pp)
+
+
+def plot_levels(levfile, output_dir, dpi=150):
+    """Plot the level-resolved diabatic populations from
+    SYSNAME_sbe_nex_k_lev_real.data for ANY sbe_out_nlev: the BZ-averaged
+    occupation f of each recorded band vs time (left) + the final per-band
+    occupation (right). Valence bands in blue, conduction in red. Works for the
+    default 4 gap-edge bands and for an arbitrary set written with sbe_out_nlev."""
+    import matplotlib.cm as cm
+    ib0, nvb, _nl = _read_nex_k_lev_meta(levfile)
+    ts, tu, occ = [], '', []
+    for t, u, _kpts, pop in _iter_nex_k_lev_blocks(levfile):
+        ts.append(t); tu = u
+        occ.append(pop.mean(axis=0))              # BZ-average occupation per band
+    if not ts:
+        print(f"  (skip levels) no data blocks in {levfile.name}"); return
+    ts = np.array(ts); occ = np.array(occ)        # [nt, nlev]
+    nlev = occ.shape[1]
+    if ib0 is None:                                # legacy gap-edge 4-level file
+        labels  = ['VB-1', 'VB', 'CB1', 'CB2'][:nlev]
+        is_cond = [False, False, True, True][:nlev]
+    else:
+        labels  = [f'b{ib0+i}' for i in range(nlev)]
+        is_cond = [(ib0 + i) > (nvb if nvb else ib0) for i in range(nlev)]
+
+    fig, ax = plt.subplots(1, 2, figsize=(11, 4.2),
+                           gridspec_kw={'width_ratios': [3, 1]})
+    nc = max(sum(is_cond), 1); nv = max(nlev - sum(is_cond), 1)
+    ic = iv = 0
+    for i in range(nlev):
+        if is_cond[i]:
+            c = cm.Reds(0.35 + 0.55 * ic / nc); ic += 1
+        else:
+            c = cm.Blues(0.35 + 0.55 * iv / nv); iv += 1
+        ax[0].plot(ts, occ[:, i], color=c, lw=1.3,
+                   label=labels[i] + (' (c)' if is_cond[i] else ' (v)'))
+    ax[0].set_xlabel(f't [{tu}]'); ax[0].set_ylabel('BZ-averaged occupation  f')
+    ax[0].set_title(f'Level-resolved diabatic populations ({nlev} bands)')
+    ax[0].grid(alpha=0.3)
+    ax[0].legend(fontsize=7, ncol=2, loc='best', framealpha=0.6)
+
+    ax[1].barh(range(nlev), occ[-1],
+               color=['#c0392b' if c else '#2471a3' for c in is_cond])
+    ax[1].set_yticks(range(nlev)); ax[1].set_yticklabels(labels, fontsize=7)
+    ax[1].invert_yaxis(); ax[1].grid(alpha=0.3, axis='x')
+    ax[1].set_xlabel('final f'); ax[1].set_title(f't = {ts[-1]:.1f} {tu}')
+    fig.tight_layout()
+    stem = levfile.name.replace('_sbe_nex_k_lev_real.data', '')
+    out = output_dir / f'{stem}_levels.png'
+    fig.savefig(out, dpi=dpi); plt.close(fig)
+    print(f"  wrote {out.name}  ({nlev} bands, {len(ts)} frames)")
 
 
 def plot_primitive_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=150,
@@ -1512,6 +1589,15 @@ def plot_primitive_spectral(filepath, bpfile, output_dir, dpi=150, max_frames=15
     lev_file = filepath.parent / filepath.name.replace('_nex_k_real.data',
                                                        '_nex_k_lev_real.data')
     use_lev = lev_file.exists()
+    if use_lev:
+        # the 4-band gap-edge decoration maps fixed columns (vbm1,vb,cb1,cb2) to
+        # bandpath lines; for an arbitrary sbe_out_nlev file that mapping breaks,
+        # so degrade to CB1-only here and point at --levels for the full view.
+        _ib0, _nvb, _nl = _read_nex_k_lev_meta(lev_file)
+        if _nl is not None and _nl != 4:
+            print(f"  (note) {lev_file.name} has {_nl} levels (sbe_out_nlev != 4); "
+                  f"spectral colours CB1 only — use --levels for the full N-level view")
+            use_lev = False
     src = lev_file if use_lev else filepath
     print(f"Processing {src.name}  (primitive spectral A(k,E) per frame, "
           f"{'4-level' if use_lev else 'CB1-only'}, skeleton {bpfile.name}) ...")
@@ -2625,6 +2711,12 @@ def main():
                              'points (x), and the six Delta-valley minima at 0.85*X '
                              '(o) -- e.g. to check the Si hot spots sit in the '
                              'correct Delta valleys.')
+    parser.add_argument('--levels', action='store_true',
+                        help='Plot the level-resolved diabatic populations from '
+                             '*_sbe_nex_k_lev_real.data: BZ-averaged occupation of '
+                             'each recorded band vs time + the final per-band bar. '
+                             'Works for any number of bands (set sbe_out_nlev in the '
+                             'SBE input; default = 4 gap-edge bands).')
     parser.add_argument('--instantaneous', action='store_true',
                         help='Also plot the instantaneous Houston-basis nex_k '
                              'maps (*_sbe_nex_k.data / *_unfold.data). These carry '
@@ -2787,6 +2879,14 @@ def main():
                                             autoscale=args.spectral_autoscale)
                 else:
                     print(f"  (skip spectral) {bpfile.name} not found")
+
+        # --- Level-resolved diabatic populations (--levels) ----------------
+        if args.levels:
+            levfiles = sorted(input_dir.glob('*_sbe_nex_k_lev_real.data'))
+            if not levfiles:
+                print("  (skip --levels) no *_sbe_nex_k_lev_real.data found")
+            for f in levfiles:
+                plot_levels(f, kdir, dpi=args.dpi)
 
     # --- Band structure -------------------------------------------------
     if not args.no_bands:

@@ -650,7 +650,8 @@ contains
       & yn_sbe_eph_acoustic, &
       & sbe_eph_ac_xi_ev, &
       & sbe_checkpoint_step, &
-      & yn_sbe_checkpoint_restart
+      & yn_sbe_checkpoint_restart, &
+      & sbe_out_nlev
 
     namelist/epm/ &
       & epm_material, &
@@ -1144,6 +1145,7 @@ contains
     yn_sbe_eph_acoustic     = 'n'        ! A4 acoustic e-ph mode off
     sbe_eph_ac_xi_ev        = -1.0d0     ! A4 DP override [eV]; <=0 = registry (substrate knob)
     sbe_checkpoint_step     = 0          ! B4 checkpoint off
+    sbe_out_nlev            = 4          ! level-resolved output: VB-1,VB,CB1,CB2 (<=0 = all nstate)
     yn_sbe_checkpoint_restart = 'n'
                                             ! (occupation 1 per spinor band, nelec valence bands instead of nelec/2)
 !! == default for &epm
@@ -1838,6 +1840,7 @@ contains
     call comm_bcast(yn_sbe_eph_acoustic,     nproc_group_global)
     call comm_bcast(sbe_eph_ac_xi_ev,        nproc_group_global)
     call comm_bcast(sbe_checkpoint_step,     nproc_group_global)
+    call comm_bcast(sbe_out_nlev,            nproc_group_global)
     call comm_bcast(yn_sbe_checkpoint_restart, nproc_group_global)
     call comm_bcast(sbe_auger_n_gate_cm3,    nproc_group_global)
 !! == bcast for epm
@@ -2893,6 +2896,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_eph_acoustic', yn_sbe_eph_acoustic
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_eph_ac_xi_ev', sbe_eph_ac_xi_ev
       write(fh_variables_log, '("#",4X,A,"=",I8)')     'sbe_checkpoint_step', sbe_checkpoint_step
+      write(fh_variables_log, '("#",4X,A,"=",I8)')     'sbe_out_nlev', sbe_out_nlev
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_checkpoint_restart', yn_sbe_checkpoint_restart
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_auger_n_gate_cm3', sbe_auger_n_gate_cm3
 

@@ -542,6 +542,11 @@ character(256),allocatable :: atom_name(:)
   ! SBE checkpoint/restart (B4)
   integer        :: sbe_checkpoint_step    ! write rho checkpoint every N steps; 0 = off
   character(1)   :: yn_sbe_checkpoint_restart ! resume from SYSNAME_sbe_ckpt_rank*.bin
+  ! Level-resolved diabatic population output (SYSNAME_sbe_nex_k_lev_real.data):
+  ! number of gap-centred bands written per k. 4 (default) = VB-1,VB,CB1,CB2;
+  ! N>0 = floor(N/2) top-valence + the rest bottom-conduction (clamped to nstate);
+  ! <=0 = ALL nstate bands.
+  integer        :: sbe_out_nlev
 
   !! &epm (local empirical pseudopotential method, Cohen-Bergstresser)
   character(32)  :: epm_material
