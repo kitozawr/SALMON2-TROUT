@@ -335,8 +335,19 @@ Where the wall-clock time goes, and which knobs actually move it. Measured on
 > tight — pick the window by the field (wider for stronger drive; the band-budget
 > lesson, wiki/06 §7). The speedup here is the ring-only fraction (the unitary
 > `O(nstate³·nk)` is a fixed floor); at larger `nk` the ring dominates and the
-> mask helps more. (Auger was inert at this excitation — two CB electrons needed;
-> its identical source-mask path is covered by `test_auger_interk_cptp`.)
+> mask helps more.
+>
+> Two further checks (Si, `dt=0.05`, all four channels: e-ph + II + Auger + eeh):
+> **(1) weak/moderate THz** (`10.txt`, A_max 0.28) — every channel *runs* (the
+> banner prints e-ph, II, ring-Auger, carrier-carrier, BGR all "enabled"); the
+> ±10 eV window leaves `nex_proj` at **−0.04 %** and `dN_ii` at −0.1 %, electrons
+> 8.000, 1.43× faster. Auger reads 0 here — a **density** effect (it needs two CB
+> electrons), *not* the mask switching it off. **(2) a clean single-cycle THz
+> pulse** (`A(t)` Gaussian ⇒ `E=−dA/dt` one derivative-of-Gaussian cycle, ~600
+> kV/cm) drives both 2-particle channels on: `dN_ii` **−0.25 %**, `dN_auger`
+> **−0.13 %**, `nex_proj` **−0.009 %**, electrons 8.000, **1.46×** faster. So the
+> window preserves the physics of *every* dissipator (e-ph, II, Auger) to
+> sub-percent while restoring cost, at both weak and channel-firing fields.
 
 ### The two levers
 
