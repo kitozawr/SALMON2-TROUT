@@ -310,8 +310,33 @@ Where the wall-clock time goes, and which knobs actually move it. Measured on
 > — much less than the naive `(nstate/n_active)²` because the e-ph kernel already
 > energy-prunes far-off-resonance partners (Gaussian `shp`). If you must recover
 > the old speed and accept the known over-generation, set `yn_sbe_full_dressed
-> = 'n'` (then `n_ring = n_active` again). A cost-preserving variant (diagonalise
-> full, dissipate only the active dressed block) is a planned follow-up.
+> = 'n'` (then `n_ring = n_active` again).
+>
+> **Cost-preserving source mask (landed).** Instead of truncating the basis, keep
+> the full dressed projection but **skip dissipator SOURCES outside the frozen
+> `[fermi+core, fermi+free]` window** (`yn_sbe_full_dressed='y'` + a narrow
+> `frozen_*_threshold_ev`). This restores the `O(nk²·n_active)` cost with the
+> *correct* full-basis physics. It now covers **both** the **e-ph** inter-k kernel
+> and the **2-particle** II / Auger / Rana kernels (each gates its source
+> `eval(ih,i1)` on `ring_e_lo/hi`). Measured — Si 5³, `nstate=40`, **II+Auger
+> only** (e-ph off, so the wall-time delta is purely the 2-particle source prune),
+> strong THz `100.txt`, `dt=0.05`, 150 steps, `OMP=4`:
+>
+> | window (rel. Fermi) | wall | speed | `dN_ii` [pairs/cell] | Δ vs all-active | `nex_proj` [cm⁻³] |
+> |---|---|---|---|---|---|
+> | all-active | 228 s | 1.0× | 1.817×10⁻⁷ | — | 1.067×10¹⁷ |
+> | **±10 eV** | 158 s | **1.45×** | 1.817×10⁻⁷ | **0 %** (10-digit) | 1.067×10¹⁷ (10-digit) |
+> | **±6 eV** | 129 s | **1.76×** | 1.554×10⁻⁷ | **−14.5 %** | 9.59×10¹⁶ (−10 %) |
+>
+> `electrons = 8.000` at every step in all three (CPTP). The **±10 eV** window
+> freezes only the deep band-1 and the highest bands (both inert here) ⇒
+> **identical physics, 1.45× faster**; **±6 eV** also freezes `E−E_F ≳ 6 eV`
+> bands that *do* carry ~15 % of the II sources at this multi-BZ field ⇒ too
+> tight — pick the window by the field (wider for stronger drive; the band-budget
+> lesson, wiki/06 §7). The speedup here is the ring-only fraction (the unitary
+> `O(nstate³·nk)` is a fixed floor); at larger `nk` the ring dominates and the
+> mask helps more. (Auger was inert at this excitation — two CB electrons needed;
+> its identical source-mask path is covered by `test_auger_interk_cptp`.)
 
 ### The two levers
 
