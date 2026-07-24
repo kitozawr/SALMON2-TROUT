@@ -1456,7 +1456,7 @@ contains
     subroutine eph_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, evbm, &
                                nph, hw, wrel, nb_bose, nu_sat, nu_eps0, nu_n, &
                                sigma, tau, dpop, gout, kidx, kn, pol_tab, pol_norm, ip_polar, &
-                               ac_tab, ip_ac, ib_scale)
+                               ac_tab, ip_ac, ib_scale, e_src_lo, e_src_hi)
         implicit none
         integer, intent(in)  :: nk, nba, nph
         real(8), intent(in)  :: eval(nba, nk), f(nba, nk), occ_max, a2half
@@ -1486,6 +1486,12 @@ contains
         ! Keldysh/Hurkx brackets (samples/x12 rate_benchmark). Intraband pairs
         ! (real-carrier cooling / heating) are untouched.
         real(8), intent(in), optional :: ib_scale
+        ! Cost-preserving full-basis mask: skip SOURCE dressed states whose energy is
+        ! outside [e_src_lo, e_src_hi] (the frozen-window range). The dressed basis is
+        ! still full (untruncated), only the scattering is restricted -- restores the
+        ! O(nk^2 * n_active) cost without the truncation over-generation (wiki/06 sec.6).
+        real(8), intent(in), optional :: e_src_lo, e_src_hi
+        logical :: do_mask
         integer :: ik, jq, a, b, ip, ipol, ipac
         real(8) :: eps_kin, nu_a, fe, fa, dE, shp, th, blk, gam, gamtot, out_tot
         real(8) :: gpart(nba, nk), emid, ibs
@@ -1494,6 +1500,7 @@ contains
 
         ibs = 1d0
         if (present(ib_scale)) ibs = ib_scale
+        do_mask = present(e_src_lo) .and. present(e_src_hi)
         emid = 0.5d0 * (ecbm + evbm)
         dpop = 0d0
         ipol = 0
@@ -1519,6 +1526,9 @@ contains
         do ik = 1, nk
             do a = 1, nba
                 if (f(a, ik) < occ_eps) cycle
+                if (do_mask) then
+                    if (eval(a, ik) < e_src_lo .or. eval(a, ik) > e_src_hi) cycle
+                end if
                 ! carrier kinetic energy from the nearest band edge (restore A^2/2,
                 ! the k-independent Houston offset; it cancels in energy MATCHING).
                 ! kinetic energy from the nearest band edge. a2half (the dropped

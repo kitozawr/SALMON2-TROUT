@@ -62,6 +62,14 @@ module bloch_solver_ssbe
         real(8) :: bgr_coeff    = 1.9d-8 ! K [eV cm]
         integer :: homo_idx     = 0     ! HOMO band index (valence/conduction split)
         real(8) :: au_dens_cm3  = 0d0   ! a.u.^-3 -> cm^-3 number-density conversion
+        ! Cost-preserving mask for the FULL-basis dressed ring (yn_sbe_full_dressed):
+        ! the dressed projection is truncation-free (all bands), but the ring kernels
+        ! scatter only the dressed states whose energy is in the frozen-window range
+        ! [ring_e_lo, ring_e_hi] (a.u.) -- restores the O(nk^2 * n_active) cost while
+        ! keeping the correct (untruncated) dressed basis (wiki/06 sec.6).
+        logical :: ring_mask_on = .false.
+        real(8) :: ring_e_lo    = -1d30
+        real(8) :: ring_e_hi    =  1d30
         ! Dissipator sub-cycling (Part C8): split the dissipative half-step into
         ! diss_subcycle CPTP sub-steps when the collision rate is fast vs dt.
         real(8) :: eph_numax_au = 0d0   ! estimated peak e-ph rate [1/a.u.time]
@@ -535,9 +543,20 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     !     the narrowed frozen window is honoured only under the explicit opt-out
     !     yn_sbe_full_dressed='n' (fast, but over-generates at sub-gap fields).
     if (yn_sbe_full_dressed == 'y') then
-        if (irank == 0 .and. .not. all(sbe%is_active)) &
-            write(*, '(a)') '# yn_sbe_full_dressed=y: ring dressed projection on the FULL band '// &
-                            'basis (frozen_core/free thresholds ignored for dissipation).'
+        ! Cost-preserving: keep the correct FULL dressed basis (is_active = all), but
+        ! if the user narrowed the frozen window, scatter only the dressed states in
+        ! that ENERGY range -- the ring kernels skip out-of-window sources, restoring
+        ! the O(nk^2 * n_active) cost without truncating the dressed projection.
+        if (.not. all(sbe%is_active)) then
+            sbe%ring_mask_on = .true.
+            sbe%ring_e_lo = (fermi_energy_ev + frozen_core_threshold_ev) / au_ev
+            sbe%ring_e_hi = (fermi_energy_ev + frozen_free_threshold_ev) / au_ev
+            if (irank == 0) &
+                write(*, '(a,f8.2,a,f8.2,a)') '# yn_sbe_full_dressed=y: FULL-basis dressed '// &
+                    'projection; ring dissipates only the [', &
+                    fermi_energy_ev + frozen_core_threshold_ev, ',', &
+                    fermi_energy_ev + frozen_free_threshold_ev, '] eV window (cost-preserving).'
+        end if
         sbe%is_active(:) = .true.
     end if
 
@@ -2717,7 +2736,7 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
                          sbe%eph_n, sbe%eph_sigma_au, tau, dpop, gout, &
                          kidx=sbe%kmap_idx, kn=sbe%kmap_n, pol_tab=opts%vq_tab, &
                          pol_norm=pnorm, ip_polar=1, ac_tab=actab, ip_ac=ipac_use, &
-                         ib_scale=sbe%eph_ib_scale)
+                         ib_scale=sbe%eph_ib_scale, e_src_lo=sbe%ring_e_lo, e_src_hi=sbe%ring_e_hi)
             else
                 call eph_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
                          sbe%eph_ecbm_au, sbe%eph_evbm_au, sbe%eph_nph, &
@@ -2725,7 +2744,8 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
                          sbe%eph_nb(1:sbe%eph_nph), sbe%eph_nusat_au, sbe%eph_eps0_au, &
                          sbe%eph_n, sbe%eph_sigma_au, tau, dpop, gout, &
                          kidx=sbe%kmap_idx, kn=sbe%kmap_n, &
-                         ac_tab=actab, ip_ac=ipac_use, ib_scale=sbe%eph_ib_scale)
+                         ac_tab=actab, ip_ac=ipac_use, ib_scale=sbe%eph_ib_scale, &
+                         e_src_lo=sbe%ring_e_lo, e_src_hi=sbe%ring_e_hi)
             end if
         else
             call eph_interk_dpop(nk, nba, eval_all, f_all, sbe%occ_max, a2half, &
@@ -2733,7 +2753,7 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
                      sbe%eph_hw(1:sbe%eph_nph), sbe%eph_wrel(1:sbe%eph_nph), &
                      sbe%eph_nb(1:sbe%eph_nph), sbe%eph_nusat_au, sbe%eph_eps0_au, &
                      sbe%eph_n, sbe%eph_sigma_au, tau, dpop, gout, &
-                     ib_scale=sbe%eph_ib_scale)
+                     ib_scale=sbe%eph_ib_scale, e_src_lo=sbe%ring_e_lo, e_src_hi=sbe%ring_e_hi)
         end if
         deallocate(actab)
         call ring_ledger(sbe, 1, nba, nk, ic, eval_all, dpop)
