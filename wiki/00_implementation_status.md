@@ -384,6 +384,22 @@ x11 showcase inputs updated with the new channels (holes+acoustic+checkpoints on
 ---
 
 ## Decisions log (gotchas that bit us / must not be re-litigated)
+- ✅ **Configurable level-resolved output `sbe_out_nlev` + `--levels` plot (2026-07-24, PR #105).**
+  The k-resolved diabatic file `SYSNAME_sbe_nex_k_lev_real.data` was hard-wired to the 4
+  gap-edge bands (`VB-1,VB,CB1,CB2`); it now writes **any number** of gap-centred bands set by
+  `sbe_out_nlev` (`&sbe`, default 4; `N>0` = `floor(N/2)` valence + rest conduction clamped to
+  `nstate`; `<=0` = ALL `nstate`). **Design notes:** (1) the writer format string is built
+  dynamically (`'(I6,',3+nlev,'E18.10)'`) and the header records `band ib0 .. ib1` + `VBM = band n`
+  so the plotter can split valence/conduction for any layout; (2) the cadence is still
+  `out_projection_k_step` (this file is nk-scaled — don't expect per-step rows unless you lower it);
+  (3) the file also feeds `--bz3d-cb-sum`, which now sums the *true* conduction columns from the
+  header meta (was a hardcoded `cols 2,3`); (4) the 4-band `--spectral` colour decoration still
+  needs the default 4-level layout — for `sbe_out_nlev≠4` it degrades to CB1-only and points at
+  `--levels`. Plot: `plot_sbe_results.py --levels` → per-band occupation(t) + final bar. Default
+  (`nlev=4`) file layout unchanged; validated Si 4³/nstate=40 (`nlev=8`→12 cols, `0`→44 cols,
+  electrons 8.000), 24/24 tests. Server-ready `samples/x12/Si_DAST_9x9x9.inp` bundles this with the
+  DAST field + mask/step/nb. (Separately confirmed: `SYSNAME_sbe_nex_nonad.data` and every other
+  output `.data` **append** on checkpoint-restart — they share the `ost/opos` open mode; no fix.)
 - ✅ **2-particle cost-preserving source mask (2026-07-24, PR #104).** The frozen-window
   SOURCE energy-mask (skip dissipator sources with `eval(ih,i1)` outside `[fermi+core,
   fermi+free]`) now covers `ii_interk_dpop`/`auger_interk_dpop`/`rana_auger_dpop`, not just
