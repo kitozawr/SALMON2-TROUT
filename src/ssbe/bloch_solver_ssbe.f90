@@ -3386,8 +3386,17 @@ subroutine calc_nex_nonad(sbe, gs, Ac, icomm, nex_proj, nex_dref)
     real(8),    allocatable :: evals(:), p_k_full(:, :, :), eigen_a(:), dref(:)
     complex(8), allocatable :: H(:, :), W(:, :), t1(:, :), t2(:, :), rho_a(:, :)
 
-    nba = sbe%n_active_bands
-    nv  = sbe%nv_act
+    ! FULL-basis dressed projection (wiki/06 sec.6): diagonalise H_VG on ALL nb
+    ! bands, NOT the truncated frozen active window. Diagonalising on the active
+    ! subspace drops the A.p coupling to the frozen bands, so the field-dressing
+    ! that belongs in the frozen bands piles into the active conduction states and
+    ! inflates nex by ~x300 on a frozen window (measured: Si 4^3, frozen 8-band vs
+    ! all-active 16-band, same coherent rho -> 9.7e19 vs 3.3e17). The measure must
+    ! be truncation-free even when the DISSIPATORS act only on the active window.
+    ! (For an all-active run active_idx(i)=i and nv_act=homo_idx, so this is
+    !  byte-identical to the old active-window form.)
+    nba = sbe%nb
+    nv  = sbe%homo_idx
     nex_proj = 0d0
     nex_dref = 0d0
     ! Need at least one dressed valence and one dressed conduction level.
@@ -3404,12 +3413,12 @@ subroutine calc_nex_nonad(sbe, gs, Ac, icomm, nex_proj, nex_dref)
         if (sbe%flag_vnl_correction) &
             p_k_full(:, :, :) = p_k_full(:, :, :) + gs%rvnl_tm_matrix(:, :, :, ik)
         do i = 1, nba
-            eigen_a(i) = gs%eigen(sbe%active_idx(i), ik)
+            eigen_a(i) = gs%eigen(i, ik)
         end do
         do j = 1, nba
-            im = sbe%active_idx(j)
+            im = j
             do i = 1, nba
-                in = sbe%active_idx(i)
+                in = i
                 H(i, j) = Ac(1) * p_k_full(in, im, 1) &
                         + Ac(2) * p_k_full(in, im, 2) &
                         + Ac(3) * p_k_full(in, im, 3)
