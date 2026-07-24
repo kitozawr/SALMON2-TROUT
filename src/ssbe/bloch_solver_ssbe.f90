@@ -328,6 +328,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     use communication, only: comm_get_groupinfo, comm_summation, comm_bcast, &
                              comm_get_max, comm_sync_all
     use salmon_global, only: frozen_core_threshold_ev, frozen_free_threshold_ev, &
+                             yn_sbe_full_dressed, &
                              sbe_decoh_temperature_k, sbe_decoh_tau_m_fs, yn_sbe_spinor, &
                              yn_sbe_impact_ionization, sbe_ii_prefactor, &
                              sbe_ii_threshold_ev, sbe_ii_ramp_ev, &
@@ -521,6 +522,24 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
         end if
     end do
     deallocate(eig_gamma)
+
+    ! 3b. FULL-BASIS dressed projection (default, wiki/06 sec.6): a NARROWED frozen
+    !     window truncates the ring's H_VG diagonalisation to the active subspace,
+    !     dropping the A.p coupling to the frozen bands -- the field-dressing that
+    !     belongs in the frozen bands then piles into the active conduction states
+    !     and the dissipators over-scatter it into real carriers (measured x10^4-10^6
+    !     over-generation at sub-gap THz; Si 4^3 all-active 2.2e18 vs frozen 1.2e22).
+    !     The reversible VG unitary already runs on the full basis; the DRESSED
+    !     PROJECTION the dissipators use must be truncation-free too. Default 'y'
+    !     forces the ring to the full band basis (all bands active for dissipation);
+    !     the narrowed frozen window is honoured only under the explicit opt-out
+    !     yn_sbe_full_dressed='n' (fast, but over-generates at sub-gap fields).
+    if (yn_sbe_full_dressed == 'y') then
+        if (irank == 0 .and. .not. all(sbe%is_active)) &
+            write(*, '(a)') '# yn_sbe_full_dressed=y: ring dressed projection on the FULL band '// &
+                            'basis (frozen_core/free thresholds ignored for dissipation).'
+        sbe%is_active(:) = .true.
+    end if
 
     ! 4. Derive the active-band count from the mask (single source of truth).
     sbe%n_active_bands = count(sbe%is_active)

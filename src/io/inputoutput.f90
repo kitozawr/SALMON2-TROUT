@@ -636,6 +636,7 @@ contains
       & sbe_colmem_tau_fs, &
       & yn_sbe_colmem_pop, &
       & yn_sbe_dressed_ref, &
+      & yn_sbe_full_dressed, &
       & yn_sbe_eeh, &
       & sbe_eeh_nu_sat, &
       & yn_sbe_auger, &
@@ -1129,6 +1130,7 @@ contains
     sbe_colmem_tau_fs       = -1.0d0     ! memory time tau_c [fs]; <=0: hbar/sigma_E
     yn_sbe_colmem_pop       = 'n'        ! 'y': memory-filtered source populations for the ring kernels
     yn_sbe_dressed_ref      = 'n'        ! 'y': Option A dressed-reference carrier measure (ring)
+    yn_sbe_full_dressed     = 'y'        ! 'y' (default): ring dressed projection on the FULL basis (correct); 'n': frozen-window truncation (fast, over-generates)
     yn_sbe_eeh              = 'n'        ! 'y': carrier-carrier (e-e/e-h) thermalization channel
     sbe_eeh_nu_sat          = -1.0d0     ! carrier-carrier rate scale [s^-1]; <=0: 1e14 default
     yn_sbe_auger            = 'n'        ! 'y': Auger recombination (density-gated CPTP, Sec 13)
@@ -1823,6 +1825,7 @@ contains
     call comm_bcast(sbe_colmem_tau_fs,       nproc_group_global)
     call comm_bcast(yn_sbe_colmem_pop,       nproc_group_global)
     call comm_bcast(yn_sbe_dressed_ref,      nproc_group_global)
+    call comm_bcast(yn_sbe_full_dressed,     nproc_group_global)
     call comm_bcast(yn_sbe_eeh,              nproc_group_global)
     call comm_bcast(sbe_eeh_nu_sat,          nproc_group_global)
     call comm_bcast(yn_sbe_auger,            nproc_group_global)
@@ -2877,6 +2880,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_colmem_tau_fs', sbe_colmem_tau_fs
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_colmem_pop', yn_sbe_colmem_pop
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_dressed_ref', yn_sbe_dressed_ref
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_full_dressed', yn_sbe_full_dressed
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_eeh', yn_sbe_eeh
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_eeh_nu_sat', sbe_eeh_nu_sat
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_auger', yn_sbe_auger
