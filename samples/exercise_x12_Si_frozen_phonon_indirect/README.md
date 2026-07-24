@@ -156,7 +156,7 @@ conduction band (band-5 / band-6 population ratio ≈ 33×), and cools them from
 > frozen-band dressing instead of leaving ρ non-positive. The eph-OFF column
 > is bit-identical to the pre-fix build.
 
-### What the phonon actually scatters here (real vs virtual)
+### What the phonon actually scatters here (real vs virtual) — read the TRUE nex
 
 This pulse is **sub-cycle** (envelope 19 fs < period 2π/ω = 33 fs): the
 coherent run shows the Houston conduction population *adiabatically follows
@@ -166,10 +166,65 @@ long-lived **virtual** dressing is golden-rule phonon-assisted tunneling
 (Hurkx/Kane BTBT physics — real for indirect Si), but its scale here is set
 by ν_sat, the *real-carrier* intervalley rate: treat the absolute yield as an
 **upper estimate** (BTBT parametrizations sit orders below it at this field).
+
+> **Which column is the real carrier density?** Read `Si_prim_sbe_nex_nonad.data`
+> **column 2 = `nex_proj`** — the non-adiabatic, **full-basis** dressed
+> projection (fixed 2026-07-24 to diagonalise H_VG on all `nstate` bands, not the
+> frozen window, so a narrow window no longer truncates it). That is the **TRUE**
+> excited-carrier density: the A²-following **dressing** is subtracted out with
+> the field, leaving only what the phonon really scattered across the gap.
+> **Do NOT** use the diabatic `nelec` (`Si_prim_sbe_nex.data`) for the real count
+> — it carries the reversible A² dressing (∝ A²(t), returns at switch-off) and
+> sits orders of magnitude above `nex_proj` at this sub-cycle field. **`nex_proj`
+> is only trustworthy at `dt ≤ 0.05 fs`**: a coarser step over-generates the
+> dressed population (a dt-artifact the diabatic `nelec` hides — wiki/06 §6). The
+> `dt = 8 a.u. (≈0.19 fs)` default here is fine for the eph-ON/OFF *ratio* and the
+> distributions, but converge `dt` on `nex_proj` before quoting an absolute yield.
 A lifetime gate cannot separate this dressing (`sbe_ring_gate_fs`, default
 **off**, is kept as an experimental knob: at τ = 2π/E_gap it still passes
 ~60 % of the envelope-following dressing and only trims sub-cycle fringes,
 −41 % here).
+
+## Driving with the real DAST 100 kV/cm field (and a clean single-cycle proxy)
+
+Two ready field files ship with this exercise for the maintainer's actual
+experiment (the `Si_TROUT_100kV` run):
+
+| file | what it is | duration | use |
+|---|---|---|---|
+| `DAST_100kV_red.txt` | the **measured** DAST THz transient, x-polarised, peak ≈ 100 kV/cm (peak `\|A_x\|` = 0.087 A·eV·fs), spectral peak **3.36 THz** | 3.27 **ps** (down-sampled to `dt = 0.1 fs`) | the physical field; a full run is a cluster job (see below) |
+| `DAST_singlecycle_100kV.txt` | a **clean single-cycle proxy**: `A(t)` is a Gaussian, so `E(t) = −dA/dt` is one derivative-of-Gaussian cycle at the **same 3.36 THz** (τ = 47.4 fs), same peak field | **285 fs** (10× shorter) | the recommended drive — same spectrum, no ps-long tails, analytically clean |
+
+The proxy is the practical choice: the real DAST is a **multi-cycle** transient
+whose active part spans ~3 ps, so at the required `dt ≤ 0.05 fs` (below) a full
+run is ~65 000 steps. The single-cycle proxy keeps the same 3.36 THz spectral
+peak and 100 kV/cm amplitude in one clean cycle over 285 fs.
+
+**To drive x12 with either file** (they are in `A_eV_fs` units), switch this
+exercise's `&units`/`&emfield`/`&tgrid` to:
+
+```
+&units
+  unit_system = 'A_eV_fs'          ! the field files are A[A·eV·fs] vs t[fs]
+/
+&emfield
+  ae_shape1   = 'input'
+  file_input1 = 'DAST_singlecycle_100kV.txt'   ! or 'DAST_100kV_red.txt'
+/
+&tgrid
+  dt = 0.05d0                      ! REQUIRED for a trustworthy nex_proj (see below)
+  nt = 5700                        ! single-cycle proxy = 285 fs; for the real DAST,
+                                   ! run only PART (nt as long as feasible / a cluster job)
+/
+```
+
+Keep the frozen-core window, `nstate`, `al` and `num_kgrid` as in
+`Si_frozen_phonon_rt.inp`. **Read the TRUE carrier density from `nex_proj`**
+(`Si_prim_sbe_nex_nonad.data` col 2), not the diabatic `nelec` — see the
+real-vs-virtual note above — and remember `nex_proj` needs `dt ≤ 0.05 fs`.
+The cost-preserving frozen window works with these fields exactly as here
+(all dissipators run; a narrow window only skips out-of-window dissipator
+sources — wiki/11 §3d).
 
 ## Calibration scan (`calibration_scan.py`) — 4³ worked example, redo on your grid
 

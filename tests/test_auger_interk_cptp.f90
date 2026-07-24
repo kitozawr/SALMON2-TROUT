@@ -120,6 +120,24 @@ program test_auger_interk_cptp
                  maxval(abs(dpi + dpa)) / scale, 0d0, 1d-6)
     end block
 
+    ! (6) cost-preserving SOURCE energy-mask: a wide window is bit-identical to
+    ! the default; a narrow window below all conduction sources (all at E>=0.5)
+    ! silences the forward channel. Trace stays exact.
+    block
+        real(8) :: dwide(nba, nk), dnar(nba, nk)
+        call auger_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
+                               pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dwide, &
+                        e_src_lo=-1d30, e_src_hi=1d30)
+        call chk("mask wide window == default (max|diff|)", &
+                 maxval(abs(dwide - dpop)), 0d0, 1d-300)
+        call auger_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
+                               pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dnar, &
+                        e_src_lo=-0.1d0, e_src_hi=0.1d0)
+        call chk("mask excludes all CB sources -> channel off", maxval(abs(dnar)), 0d0, 1d-14)
+    end block
+
     if (nfail == 0) then
         write(*,'(a)') 'PASS  (inter-k Auger: trace-conserving, recombining+promoting, '// &
                        'bounded, no-pair/sub-threshold no-op, FD detailed balance with the II kernel)'

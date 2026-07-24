@@ -242,7 +242,16 @@ optical driver at the same E has a **smaller** `A_max` (higher ω) but reaches
 
 **Cost note:** with the full-basis projection the ring scales `O(nk²·nstate²)`, so
 doubling `nstate` for a strong field is ~4× on the ring (`wiki/11 §3d`). Budget the
-grid/`dt`/channel set accordingly, or use the cost-preserving variant when it lands.
+grid/`dt`/channel set accordingly, or use the **cost-preserving source mask**
+(landed): keep the full dressed projection but restrict the dissipator *sources*
+to the `[fermi+core, fermi+free]` window (`frozen_*_threshold_ev` +
+`yn_sbe_full_dressed='y'`). It covers the e-ph **and** the 2-particle II/Auger/Rana
+kernels. **The window width follows the same band budget as this section:** a
+measured Si 5³/`nstate=40` II run under a strong THz drive kept `dN_ii` *identical*
+to all-active with a **±10 eV** window (1.45× faster) but lost **−14.5 %** with a
+too-tight **±6 eV** window that froze the `E−E_F ≳ 6 eV` bands the multi-BZ field
+actually populates (`wiki/11 §3d` for the table). Widen the window for stronger
+fields, exactly as you widen `nstate`.
 
 ---
 

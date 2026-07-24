@@ -95,24 +95,34 @@ Branch `claude/inter-k-ring-eph-ii` **merged into `develop-2.0.0`** (merge commi
 
 ## 🧭 NEXT SESSION — START HERE
 
-### 🔴 NEXT CODE TASK (2026-07-24) — II/Auger/Rana 2-particle cost-preserving source mask
+### ✅ DONE (2026-07-24, PR #104) — II/Auger/Rana 2-particle cost-preserving source mask
 The sub-gap **huge-Auger is FIXED** (root cause = frozen-window dressed-projection
-truncation → full-basis projection, `yn_sbe_full_dressed` default `'y'`; PR #103).
-The cost-preserving **e-ph** SOURCE energy-mask is done (`eph_interk_dpop` gains
-`e_src_lo/e_src_hi`; `sbe%ring_e_lo/ring_e_hi/ring_mask_on` set in `init_sbe_bloch_solver`
-from the frozen thresholds). **TODO: extend the same source mask to the 2-particle
-kernels** so a narrow window restores their cost too:
-- `ii_interk_dpop` (source = hot electron `ih`, `sbe_superres_ssbe.f90` ~L1650:
-  `if (f(ih,i1)<occ_eps) cycle`), `auger_interk_dpop` (~L1825/L1894),
-  `rana_auger_dpop` — add optional `e_src_lo/e_src_hi`, skip a source whose
-  `eval(...)` is outside the window; pass `sbe%ring_e_lo/hi` from the `apply_*_ring`
-  call sites exactly like the e-ph call in `apply_ring_channels`.
-- Optionally prune the **partner** loops too (the O(n_b) inner search) for the full
-  `O(nk²·n_active²)`; source-masking alone is partial for 2-particle channels.
-- **Validate:** masked vs all-active `nex_proj` within ~10 %, electrons conserved,
-  wall-time restored. Unit tests must stay 24/24 (optional args absent ⇒ no-op).
-- **Priority:** LOW at sub-gap (wiki/04 recommends II/Auger OFF there); this mainly
-  helps ≳ MV/cm runs that keep II/Auger on. Branch fresh from trunk.
+truncation → full-basis projection, `yn_sbe_full_dressed` default `'y'`; PR #103),
+and the cost-preserving SOURCE energy-mask now covers **all** ring channels, not
+just e-ph. `ii_interk_dpop` / `auger_interk_dpop` / `rana_auger_dpop` gained optional
+`e_src_lo/e_src_hi`; each skips a dissipator SOURCE whose Houston energy `eval(ih,i1)`
+is outside the `[fermi+core, fermi+free]` window (electron- & hole-initiated II;
+forward & reverse Auger; Rana's per-state gather/distribute is windowed trace-exact
+for interface uniformity — it is mean-field, no cost win). Threaded from the
+`apply_ring_channels` call sites via `sbe%ring_e_lo/ring_e_hi`, exactly like e-ph.
+- **Unit tests (24/24):** II/Auger wide window bit-identical to default + narrow
+  window silences the channel; Rana wide==default, all-excluded no-op, partial-window
+  trace conservation. Optional args absent ⇒ exact no-op.
+- **Calc-validated (Si, `dt=0.05`):** **(a)** strong `100.txt` II+Auger — ±10 eV
+  window `dN_ii` identical to all-active (10-digit), 1.45×; ±6 eV −14.5 % (too tight
+  for the multi-BZ field, band-budget lesson wiki/06 §7), 1.76×. **(b)** weak `10.txt`
+  all four channels — every channel *runs* (e-ph, II, ring-Auger, carrier-carrier,
+  BGR all "enabled"); ±10 eV `nex_proj` −0.04 %, electrons 8.000, 1.43×. Auger reads
+  0 by **density** (needs two CB e⁻), not code. **(c)** a clean single-cycle THz pulse
+  (`A(t)` Gaussian ⇒ `E=−dA/dt`, ~600 kV/cm) drives **both** 2-particle channels: mask
+  preserves `dN_ii` −0.25 %, `dN_auger` −0.13 %, `nex_proj` −0.009 %, electrons 8.000,
+  1.46×. Tables in wiki/11 §3d.
+- **Samples:** x10 surfaces the mask/step(`dt≤0.05`)/nb(band-budget) knobs; x12 ships
+  the maintainer's DAST 100 kV/cm field + a single-cycle proxy (`A` Gaussian, same
+  3.36 THz peak, 285 fs) and a rewritten true-nex (`nex_proj`, not dressed `nelec`) note.
+- **Still open (LOW):** the O(nk²·n_active²) **partner**-loop prune (the O(n_b) inner
+  search) — source-masking alone is partial for the 2-particle channels; helps only
+  ≳ MV/cm runs that keep II/Auger on. See the O(nk³) note in the future-ideas list below.
 
 ---
 
@@ -374,6 +384,21 @@ x11 showcase inputs updated with the new channels (holes+acoustic+checkpoints on
 ---
 
 ## Decisions log (gotchas that bit us / must not be re-litigated)
+- ✅ **2-particle cost-preserving source mask (2026-07-24, PR #104).** The frozen-window
+  SOURCE energy-mask (skip dissipator sources with `eval(ih,i1)` outside `[fermi+core,
+  fermi+free]`) now covers `ii_interk_dpop`/`auger_interk_dpop`/`rana_auger_dpop`, not just
+  e-ph. **Design rules recorded:** (1) mask the OUTER source loop only (`ih`), keyed on the
+  Houston eigenvalue — matches the e-ph pattern and the `is_active` intent; the partner/inner
+  loops are left full (a further O(nk²·n_active²) prune is possible but LOW priority). (2)
+  `do_mask = present(e_src_lo).and.present(e_src_hi)` ⇒ callers omitting both are a byte-exact
+  no-op (keeps the 24/24 unit tests + all existing runs bit-identical). (3) **Rana is
+  mean-field** (O(nk·nba), no O(nk²) source loop) so the window buys no cost there; it is
+  threaded only for interface uniformity, windowing the gather+distribute consistently so the
+  pair transfer stays trace-exact within the window while the bulk R07 rate keeps the
+  full-basis density — do NOT "optimize" Rana expecting a speedup. **Validated** strong/weak/
+  single-cycle (wiki/11 §3d): mask preserves e-ph, II AND Auger to sub-percent, electrons
+  8.000, 1.4–1.8×. **Auger reading 0 at weak field is a density effect (needs two CB e⁻), not
+  the mask disabling it** — confirmed by the single-cycle run where it fires and is preserved.
 - **Franz–Keldysh per-k kernel ≠ the Airy JDOS lineshape (`si_three_photon_isosurfaces.py`, PR #60):** the literal Tharmalingam/Aspnes `[Ai'(b)²−b·Ai(b)²]/ħθ` grows as √(−Δ) above the edge — that growth IS the parabolic joint DOS, which the explicit k-sum already reproduces from the real bands. Using it as a per-k weight **double-counts the JDOS** and drags the rate maximum into the low-gap region (observed: the 4γ peak landed at E_dir=3.43 eV instead of on the 4.0 eV shell). The correct per-k weight is the **peaked kernel** `fk_resonance_kernel`: the exact FK sub-edge tail `exp[−(4/3)(Δ/w)^{3/2}]` for Δ>0, Gaussian roll-off for Δ<0, `w=hypot(ħθ,η)`, **peak-normalized** (not area-normalized) so the sub-edge rate grows with field instead of just spreading. The literal JDOS form is kept as `fk_lineshape_jdos` for reference only. Same absolute-scale caveat as the Zener script: the local EPM undershoots gaps, so quote relative geometry, not absolute rates, unless scissor-corrected.
 - **Si gap:** a 3-parameter local EPM gives ~1.06 eV converged = Kunikiyo's own calc (1.068), NOT the 1.12 eV experimental value. The spec's "30 meV from 1.12" is against experiment; treat **1.068 eV (Kunikiyo calc)** as the real target. CBM at 0.86·2π/a along ⟨100⟩.
 - **Si diamond:** V^A ≡ 0 for all shells → the existing zincblende `VS·cos + i·VA·sin` machinery is reused verbatim with V^A=0 (purely real diamond). τ=(a/8)(1,1,1) for both.

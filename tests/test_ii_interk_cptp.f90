@@ -183,6 +183,24 @@ program test_ii_interk_cptp
         if (sum(dt2(ic, :)) <= 0d0) call bad("A2: no pair electron created (hhe)")
     end block
 
+    ! (11) cost-preserving SOURCE energy-mask: a wide window is bit-identical to
+    ! the default (no-op); a narrow window that excludes the single hot source
+    ! (ic,k1) at E=1.0 silences the electron channel. Trace stays exact.
+    block
+        real(8) :: dwide(nba, nk), dnar(nba, nk)
+        call ii_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
+                            pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dwide, &
+                        e_src_lo=-1d30, e_src_hi=1d30)
+        call chk("mask wide window == default (max|diff|)", &
+                 maxval(abs(dwide - dpop)), 0d0, 1d-300)
+        call ii_interk_dpop(nk, nba, eval, f, occ_max, a2half, ecbm, eth, &
+                            pref, expo, iv, ic, kidx, kn, klut, &
+                        bmat, eps_inf, qtf2, wp2, lambda2, q2reg, sigma, tau, dnar, &
+                        e_src_lo=-0.1d0, e_src_hi=0.1d0)
+        call chk("mask excludes hot source -> channel off", maxval(abs(dnar)), 0d0, 1d-14)
+    end block
+
     if (nfail == 0) then
         write(*,'(a)') 'PASS  (inter-k impact ionization: trace-conserving, '// &
                        'carrier-multiplying, bounded, no-op below threshold; B1 table bit-identical, '// &

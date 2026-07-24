@@ -2789,7 +2789,8 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
                         sbe%ii_ecbm_au, sbe%ii_eth_au, sbe%ii_pref_au, sbe%ii_exponent, &
                         iv, ic, sbe%kmap_idx, sbe%kmap_n, sbe%kmap_lut, &
                         gs%b_matrix, eps_inf, qtf2, wp2, lambda2, q2reg, sig, tau, dpop_loc, &
-                        i1_lo=sbe%ik_min, i1_hi=sbe%ik_max, opts=opts)
+                        i1_lo=sbe%ik_min, i1_hi=sbe%ik_max, opts=opts, &
+                        e_src_lo=sbe%ring_e_lo, e_src_hi=sbe%ring_e_hi)
                 call comm_summation(dpop_loc, dpop, nba*nk, sbe%icomm)
                 call ring_ledger(sbe, 2, nba, nk, ic, eval_all, dpop)
             else
@@ -2801,7 +2802,8 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
                         sbe%ii_ecbm_au, sbe%ii_eth_au, sbe%ii_pref_au, sbe%ii_exponent, &
                         iv, ic, sbe%kmap_idx, sbe%kmap_n, sbe%kmap_lut, &
                         gs%b_matrix, eps_inf, qtf2, wp2, lambda2, q2reg, sig, tau, dpop_loc, &
-                        i1_lo=sbe%ik_min, i1_hi=sbe%ik_max, opts=opts)
+                        i1_lo=sbe%ik_min, i1_hi=sbe%ik_max, opts=opts, &
+                        e_src_lo=sbe%ring_e_lo, e_src_hi=sbe%ring_e_hi)
                 call comm_summation(dpop_loc, dpop2, nba*nk, sbe%icomm)
                 call ring_ledger(sbe, 3, nba, nk, ic, eval_all, dpop2)
                 dpop = dpop + dpop2
@@ -2815,7 +2817,8 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
     if (sbe%flag_rana2d .and. iv >= 1 .and. ic <= nba) then
         call rana_auger_dpop(nk, nba, eval_all, f_all, sbe%occ_max, iv, ic, &
                              sbe%rana_area_au, sbe%rana_kt_au, sbe%rana_vf_au, &
-                             sbe%rana_eps_r, tau, dpop, rnet)
+                             sbe%rana_eps_r, tau, dpop, rnet, &
+                             e_src_lo=sbe%ring_e_lo, e_src_hi=sbe%ring_e_hi)
         call ring_ledger(sbe, 4, nba, nk, ic, eval_all, dpop)
         call ring_apply_dpop(sbe, gs, U_loc, dpop, tau)
     end if
