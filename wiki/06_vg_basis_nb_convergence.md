@@ -2,6 +2,8 @@
 
 Standalone specification for checking that the number of bands carried into the velocity-gauge (VG) dynamics is sufficient. This is a **separate** correctness axis from the plane-wave cutoff and is **not** fixed by rotating into the Houston basis. Belongs in the long-term reference because the band budget must be re-verified for every new material and every new driver wavelength.
 
+> **⚠️ Read §6 first (measured, 2026-07-23).** At sub-gap THz the real-carrier "over-generation" is a **time-step artifact**, not a band-count problem: with `dt` converged (≤ 0.05 fs for Si) the clean VG reproduces the < 10¹⁶ theory bound and is **flat from N_b ≈ 8**. Always converge `dt` on the **non-adiabatic** measure (`nex_proj`/`nex_dref`) before running an N_b study — an unconverged `dt` fakes a basis-insufficiency.
+
 > **Implementation in this fork.**
 > - Primitives (pure, unit-tested): `vg_eta_admixture`, `vg_trunc_shift2`, `vg_conv_error`, `vg_ptop_exceeds` in [`../src/ssbe/sbe_superres_ssbe.f90`](../src/ssbe/sbe_superres_ssbe.f90).
 > - Test: [`../tests/test_vg_basis_nb.f90`](../tests/test_vg_basis_nb.f90) verifies the three criteria plus the Hylleraas-Undheim-MacDonald interlacing/upper-bound theorem and the 2nd-order truncation-shift formula (with a self-contained Jacobi eigensolver — no LAPACK).
@@ -104,7 +106,99 @@ Compare to gaps:
 
 ---
 
-## 6. References
+## 6. MEASURED CASE STUDY — the sub-gap-THz "over-generation" is a **dt artifact**, not a band-count problem (2026-07-23)
+
+A clean-velocity-gauge convergence study on **Si primitive, driven by the maintainer's
+DAST optical-rectification THz transient** (peak E ≈ 100 kV/cm, 3.3 THz, Keldysh
+γ_K ≈ 5.7 — deep sub-gap, where theory expects real carriers **< 10¹⁶ cm⁻³**),
+`5×5×5`, no dissipation. This settled a live puzzle: the frozen-window VG appeared to
+over-generate real carriers by ~10³ at this working point. **It does not — the coherent
+kernel reproduces the theory bound once `dt` is converged.**
+
+**Method note.** The intended knob `nstate_sbe < nstate` for shrinking the coherent basis
+is **currently broken** (heap overflow: `dt_evolve_bloch_cf4` copies the `(nstate,nstate)`
+`gs%p_tm_matrix` into a `(nstate_sbe,nstate_sbe)` buffer — see the decisions log). So each
+N_b point here is a **separate ground state** regenerated at that band count (the EPM's
+lowest-N_b eigenpairs are truncation-invariant, so this is exactly criterion (b)).
+
+### (i) N_b convergence is meaningless at an unconverged dt
+
+![N_b convergence, dt=0.25 vs dt=0.05](figures/vg_nb_convergence_dt.png)
+
+At **dt = 0.25 fs** the non-adiabatic real-carrier density `nex_proj` **climbs** with N_b
+(×2 → ×80 theory) and "converges" to a **wrong, dt-inflated** value — the classic symptom
+that would send you to add ever more bands (the §4 THz worry). At **dt = 0.05 fs** it is
+**flat from N_b ≈ 8** (×1.4) — the added bands are not needed. The dt-error was filling
+each newly-available band, *faking* a basis-insufficiency.
+
+### (ii) Refine dt at fixed N_b: the real measure collapses, the dressing does not
+
+| dt [fs] | `nex_proj` (real, non-adiabatic) | × theory | diabatic `nelec` (dressing) |
+|---|---|---|---|
+| 0.25 | 5.5×10¹⁷ | **55** | 2.554×10²¹ |
+| 0.10 | 1.5×10¹⁶ | 1.5 | 2.556×10²¹ |
+| 0.05 | 1.3×10¹⁶ | 1.3 | 2.555×10²¹ |
+| 0.02 | 1.4×10¹⁶ | 1.4 | 2.555×10²¹ |
+
+![dt convergence and time series](figures/vg_dt_convergence.png)
+
+`nex_proj` falls **×40** and converges to ≈ 1.3–1.4×10¹⁶ ≈ the theory bound (residual ×1.3
+is the coarse `5³` grid / finite N_b / genuine small multiphoton). The **diabatic `nelec`
+is dt-flat to 4 digits** — it is the reversible A²(t) dressing (~2.5×10²¹), 700× larger and
+dt-insensitive. The right panel shows the mechanism: at dt = 0.25 the spurious population
+**accumulates over the pulse**; at dt ≤ 0.1 it tracks the theory bound.
+
+### Three lessons (add to the criteria in §3)
+
+1. **Judge convergence on the non-adiabatic real-carrier measure** (`nex_proj`/`nex_dref`
+   in `_sbe_nex_nonad.data`), **never on the diabatic `nelec`/`nhole`** — the latter is
+   dominated by the reversible dressing and is dt-flat, so it will falsely certify
+   "dt-converged" while the real excitation is off by ×40.
+2. **Criterion (b) N_b-convergence MUST be run at a converged `dt` first.** An
+   under-resolved `dt` pumps the non-adiabatic sector into every band you add, so `nex`
+   rises with N_b and mimics a band-budget problem. Converge `dt` on the real-carrier
+   measure, *then* converge N_b.
+3. **Time-step for the real measure:** for Si's ~14 eV band spread use **`dt ≤ 0.05 fs`**
+   (`0.1` is ~10 % high; `0.25` is ×40). The CF4 stays **unitary** — electrons = 8.000 at
+   every `dt` — so the failure is invisible in the trace and in the diabatic density; it is
+   a phase-accuracy failure of the fast interband coherences (5.3 rad/step at dt = 0.25 fs
+   × 14 eV). This is a *separate* axis from `dt` for the absorbed **energy** (wiki/11 §3c).
+
+> **Reproduce:** `samples/exercise_x08_Si_primitive_hhg_basis` GS at several `nstate`, clean
+> `&sbe`, a sub-gap THz field, and scan `dt` — read `_sbe_nex_nonad.data` col 2/3, not
+> `_sbe_nex.data`.
+
+### (iv) With dissipators ON, the over-generation is a SEPARATE, dt-DIVERGENT pathology
+
+The clean-kernel `dt` cure above does **not** carry over to the dissipative run — the
+opposite is true. Same field/material, `4³`, `nstate=16`, frozen window, full ring
+(e-ph + acoustic + II + Auger), to 1000 fs:
+
+| `dt` [fs] | `nex_proj` (diss ON) | cumulative ring-Auger [e⁻/cell] |
+|---|---|---|
+| 0.25 | 1.3×10²² (×10⁶) | −59 |
+| 0.05 | 3.6×10²² (×10⁶) | **−24 900** |
+
+![dissipator dt-divergence](figures/vg_dissipator_dt_divergence.png)
+
+The green curve is the **clean VG at the same dt=0.05** (~10¹⁶ = physical). Turning the
+dissipators on pumps `nex_proj` to **~10²² at any `dt`, and refining `dt` makes it worse**
+(nex ~×2, Auger churn **×420**); electrons = 8.000 throughout (trace is conserved — this is
+*not* a trace leak). **Mechanism:** the ring/frozen-sector CP-decoherence realifies the
+reversible A²(t) dressing **per scattering event** (wiki/00, the "collision-assisted
+generation" note), and that per-step realification is **not rate-normalized (∝ dt)** — so
+more steps (smaller `dt`) ⇒ more spurious real carriers ⇒ more Auger (∝ n²).
+
+**Consequence.** Two independent over-generation layers with *opposite* `dt` behaviour:
+the **coherent** one is cured by `dt ≤ 0.05 fs`; the **dissipative** one is a separate bug
+that `dt` cannot fix (it worsens it). The real fix must exclude the reversible dressing from
+the collision source (the Option-A direction, `yn_sbe_dressed_ref`) **and/or** rate-normalize
+the per-step realification so the ledger converges as `dt → 0`. Until then, sub-gap dissipative
+absolute yields are unreliable regardless of `dt` — see the wiki/04 flag box.
+
+---
+
+## 7. References
 - Variational upper-bound / interlacing of truncated eigenvalues: E. A. Hylleraas & B. Undheim, Z. Phys. 65, 759 (1930); J. K. L. MacDonald, Phys. Rev. 43, 830 (1933).
 - Velocity-gauge band-coupling and the need for many bands / gauge care: M. S. Wismer & V. S. Yakovlev, Phys. Rev. B 97, 144302 (2018); L. Yue & M. B. Gaarde, J. Opt. Soc. Am. B 39, 535 (2022).
 - Kane momentum matrix element / E_P for GaAs: E. O. Kane, J. Phys. Chem. Solids 1, 249 (1957); E_P ~ 25.7 eV, I. Vurgaftman, J. R. Meyer, L. R. Ram-Mohan, J. Appl. Phys. 89, 5815 (2001).
