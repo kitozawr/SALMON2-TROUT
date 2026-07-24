@@ -50,7 +50,12 @@
   al_vec2(1:3) = 2.7146791d0, 0.0000000d0, 2.7146791d0
   al_vec3(1:3) = 2.7146791d0, 2.7146791d0, 0.0000000d0
   nelec  = 8
-  nstate = 20                          ! MUST match the GS step (VG headroom: 16 conduction bands)
+  ! nb (BAND BUDGET): MUST match the GS step. 20 = 4 valence + 16 conduction of
+  ! VG headroom, enough for a weak/moderate THz field. A STRONGER field pushes
+  ! population higher -> raise nstate (1 MV/cm ~ 24-32, >=3 MV/cm ~ 40-48) and
+  ! re-verify P_top < 1e-3 + nex(nstate) plateau (wiki/06 §7). Regenerate the GS
+  ! at the same nstate whenever you change it.
+  nstate = 20
 /
 
 &kgrid
@@ -58,8 +63,13 @@
 /
 
 &tgrid
-  dt = 0.1d0                           ! reduce (0.02-0.05) for accuracy vs the ~14 eV band spread
-  nt = 600                             ! 60 fs template; raise for the long (ps) bleaching run
+  dt = 0.05d0                          ! STEP: only dt <= 0.05 fs converges the NON-ADIABATIC
+                                       ! nex_proj measure; a coarser dt over-generates the
+                                       ! dressed population (dt-artifact, wiki/06 §6). Converge
+                                       ! dt on nex_proj, NOT the diabatic nelec (which hides it).
+                                       ! 0.25 fs is OK for current-only observables.
+  nt = 1200                            ! 60 fs template. For a long (ps) field, run only PART of
+                                       ! it -- 0.05 fs x full ps = 1e4+ steps (cluster job).
 /
 
 &emfield
@@ -87,4 +97,15 @@
   sbe_decoh_tau_m_fs       = 30.0d0    ! ... with tau_m = 30 fs (both <= 0 to disable)
   yn_sbe_bgr_threshold     = 'y'       ! BGR threshold shift (Coulomb HF is OFF below)
   yn_sbe_coulomb           = 'n'       ! Sigma^HF mean-field: if 'y', MUST set bgr='n' (guard aborts)
+  ! --- MASK (cost-preserving frozen window) --------------------------------
+  yn_sbe_full_dressed      = 'y'       ! full-basis dressed projection = CORRECT (default). The
+                                       ! dissipators/measure use ALL nstate bands, so a narrow
+                                       ! window below does NOT truncate the physics -- it only
+                                       ! skips dissipator SOURCES outside the window (e-ph AND
+                                       ! the 2-particle II/Auger), restoring O(nk^2*n_active) cost
+                                       ! (wiki/11 §3d: measured 1.4-1.8x, nex within ~0-14%).
+  frozen_core_threshold_ev = -100.0d0  ! active window = [Fermi+core, Fermi+free] eV. Defaults
+  frozen_free_threshold_ev =  100.0d0  ! (-100/+100) freeze nothing (all-active). Narrow to e.g.
+                                       ! -10/+10 to engage the mask; WIDEN for stronger fields
+                                       ! (a too-tight window drops real II sources -- wiki/06 §7).
 /
