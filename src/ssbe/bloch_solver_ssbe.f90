@@ -2823,6 +2823,7 @@ subroutine ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
     complex(8) :: rad(sbe%n_active_bands, sbe%n_active_bands)
     complex(8) :: Dk(sbe%n_active_bands, sbe%n_active_bands)
     complex(8) :: cvec(sbe%n_active_bands), ctmp
+    complex(8) :: rho0(sbe%n_active_bands, sbe%n_active_bands)  ! dressed background (Houston basis), Option A coherence sector
     real(8), allocatable :: fold_loc(:,:)
     logical, save :: limiter_printed = .false.
     real(8), parameter :: dtol = 1d-14
@@ -2922,11 +2923,33 @@ subroutine ring_apply_dpop(sbe, gs, U_loc, dpop, tau, gout)
             end if
             rad(a,a) = cmplx(fnew, 0d0, 8)
         end do
-        do b = 1, nba
-            do a = 1, nba
-                if (a /= b) rad(a,b) = rad(a,b) * damp(a) * damp(b)
+        ! Option A, COHERENCE sector (снятие одёжки): damp toward the reversible
+        ! dressed background rho0(a,b) = occ sum_{v<=nv} conj(W(v,a)) W(v,b) -- the
+        ! field-free GS carried into the instantaneous dressed (Houston) basis --
+        ! instead of toward 0. The static dressed_ref only subtracted the DIAGONAL
+        ! of rho0 (f0_a) from the population measure; the reversible dressing lives
+        ! equally in the OFF-DIAGONAL coherences, and damping those realifies it
+        ! (the dominant, dt-divergent fabrication -- wiki/06 sec.6-iv). Damping the
+        ! EXCESS coherence rad-rho0 preserves the reversible dressing exactly:
+        !   rho_ab -> rho0_ab + (rho_ab - rho0_ab) damp_a damp_b.
+        ! rho0 is Hermitian PSD with |rho0_ab|^2 <= f0_a f0_b, A->0 => W->1 =>
+        ! rho0 -> diag(occ,0) (off-diagonals vanish) => byte-identical to the old
+        ! damp-to-0 path. Trace untouched (diagonal not modified here).
+        if (sbe%flag_dressed_ref) then
+            call ZGEMM('C','N', nba,nba, min(sbe%nv_act,nba), &
+                       cmplx(sbe%occ_max,0d0,8), W,nba, W,nba, cmplx(0d0,0d0,8), rho0,nba)
+            do b = 1, nba
+                do a = 1, nba
+                    if (a /= b) rad(a,b) = rho0(a,b) + (rad(a,b) - rho0(a,b)) * damp(a) * damp(b)
+                end do
             end do
-        end do
+        else
+            do b = 1, nba
+                do a = 1, nba
+                    if (a /= b) rad(a,b) = rad(a,b) * damp(a) * damp(b)
+                end do
+            end do
+        end if
         ! ---- collisional-memory dephasing (wiki/10 sec. 8.6) -----------------
         ! Replaces the instantaneous exp(-(g_a+g_b) tau/2): the Houston-frame
         ! coherence drives auxiliary fields z_j (one per kernel line, decay
