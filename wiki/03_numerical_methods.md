@@ -166,7 +166,7 @@ $H_{VG}=\varepsilon_n + \mathbf A(t)\cdot\boldsymbol\pi$. Two ingredients:
 * the bare window span $W = E_{\max}({\rm CB2}) - E_{\min}({\rm VB{-}1})$ —
   for the Si/GaAs gap-edge quartet $W \approx 11\text{–}12$ eV
   ($0.42\text{–}0.45$ Ha);
-* the peak velocity-gauge coupling $\Omega = A_{\rm peak}\,\max|\pi_{vc}|$,
+* the peak velocity-gauge coupling $\Omega = A_{\rm peak}\max|\pi_{vc}|$,
   with $A_{\rm peak} = F_{\rm peak}/\omega$. At $F = 10$ MV/cm
   ($1.94\times10^{-3}$ a.u.) and $\hbar\omega = 0.125$ eV:
   $A_{\rm peak} \approx 0.42$ a.u., $|\pi_{vc}|\approx0.3\text{–}0.5$ a.u.
@@ -177,8 +177,8 @@ The dressed span $\widetilde W = \sqrt{W^2 + 4\Omega^2} \approx 0.55\text{–}0.
 Ha at 10 MV/cm. The practical 4th-order phase rule:
 
 $$
-\boxed{\;dt \lesssim \frac{0.2}{\widetilde W}\ \ \text{(populations/valley
-movies)},\qquad dt \lesssim \frac{0.05}{\widetilde W}\ \ \text{(currents/HHG)}\;}
+\boxed{dt \lesssim \frac{0.2}{\widetilde W}\ \ \text{(populations/valley
+movies)},\qquad dt \lesssim \frac{0.05}{\widetilde W}\ \ \text{(currents/HHG)}}
 $$
 
 **For 2V+2C Si/GaAs at fields up to 10 MV/cm this gives:**
@@ -197,11 +197,11 @@ already gives ≥ 275 points/cycle.
 
 **3. Houston-basis rotation (subordinate, but real).** The dissipators act in
 the instantaneous eigenbasis; its rotation rate peaks at swept anticrossings,
-$\dot\theta \sim F\,|\pi_{vc}|/\Delta E_{\rm gap}$ — at 10 MV/cm and a 1.4 eV
+$\dot\theta \sim F|\pi_{vc}|/\Delta E_{\rm gap}$ — at 10 MV/cm and a 1.4 eV
 gap this is ~0.016 rad/a.u.t, so the span rule (≥25× stricter) covers it.
 
 **4. Collision flux — watch the CPTP limiter.** Each ring channel transfers
-$f\,(1-e^{-\Gamma dt})$ against step-START populations; many independent
+$f(1-e^{-\Gamma dt})$ against step-START populations; many independent
 quadruples can pile onto one sink within a long step. The global CPTP limiter
 keeps this exactly trace-conserving by scaling the whole transfer field, and
 prints once:
@@ -214,7 +214,7 @@ prints once:
 **capped**, not resolved — multiply `dt` by roughly the reported `s` to
 restore faithful rates (e.g. the 0.5 fs step that motivated the limiter
 reported `s = 0.118`, i.e. a ~8× too-large step for that flux). For faithful
-linearized channel rates keep $\Gamma_{\max}\,dt \lesssim 0.1$.
+linearized channel rates keep $\Gamma_{\max}dt \lesssim 0.1$.
 
 **Strong-field sanity check (basis, not dt):** with only 2 CB unfrozen, verify
 the VG basis-sufficiency monitor stays quiet (`grep "basis edge" *_rt.log`

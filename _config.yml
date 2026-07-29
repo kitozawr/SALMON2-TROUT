@@ -1,0 +1,94 @@
+# GitHub Pages configuration -- renders README.md + the wiki/ folder as a site.
+#
+# The docs are plain relative-linked Markdown (README -> wiki/xx.md, wiki -> xx.md,
+# figures/*.png), so the site is built with the GitHub Pages plugin set that
+# understands exactly that layout -- no front matter and no link rewriting is
+# needed in the source files themselves:
+#   jekyll-optional-front-matter : render .md files that have no YAML front matter
+#   jekyll-readme-index          : README.md becomes the site index page
+#   jekyll-relative-links        : rewrite relative *.md links to their page URLs
+#   jekyll-titles-from-headings  : use each file's first H1 as the page title
+# All four ship with the github-pages gem used by actions/jekyll-build-pages.
+
+title: SALMON2-TROUT
+description: >-
+  Fork of SALMON 2.0.0 — velocity-gauge semiconductor Bloch equations with a
+  CPTP (GKLS) open-system dissipator stack.
+theme: jekyll-theme-cayman
+
+# Project site served at https://kitozawr.github.io/SALMON2-TROUT/ -- baseurl is
+# set explicitly so the theme CSS, the figures and the rewritten wiki links all
+# resolve under the /SALMON2-TROUT/ prefix (verified with a local jekyll build).
+url: "https://kitozawr.github.io"
+baseurl: "/SALMON2-TROUT"
+
+plugins:
+  - jekyll-optional-front-matter
+  - jekyll-readme-index
+  - jekyll-relative-links
+  - jekyll-titles-from-headings
+
+# The docs carry real LaTeX ($…$ inline, $$…$$ display). github.com renders that
+# natively, a Jekyll site does NOT -- so MathJax is loaded by the `mathjax`
+# layout below, applied to every page. `math_engine: null` stops kramdown from
+# pre-converting math into MathJax-v2 <script type="math/tex"> tags (which
+# MathJax v3 ignores); the $$…$$ is passed through verbatim for MathJax to find.
+kramdown:
+  math_engine: null
+
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: mathjax
+
+relative_links:
+  enabled: true
+  collections: false
+
+optional_front_matter:
+  remove_originals: true
+
+readme_index:
+  enabled: true
+  remove_originals: false
+
+titles_from_headings:
+  enabled: true
+  strip_title: true
+
+# Only the docs are published. Everything below is source/build material that
+# Jekyll would otherwise copy verbatim into the site.
+exclude:
+  - src
+  - build
+  - samples
+  - tests
+  - testsuites
+  - utility
+  - tools
+  - platforms
+  - cmakefiles
+  - gnu_makefiles
+  - CMakeFiles
+  - __pycache__
+  - CMakeLists.txt
+  - Makefile
+  - configure.py
+  - band_field_coupling.py
+  - epm_cds_primitive.py
+  - epm_gaas_primitive.py
+  - epm_gaas_reference.py
+  - epm_graphene.py
+  - epm_graphene_primitive.py
+  - epm_io.py
+  - epm_si_primitive.py
+  - epm_si_reference.py
+  - epm_wurtzite_cds.py
+  - plot_sbe_results.py
+  - plot_tddft_results.py
+  - si_three_photon_isosurfaces.py
+  - zener_tunneling_estimate.py
+  - LICENSE.THIRD-PARTY
+  - ACKNOWLEDGEMENTS
+  - NOTICE

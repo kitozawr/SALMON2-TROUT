@@ -1,0 +1,38 @@
+---
+layout: default
+---
+
+{{ content }}
+
+<!--
+  MathJax v3. Applied to every page via the `defaults` block in _config.yml.
+  Needed because a Jekyll/GitHub Pages site does NOT render LaTeX on its own
+  (github.com's Markdown viewer does, which is why the docs look fine there).
+
+  processEscapes lets \$ be a literal dollar sign; skipHtmlTags keeps MathJax
+  out of code blocks so Fortran/shell snippets containing $ or _ are untouched.
+-->
+<script>
+  window.MathJax = {
+    tex: {
+      inlineMath:  [['$', '$'], ['\\(', '\\)']],
+      displayMath: [['$$', '$$'], ['\\[', '\\]']],
+      processEscapes: true,
+      processEnvironments: true
+    },
+    options: {
+      skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+      ignoreHtmlClass: 'highlight|highlighter-rouge'
+    }
+  };
+</script>
+<script id="MathJax-script" async
+        src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+<style>
+  /* Long equations and wide tables should scroll inside the page, never make
+     the whole document scroll sideways. */
+  mjx-container[jax="CHTML"][display="true"] { overflow-x: auto; overflow-y: hidden; }
+  .main-content table { display: block; overflow-x: auto; max-width: 100%; }
+  .main-content img { max-width: 100%; height: auto; }
+</style>

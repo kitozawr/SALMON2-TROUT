@@ -215,11 +215,11 @@ Suggested manuscript framing (once option A is validated):
 Single-electron two-band system + bosonic bath, linear diagonal coupling
 [B25 Eq. (1)]:
 
-$$H = -\tfrac12 E(K_t,t)\,\sigma_z + \tfrac12\hbar\Omega(K_t,t)\,\sigma_x
+$$H = -\tfrac12 E(K_t,t)\sigma_z + \tfrac12\hbar\Omega(K_t,t)\sigma_x
 + \sum_q \hbar\omega_q b_q^\dagger b_q + \sigma_z \sum_q g_q (b_q + b_q^\dagger)$$
 
 with $K_t = K + eA(t)/\hbar$, generalized Rabi frequency
-$\Omega = (2e/\hbar)\,d(K_t)E(t)$, transition dipole $d$ and gap $E$ at the
+$\Omega = (2e/\hbar)d(K_t)E(t)$, transition dipole $d$ and gap $E$ at the
 shifted momentum. The bath couples **only diagonally** (pure dephasing — no
 direct bath-driven interband transitions); ionization is still affected
 because laser and bath dynamics couple. After a polaron transformation +
@@ -236,18 +236,18 @@ appears downstream is $(g_q/\hbar\omega_q)^2$.
 
 Second-order Dyson expansion, bath traced out ⇒ [B25 Eqs. (3)–(4)]:
 
-$$n_c(K,t) = \tfrac12\,\mathrm{Re}\int_{-\infty}^{t}\! dt_1
-\int_{-\infty}^{t_1}\! dt_2\; \Omega^*(K_{t_1},t_1)\,\Omega(K_{t_2},t_2)\,
-\exp\big[\,i S(t_1,t_2) + C(t_1-t_2)\,\big],\qquad
-n_c(t)=\int_{BZ} n_c(K,t)\,dK$$
+$$n_c(K,t) = \tfrac12\mathrm{Re}\int_{-\infty}^{t}\! dt_1
+\int_{-\infty}^{t_1}\! dt_2 \Omega^*(K_{t_1},t_1)\Omega(K_{t_2},t_2)
+\exp\big[i S(t_1,t_2) + C(t_1-t_2)\big],\qquad
+n_c(t)=\int_{BZ} n_c(K,t)dK$$
 
 with the dynamic-Stark-shifted action
-$S(t_1,t_2)=\int_{t_2}^{t_1} E_s(K_\tau,\tau)\,d\tau/\hbar$,
+$S(t_1,t_2)=\int_{t_2}^{t_1} E_s(K_\tau,\tau)d\tau/\hbar$,
 $E_s=\sqrt{E^2+|\hbar\Omega|^2}$. **ALL environment influence is in the bath
 correlation function** [B25 Eq. (5)]:
 
-$$C(t_1-t_2) \approx \int_{-\infty}^{\infty} J(\omega)\Big[\, i\sin\omega(t_1{-}t_2)
-- \big(1-\cos\omega(t_1{-}t_2)\big)\coth\tfrac{\hbar\omega}{2k_BT} \Big]\,d\omega$$
+$$C(t_1-t_2) \approx \int_{-\infty}^{\infty} J(\omega)\Big[ i\sin\omega(t_1{-}t_2)
+- \big(1-\cos\omega(t_1{-}t_2)\big)\coth\tfrac{\hbar\omega}{2k_BT} \Big]d\omega$$
 
 - $e^{C(\tau)}$ does **not** factorize across time steps — this pair-time
   structure IS the non-Markovianity ("the future evolution depends on the past
@@ -264,15 +264,15 @@ $$C(t_1-t_2) \approx \int_{-\infty}^{\infty} J(\omega)\Big[\, i\sin\omega(t_1{-}
 - Ionization ratio $\eta = n_c(j_o\neq0)/n_c(j_o=0)|_{t=\infty}$ [B25 Eq. (6)].
 
 **Normalization (ours, anchored):** with the letter's $D$-operator convention
-the continuum weight is $W(\omega) = \sum_q (g_q/\hbar\omega_q)^2\,
+the continuum weight is $W(\omega) = \sum_q (g_q/\hbar\omega_q)^2
 \delta(\omega-\omega_q)$ extended oddly; we implement
-$W(\omega)=j_o\,g(|\omega|)/\omega$ with $g_{\rm ohmic}=e^{-\omega/\omega_c}$,
+$W(\omega)=j_og(|\omega|)/\omega$ with $g_{\rm ohmic}=e^{-\omega/\omega_c}$,
 $g_{\rm debye}=\omega_c^2/(\omega^2+\omega_c^2)$. For ANY cutoff with
 $g(0)=1$ this reproduces the printed high-T anchor
 $T_2=\hbar/(2\pi k_BTj_o)$ **exactly** (test_bath_corr), plus the closed
-forms $\mathrm{Im}\,C_{\rm ohmic}=2j_o\arctan(\omega_c t)$,
-$\mathrm{Re}\,C_{\rm ohmic}(T{=}0)=-j_o\ln(1+\omega_c^2t^2)$,
-$\mathrm{Im}\,C_{\rm debye}=\pi j_o(1-e^{-\omega_c t})$. The supplement's own
+forms $\mathrm{Im}C_{\rm ohmic}=2j_o\arctan(\omega_c t)$,
+$\mathrm{Re}C_{\rm ohmic}(T{=}0)=-j_o\ln(1+\omega_c^2t^2)$,
+$\mathrm{Im}C_{\rm debye}=\pi j_o(1-e^{-\omega_c t})$. The supplement's own
 Gaussian/Shifted-Gaussian/UDB definitions are NOT implemented (no source).
 
 ### 6.3 The letter's results (what a correct implementation must reproduce)
@@ -409,12 +409,12 @@ Model: Caldeira–Leggett bath, coupling H_sb = −f(x)·Σc_i x_i, plus an
 NZ projection to 2nd order in the coupling λ gives the time-nonlocal master
 equation [MT99 Eq. (13′)]
 
-$$\dot\rho_s(t) = L_s^{\rm eff}(t)\rho_s(t) + \int_{-\infty}^{t}\! K(t,t')\rho_s(t')\,dt',$$
+$$\dot\rho_s(t) = L_s^{\rm eff}(t)\rho_s(t) + \int_{-\infty}^{t}\! K(t,t')\rho_s(t')dt',$$
 
-$$K(t,t') = \lambda^2 L^-\big(a(t{-}t')\,\mathcal{T}e^{\int_{t'}^{t}L_s}L^-
-+ b(t{-}t')\,\mathcal{T}e^{\int_{t'}^{t}L_s}L^+\big),$$
+$$K(t,t') = \lambda^2 L^-\big(a(t{-}t')\mathcal{T}e^{\int_{t'}^{t}L_s}L^-
++ b(t{-}t')\mathcal{T}e^{\int_{t'}^{t}L_s}L^+\big),$$
 
-with $L^-=-i[f,\cdot\,]$, $L^+=[f,\cdot\,]_+ -2\chi$ (χ = thermal mean of f),
+with $L^-=-i[f,\cdot]$, $L^+=[f,\cdot]_+ -2\chi$ (χ = thermal mean of f),
 and the bath correlation function c(t) = a(t) − i b(t) [MT99 Eq. (8)]. Two
 essential structural facts: **the field enters the memory kernel** (bath
 influence is modified by strong fields), and the kernel is nonlocal — naive
