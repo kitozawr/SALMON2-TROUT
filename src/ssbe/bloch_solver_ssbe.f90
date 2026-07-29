@@ -1229,14 +1229,46 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
             ' at (', gs%kpoint(1, ik_gamma), gs%kpoint(2, ik_gamma), gs%kpoint(3, ik_gamma), &
             ') [reduced]'
         write(*, '(a, i4, a, i4)') '  n_active_bands         = ', sbe%n_active_bands, ' / ', sbe%nb
+        ! What 'active' means depends on yn_sbe_full_dressed. With the default
+        ! 'y' the dressed PROJECTION is truncation-free -> is_active is forced
+        ! all-true (n_active_bands = nb) and a narrowed frozen window survives
+        ! ONLY as the ring SOURCE mask [ring_e_lo, ring_e_hi]. Printing just
+        ! is_active then shows "active = T" for every band and hides the window
+        ! entirely -- so report the source mask separately (it is the thing that
+        ! actually skips work).
+        if (sbe%ring_mask_on) then
+            write(*, '(a)') '  yn_sbe_full_dressed = y  -> is_active is ALL bands by design'
+            write(*, '(a)') '     (the dressed projection must be truncation-free; wiki/06 sec.6).'
+            write(*, '(a,f8.2,a,f8.2,a)') '  ring SOURCE mask (cost only) = [', &
+                sbe%ring_e_lo * au_ev, ',', sbe%ring_e_hi * au_ev, '] eV:'
+            write(*, '(a,i4,a,i4,a)') '     dissipator sources are skipped outside it -- ', &
+                count(gs%eigen(1:sbe%nb, ik_gamma) >= sbe%ring_e_lo .and. &
+                      gs%eigen(1:sbe%nb, ik_gamma) <= sbe%ring_e_hi), ' / ', sbe%nb, &
+                ' bands in-window at Gamma.'
+            write(*, '(a)') '     NOTE: the runtime mask tests the INSTANTANEOUS Houston'
+            write(*, '(a)') '     eigenvalue per k, so the Gamma count below is indicative only.'
+        end if
         write(*, '(a)') '----------------------------------------'
-        write(*, '(a)') '  Band energies (at Gamma) relative to Fermi level:'
+        if (sbe%ring_mask_on) then
+            write(*, '(a)') '  Band energies (at Gamma) relative to Fermi level'
+            write(*, '(a)') '  [active = in the dressed projection; src = usable as a dissipator source]:'
+        else
+            write(*, '(a)') '  Band energies (at Gamma) relative to Fermi level:'
+        end if
 
         do ib = 1, min(sbe%nb, 100)  ! Print first 100 bands
             eigen_ev = gs%eigen(ib, ik_gamma) * au_ev
-            write(*, '(a, i3, a, f10.4, a, f8.2, a, l1)') &
-                '    Band ', ib, ': E = ', eigen_ev, ' eV, E-E_F = ', &
-                (eigen_ev - fermi_energy_ev), ' eV, active = ', sbe%is_active(ib)
+            if (sbe%ring_mask_on) then
+                write(*, '(a, i3, a, f10.4, a, f8.2, a, l1, a, l1)') &
+                    '    Band ', ib, ': E = ', eigen_ev, ' eV, E-E_F = ', &
+                    (eigen_ev - fermi_energy_ev), ' eV, active = ', sbe%is_active(ib), &
+                    ', src = ', (gs%eigen(ib, ik_gamma) >= sbe%ring_e_lo .and. &
+                                 gs%eigen(ib, ik_gamma) <= sbe%ring_e_hi)
+            else
+                write(*, '(a, i3, a, f10.4, a, f8.2, a, l1)') &
+                    '    Band ', ib, ': E = ', eigen_ev, ' eV, E-E_F = ', &
+                    (eigen_ev - fermi_energy_ev), ' eV, active = ', sbe%is_active(ib)
+            end if
         end do
         
         if (sbe%nb > 100) write(*, '(a)') '    ... (more bands)'
