@@ -19,7 +19,7 @@ into the calculation directory (or use `-i DIR -o OUTDIR`) and run. It scans for
 * from `SYSNAME_sbe_rt.data`, the **optical conductivity**
   $\sigma(\omega)=J(\omega)/E(\omega)$ along the driven axis: a global Re/Im
   spectrum over 0–4 THz and a strongly-overlapped **short-time Fourier**
-  $\mathrm{Re}\sigma(\omega,t)$ map (Hann-windowed, hop = 1 sample by default).
+  $\mathrm{Re} \sigma(\omega,t)$ map (Hann-windowed, hop = 1 sample by default).
   Tune `--fmax-thz`, `--stft-window-fs`, `--stft-hop`; disable
   `--no-conductivity`. Resolving 0–4 THz needs a ps-scale run (it warns
   otherwise);
@@ -117,7 +117,7 @@ the data itself:
 
 2. **The cell is the Voronoi cell of the origin.** From `b_matrix` alone:
    * **3D wireframe** (`_bz_wireframe_3d`): take the 27 nearest reciprocal-lattice
-     points $\{i\mathbf b_1 + j\mathbf b_2 + k\mathbf b_3 : i,j,k\in\{-1,0,1\}\}$,
+     points $\{i \mathbf b_1 + j \mathbf b_2 + k \mathbf b_3 : i,j,k\in\{-1,0,1\}\}$,
      build their Voronoi diagram, and keep the ridges that bound the origin's
      cell — those polygons are the BZ faces, their edges the wireframe.
    * **2D silhouette** (`_bz_outline_2d`): the Bragg planes
@@ -216,7 +216,7 @@ folded maps is band-**folding**, not a matrix-element effect.
 
 ### `zener_tunneling_estimate.py` (GaAs — the TUNNELLING probe)
 Transverse-k-resolved vertical **Zener/Kane** probability
-$P_{\rm Kane}(k_\perp) = \exp(-Cm_r^{1/2}E_g^{3/2}/F)$ + linear **Landau–Zener**
+$P_{\rm Kane}(k_\perp) = \exp(-C m_r^{1/2}E_g^{3/2}/F)$ + linear **Landau–Zener**
 at genuine off-Γ avoided crossings, vs field; `--map2d` adds the 2-D transverse
 birth map $W(k_y,k_z)$ at $k_\parallel = 0$ (the injection "needle" FWHM at Γ,
 with the folded conduction geometry overlaid — the proof that diagonal SBE
@@ -225,7 +225,7 @@ weight sits at fold positions, not the injection blob).
 ### `si_three_photon_isosurfaces.py` (Si — the MULTIPHOTON probe)
 The power-law $I^N$ counterpart (different prefactor — *not* a tunnelling
 exponential): the N-photon direct rate
-$W_N(k) \sim I^N |M_N(k)|^2 g_{\rm FK}(E_{\rm dir}(k)-N\hbar\omega)$ on a 3-D BZ
+$W_N(k) \sim I^N |M_N(k)|^2  g_{\rm FK}(E_{\rm dir}(k)-N\hbar\omega)$ on a 3-D BZ
 grid — full LOPT ladder over all intermediate bands, exact polarization
 orientation-average (keeps O_h ⇒ IBZ-evaluated), **Franz–Keldysh broadening**
 $\hbar\theta = (F^2/2\mu)^{1/3}$ whose sub-edge Airy tail lets the below-edge

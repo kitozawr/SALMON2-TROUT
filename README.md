@@ -15,13 +15,13 @@ simulator for Optics and Nanoscience).
 Everything the solver propagates is one GKLS master equation per k-point,
 
 $$
-\partial_t \rho(\mathbf k) = -i\big[H_{VG}(\mathbf k,t) + \Sigma^{\rm HF}[\rho],\rho(\mathbf k)\big]
-+ \mathcal D_{\rm KZ} + \mathcal D_{\rm e\text{-}ph} + \mathcal D_{\rm II} + \mathcal D_{\rm Aug} + \mathcal D_{\rm ee},
+\partial_t \rho(\mathbf k)  =  - i\big[ H_{VG}(\mathbf k,t) + \Sigma^{\rm HF}[\rho] , \rho(\mathbf k)\big] +
+ \mathcal D_{\rm KZ} + \mathcal D_{\rm e\text{-}ph} + \mathcal D_{\rm II} + \mathcal D_{\rm Aug} + \mathcal D_{\rm ee},
 $$
 
 | term | physics | switch |
 |---|---|---|
-| $H_{VG} = \varepsilon_n\delta_{nm} + \mathbf A(t)\!\cdot\!\boldsymbol\pi_{nm}$ | velocity-gauge band dynamics; **all** Zener/multiphoton injection lives here | always on |
+| $H_{VG} = \varepsilon_n\delta_{nm} + \mathbf A(t) \cdot \boldsymbol\pi_{nm}$ | velocity-gauge band dynamics; **all** Zener/multiphoton injection lives here | always on |
 | $\Sigma^{\rm HF}$ | Coulomb exchange: dynamic gap + Rabi renormalization (Golde–Kira–Meier–Koch) | `yn_sbe_coulomb` |
 | $\mathcal D_{\rm KZ}$ | Kuhn–Zurek wave-packet dephasing (exactly CPTP Gaussian-kernel Hadamard map) | `sbe_decoh_*` |
 | $\mathcal D_{\rm e\text{-}ph}$ | cited per-material phonon tables; **inter-k through the ring** → true intervalley relaxation | `yn_sbe_eph` |

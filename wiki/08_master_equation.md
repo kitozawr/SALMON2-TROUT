@@ -21,12 +21,12 @@ The dynamical object is the **one-particle reduced density matrix in the fixed
 (field-free) Bloch band basis**, one matrix per crystal-momentum grid point:
 
 $$
-\rho_{nm}(\mathbf k, t) = \langle \hat c^\dagger_{m\mathbf k}\hat c_{n\mathbf k}\rangle,
+\rho_{nm}(\mathbf k, t) = \langle \hat c^\dagger_{m\mathbf k} \hat c_{n\mathbf k}\rangle,
 \qquad n,m = 1\ldots N_b,\quad \mathbf k \in \text{MP grid},
 $$
 
 with the equilibrium initial condition $\rho_{nm}(\mathbf k,0)=\delta_{nm} f^0_n$,
-$f^0_n \in \{0,\texttt{occ}\}$, where $\texttt{occ} = 2$ (scalar) or $1$
+$f^0_n \in \{0, \texttt{occ}\}$, where $\texttt{occ} = 2$ (scalar) or $1$
 (spinor, `yn_sbe_spinor='y'`). Diagonal elements are band populations,
 off-diagonals are interband coherences (microscopic polarizations).
 
@@ -35,11 +35,11 @@ quantum master equation, k-point by k-point, with the nonlocal channels coupling
 the k-points through gathered quantities:
 
 $$
-\boxed{
-\partial_t \rho(\mathbf k) =
-\underbrace{-i\big[H_{VG}(\mathbf k,t) + \Sigma^{\rm HF}[\rho](\mathbf k,t),\rho(\mathbf k)\big]}_{\text{coherent (unitary) part, §1–§2}}
-+ \sum_{c} \mathcal D_c[\rho](\mathbf k)
-}
+\boxed{ 
+\partial_t \rho(\mathbf k)  = 
+\underbrace{- i\big[ H_{VG}(\mathbf k,t)  +  \Sigma^{\rm HF}[\rho](\mathbf k,t) , \rho(\mathbf k)\big]}_{\text{coherent (unitary) part, §1–§2}} +
+ \sum_{c} \mathcal D_c[\rho](\mathbf k)
+ }
 $$
 
 where the sum runs over the enabled CPTP dissipation channels $c$:
@@ -58,7 +58,7 @@ inside the commutator (§2); the band-gap renormalization
 (`yn_sbe_bgr_threshold`) is a *parameter modifier* of $\mathcal D_{\rm II}$
 (§4.3.4) and is **mutually exclusive** with $\Sigma^{\rm HF}$ (§2.3).
 
-Trace convention: $N_e = \sum_{\mathbf k} w_{\mathbf k}\mathrm{Tr}\rho(\mathbf k)$
+Trace convention: $N_e = \sum_{\mathbf k} w_{\mathbf k} \mathrm{Tr} \rho(\mathbf k)$
 with MP weights $w_{\mathbf k}=1/N_k$ is conserved **exactly** by every term above
 (the unitary part trivially; each $\mathcal D_c$ by construction — the per-channel
 invariants are tabulated in §6).
@@ -83,8 +83,8 @@ and with the crystal momentum **fixed on the grid** (this is the defining proper
 of the velocity gauge — no moving grid), the matrix propagated is
 
 $$
-\big(H_{VG}\big)_{nm}(\mathbf k,t) = \varepsilon_n(\mathbf k)\delta_{nm}
-+ \mathbf A(t)\cdot \boldsymbol\pi_{nm}(\mathbf k),
+\big(H_{VG}\big)_{nm}(\mathbf k,t) = \varepsilon_n(\mathbf k) \delta_{nm} +
+ \mathbf A(t)\cdot \boldsymbol\pi_{nm}(\mathbf k),
 $$
 
 where the scalar $\tfrac12A^2(t)$ is a global (k- and band-independent) phase and
@@ -99,7 +99,7 @@ $E_n(\mathbf k + \mathbf A) \approx E_a$.
 
 $$
 \boldsymbol\pi_{nm}(\mathbf k) = \mathbf p_{nm}(\mathbf k) + \big(\hat v_{\rm NL}\big)_{nm}(\mathbf k),
-\qquad \hat v_{\rm NL} = -i[\hat{\mathbf r}, \hat V_{\rm NL}].
+\qquad \hat v_{\rm NL} = - i [\hat{\mathbf r}, \hat V_{\rm NL}].
 $$
 
 For a **local** EPM pseudopotential $\hat v_{\rm NL}\equiv 0$ (the `rvnl_tm` block
@@ -121,12 +121,12 @@ consistently.
 
 At each step and each $\mathbf k$ the instantaneous eigenproblem
 
-$$\big(H_{VG}(\mathbf k,t) + \Sigma^{\rm HF}(\mathbf k,t)\big)W(\mathbf k,t) = W(\mathbf k,t)\mathrm{diag}\{E_a(\mathbf k,t)\}$$
+$$\big(H_{VG}(\mathbf k,t) + \Sigma^{\rm HF}(\mathbf k,t)\big) W(\mathbf k,t) = W(\mathbf k,t) \mathrm{diag}\{E_a(\mathbf k,t)\}$$
 
 defines the Houston (adiabatic) basis $W$ and quasi-energies $E_a$. The
 **physical** (real-carrier) populations are
 
-$$f_a(\mathbf k,t) = \big(W^\dagger \rho W\big)_{aa},$$
+$$f_a(\mathbf k,t) = \big(W^\dagger \rho  W\big)_{aa},$$
 
 while the fixed-basis diagonals $\rho_{nn}$ contain *virtual* (field-dressed)
 admixtures during the pulse. **Every dissipator is applied in the Houston
@@ -152,13 +152,13 @@ B 248, 863 (2011), Eqs. 4–5), evaluated on the **deviation from equilibrium**:
 
 $$
 \Sigma^{\rm HF}_{nm}(\mathbf k)
-= -\sum_{\mathbf q\neq \mathbf k} V(\mathbf k-\mathbf q)\delta\rho_{nm}(\mathbf q),
+= -\sum_{\mathbf q\neq \mathbf k} V(\mathbf k-\mathbf q) \delta\rho_{nm}(\mathbf q),
 \qquad \delta\rho = \rho-\rho_0,\quad \rho_0 = \mathrm{diag}(f^0),
 $$
 
 $$
 V(\mathbf p) = \frac{\texttt{sbe\_coulomb\_strength}\cdot 4\pi}
-{\varepsilon\Omega_{\rm cell}N_k\big(|\mathbf p|^2+\kappa^2\big)},
+{\varepsilon \Omega_{\rm cell} N_k \big(|\mathbf p|^2+\kappa^2\big)},
 $$
 
 with $\varepsilon$ the material dielectric (registry; override
@@ -174,9 +174,9 @@ off-diagonal parts reproduces **both** textbook renormalizations at once —
 no separate terms are needed:
 
 * diagonal → renormalized single-particle energies (dynamic band-gap shrinkage):
-  $\tilde\varepsilon^\lambda_{\mathbf k} = \varepsilon^\lambda_{\mathbf k} - \sum_{\mathbf q} V_{\mathbf k-\mathbf q} f^\lambda_{\mathbf q};$
+  $\tilde\varepsilon^\lambda_{\mathbf k} = \varepsilon^\lambda_{\mathbf k} - \sum_{\mathbf q} V_{\mathbf k-\mathbf q}  f^\lambda_{\mathbf q};$
 * off-diagonal → renormalized Rabi frequency (excitonic enhancement of the drive):
-  $\Omega_{\mathbf k} = \mathbf d_{\mathbf k}\!\cdot\!\mathbf E + \sum_{\mathbf q} V_{\mathbf k-\mathbf q} p_{\mathbf q},$
+  $\Omega_{\mathbf k} = \mathbf d_{\mathbf k} \cdot \mathbf E + \sum_{\mathbf q} V_{\mathbf k-\mathbf q}  p_{\mathbf q},$
   with the Pauli factor $(1-f^e-f^h)$ emerging automatically from the commutator
   structure.
 
@@ -190,7 +190,7 @@ inter-coset exchange is removed by the sublattice projection
 ### 2.3 BGR: the stand-in, never the companion
 
 `yn_sbe_bgr_threshold='y'` lowers the impact-ionization threshold with density,
-$E_{\rm th}(t) = E_{\rm th,0} - |Kn^{1/3}(t)|$ (Vashishta–Kalia form), as a
+$E_{\rm th}(t) = E_{\rm th,0} - |K n^{1/3}(t)|$ (Vashishta–Kalia form), as a
 *cheap stand-in* for exactly the diagonal shift of §2.2 when Coulomb is off.
 Enabling both **double-counts the same physics** — the init aborts
 (`error stop`) by design. Maximally-loaded runs use $\Sigma^{\rm HF}$ and keep
@@ -204,29 +204,29 @@ BGR off (see `samples/exercise_x11_full_dissipation_showcase/`).
 
 Every channel is a Gorini–Kossakowski–Sudarshan–Lindblad generator
 
-$$\mathcal D[\rho] = \sum_j \Big( L_j\rhoL_j^\dagger - \tfrac12\{L_j^\dagger L_j,\rho\} \Big),$$
+$$\mathcal D[\rho] = \sum_j \Big( L_j \rho L_j^\dagger - \tfrac12\{L_j^\dagger L_j, \rho\} \Big),$$
 
 whose finite-step map $e^{\tau\mathcal D}$ is **completely positive and
 trace-preserving for every $\tau\ge0$** — the defining correctness property of
 this fork (no positivity clipping anywhere). Concretely only two primitive maps
 are ever used, both in the Houston basis:
 
-**(a) Amplitude damping** $a\!\to\!b$ with step probability
+**(a) Amplitude damping** $a \to b$ with step probability
 $\gamma = 1-e^{-\Gamma\tau}$: the Kraus map
-$K_0=\mathrm{diag}(\ldots,\sqrt{1-\gamma},\ldots)$, $K_1=\sqrt{\gamma}|b\rangle\langle a|$
+$K_0=\mathrm{diag}(\ldots,\sqrt{1-\gamma},\ldots)$, $K_1=\sqrt{\gamma} |b\rangle\langle a|$
 gives exactly
 
 $$
 \tilde\rho_{aa}\to(1-\gamma)\tilde\rho_{aa},\qquad
 \tilde\rho_{bb}\to\tilde\rho_{bb}+\gamma\tilde\rho_{aa},\qquad
-\tilde\rho_{ab'}\to\sqrt{1-\gamma}\tilde\rho_{ab'}\ (b'\neq a).
+\tilde\rho_{ab'}\to\sqrt{1-\gamma} \tilde\rho_{ab'}\ (b'\neq a).
 $$
 
 This is why every population-moving channel damps the coherences of a level that
 lost population by $\sqrt{f^{\rm new}_a/f^{\rm old}_a}$ — that factor **is**
 $\sqrt{1-\gamma}$, i.e. the *exact* amplitude-damping Kraus coherence factor,
 not a phenomenological add-on. Populations always move with the saturating form
-$f(1-e^{-\Gamma\tau})\le f$ (never negative) into Pauli-blocked destinations
+$f (1-e^{-\Gamma\tau})\le f$ (never negative) into Pauli-blocked destinations
 clamped to $[0,\texttt{occ}]$.
 
 **(b) Pure dephasing** by a Hadamard (entrywise) product with a positive
@@ -239,9 +239,9 @@ The full step over $h$ (see [`03_numerical_methods.md`](03_numerical_methods.md)
 for the integrator itself) is the Strang sandwich
 
 $$
-\rho(t+h) = D\!\left(\tfrac h2\right)\circ
+\rho(t+h) = D \left(\tfrac h2\right)\circ
 \Big[S_2(p_1h)\circ S_2(p_2h)\circ S_2(p_1h)\Big]\circ
-D\!\left(\tfrac h2\right)[\rho(t)],
+D \left(\tfrac h2\right)[\rho(t)],
 $$
 
 with $S_2$ the CF4/Magnus unitary sub-step on Gauss–Legendre nodes (exact matrix
@@ -269,14 +269,14 @@ Wave-packet decoherence by phonon-bath position monitoring. Each Houston branch
 $a$ carries a wave-packet position $X_a(t)$ advanced by its group velocity,
 
 $$
-V_a(\mathbf k,t) = \big(W^\dagger\boldsymbol\piW\big)_{aa} + \mathbf A(t)\cdot\hat{\mathbf e},\qquad
+V_a(\mathbf k,t) = \big(W^\dagger\boldsymbol\pi W\big)_{aa} + \mathbf A(t)\cdot\hat{\mathbf e},\qquad
 X_a \mathrel{+}= \tfrac12\big(V_a(t)+V_a(t+h)\big)h,
 $$
 
 and the coherences decay with the **squared branch separation**:
 
 $$
-\tilde\rho_{ab} \longleftarrow \exp\!\big[-\lambda(X_a-X_b)^2\tau\big]\tilde\rho_{ab},
+\tilde\rho_{ab}  \longleftarrow  \exp \big[-\lambda (X_a-X_b)^2 \tau\big] \tilde\rho_{ab},
 \qquad \lambda = \frac{k_B T}{\tau_m}
 $$
 
@@ -284,7 +284,7 @@ $$
 $M_{ab}=e^{-\lambda(X_a-X_b)^2\tau}$ is a Gaussian RBF kernel — positive
 semidefinite by Schoenberg's theorem — so the Hadamard map is exactly CPTP for
 any $\tau\ge0$ and any parameters (§3.1b). This is the Caldeira–Leggett
-high-temperature position-coupling limit: $\Gamma_{ab} \propto k_BT\Delta X^2/\tau_m$
+high-temperature position-coupling limit: $\Gamma_{ab} \propto k_BT \Delta X^2/\tau_m$
 = Zurek's decoherence rate for spatially separated packets.
 
 **When not to use it:** with collision channels on, they already amplitude-damp
@@ -321,8 +321,8 @@ the partial rate to every destination $(b,\mathbf q)$ over the **whole BZ**:
 $$
 \Gamma_{(a\mathbf k)\to(b\mathbf q)} =
 \nu(\varepsilon_{a\mathbf k})\sum_p w_p
-\Big[ f^{\rm em}_p\delta_\sigma\!\big(E_a(\mathbf k)-E_b(\mathbf q)-\hbar\omega_p\big)
-    + f^{\rm ab}_p\delta_\sigma\!\big(E_b(\mathbf q)-E_a(\mathbf k)-\hbar\omega_p\big)\Big]
+\Big[ f^{\rm em}_p \delta_\sigma \big(E_a(\mathbf k)-E_b(\mathbf q)-\hbar\omega_p\big) +
+    f^{\rm ab}_p \delta_\sigma \big(E_b(\mathbf q)-E_a(\mathbf k)-\hbar\omega_p\big)\Big]
 \Big[1-\frac{f_b(\mathbf q)}{\texttt{occ}}\Big]_+ ,
 $$
 
@@ -331,8 +331,8 @@ with $\delta_\sigma$ a normalized Gaussian of width $\sigma$
 $\Gamma_{\rm out}=\sum_{b\mathbf q}\Gamma_{(a\mathbf k)\to(b\mathbf q)}$ moves
 
 $$
-\Delta f_{a\mathbf k} = -f_{a\mathbf k}\big(1-e^{-\Gamma_{\rm out}\tau}\big),\qquad
-\Delta f_{b\mathbf q} = +\big|\Delta f_{a\mathbf k}\big|\frac{\Gamma_{(a\mathbf k)\to(b\mathbf q)}}{\Gamma_{\rm out}},
+\Delta f_{a\mathbf k} = - f_{a\mathbf k}\big(1-e^{-\Gamma_{\rm out}\tau}\big),\qquad
+\Delta f_{b\mathbf q} = + \big|\Delta f_{a\mathbf k}\big| \frac{\Gamma_{(a\mathbf k)\to(b\mathbf q)}}{\Gamma_{\rm out}},
 $$
 
 so $\sum\Delta f = 0$ **identically** (trace exact), and the source's coherences
@@ -348,12 +348,12 @@ ring is on (no double count).
 #### 4.3.1 The cited magnitude (both representations share it)
 
 $$
-\gamma(\varepsilon^{\rm kin}) = P\big(\varepsilon^{\rm kin} - E_{\rm th}\big)^{a}
+\gamma(\varepsilon^{\rm kin}) = P \big(\varepsilon^{\rm kin} - E_{\rm th}\big)^{a} 
 \Theta_{\rm ramp}\big(\varepsilon^{\rm kin}-E_{\rm th}\big),\qquad
 \varepsilon^{\rm kin} = E_h(\mathbf k,t)+\tfrac12A^2 - E_{\rm CBM},
 $$
 
-Stobbe–Redmer–Schattke quartic for GaAs ($a=4$, $P=2\times10^{12}\mathrm{s^{-1}eV^{-4}}$,
+Stobbe–Redmer–Schattke quartic for GaAs ($a=4$, $P=2\times10^{12} \mathrm{s^{-1}eV^{-4}}$,
 $E_{\rm th}=2.1$ eV), Keldysh quadratic for Si ($a=2$, $E_{\rm th}=1.1$ eV) and CdS
 ($E_{\rm th}=3.6$ eV cited; $P$ = **fit parameter**, must be given explicitly).
 $\Theta_{\rm ramp}$ = the step smoothed over `sbe_ii_ramp_ev` (the fit's energy
@@ -376,9 +376,9 @@ Partial rate of the quadruple:
 
 $$
 \Gamma_{\mathbf k_1 h}^{(\mathbf k_1' \mathbf k_2)} =
-\gamma(\varepsilon^{\rm kin}_{h\mathbf k_1})
-\big|V(\mathbf k_1-\mathbf k_1')\big|^2
-\delta_\sigma\!\big(E_h(\mathbf k_1)+E_v(\mathbf k_2)-E_c(\mathbf k_1')-E_c(\mathbf k_2')\big)
+\gamma(\varepsilon^{\rm kin}_{h\mathbf k_1}) 
+\big|V(\mathbf k_1-\mathbf k_1')\big|^2 
+\delta_\sigma \big(E_h(\mathbf k_1)+E_v(\mathbf k_2)-E_c(\mathbf k_1')-E_c(\mathbf k_2')\big) 
 \frac{f_{v\mathbf k_2}}{\texttt{occ}}
 \Big[1-\frac{f_{c\mathbf k_1'}}{\texttt{occ}}\Big]_+
 \Big[1-\frac{f_{c\mathbf k_2'}}{\texttt{occ}}\Big]_+ .
@@ -389,14 +389,14 @@ of the actual (possibly non-orthogonal) cell** and the **CDRB model dielectric**
 [K15 Eq. (8); CDRB PRB 47, 9892 (1993)]:
 
 $$
-\big|V(\mathbf q)\big|^2 \to \sum_{\mathbf G \in \{-1,0,1\}^3}
-\frac{1}{\varepsilon_{\rm CDRB}\big(|\mathbf q+\mathbf G|^2\big)
+\big|V(\mathbf q)\big|^2  \to  \sum_{\mathbf G \in \{-1,0,1\}^3}
+\frac{1}{\varepsilon_{\rm CDRB}\big(|\mathbf q+\mathbf G|^2\big) 
 \big(|\mathbf q+\mathbf G|^2 + \lambda^2 + q^2_{\rm reg}\big)},
 $$
 
 $$
-\varepsilon_{\rm CDRB}(q^2) = 1 + \left[\frac{1}{\varepsilon_\infty - 1}
-+ \alpha\frac{q^2}{q_{\rm TF}^2} + \frac{q^4}{4\omega_p^2}\right]^{-1},
+\varepsilon_{\rm CDRB}(q^2) = 1 + \left[\frac{1}{\varepsilon_\infty - 1} +
+\alpha \frac{q^2}{q_{\rm TF}^2} + \frac{q^4}{4 \omega_p^2}\right]^{-1},
 \qquad \alpha = 1.563,
 $$
 
@@ -426,7 +426,7 @@ over each rank's k-range and `comm_summation`-ed (O($N_k^3/P$)).
 #### 4.3.3 Dynamic free-carrier screen $\lambda^2(n(t))$ (GaAs only)
 
 $$
-\lambda^2(t) = \min\Big[\underbrace{\tfrac{4\pi n_{\rm exc}(t)}{\varepsilon_0k_BT}}_{\text{Debye}},
+\lambda^2(t) = \min\Big[\underbrace{\tfrac{4\pi  n_{\rm exc}(t)}{\varepsilon_0 k_BT}}_{\text{Debye}}, 
 \underbrace{\tfrac{4}{\varepsilon_0}\Big(\tfrac{3 n_{\rm exc}(t)}{\pi}\Big)^{1/3}}_{\text{degenerate TF}}\Big],
 $$
 
@@ -449,12 +449,12 @@ moves its $E_{\rm th}$ with density (§2.3) — only when $\Sigma^{\rm HF}$ is o
 
 #### 4.4.1 Nonlocal ring Auger = the exact time-reverse of §4.3.2
 
-Same quadruples, same $\gamma|V(\mathbf q)|^2\delta_\sigma$ weight, **reversed
+Same quadruples, same $\gamma |V(\mathbf q)|^2 \delta_\sigma$ weight, **reversed
 occupation factors**:
 
 $$
-P^{\rm rev} = \Big[1-\frac{f_{v\mathbf k_2}}{\texttt{occ}}\Big]_+
-\frac{f_{c\mathbf k_1'}}{\texttt{occ}}\frac{f_{c\mathbf k_2'}}{\texttt{occ}},
+P^{\rm rev} = \Big[1-\frac{f_{v\mathbf k_2}}{\texttt{occ}}\Big]_+ 
+\frac{f_{c\mathbf k_1'}}{\texttt{occ}} \frac{f_{c\mathbf k_2'}}{\texttt{occ}},
 $$
 
 and negated stencil ($+$hot, $-c_1'$, $+$valence, $-c_2'$): two conduction
@@ -479,36 +479,36 @@ No gap ⇒ no threshold law; the collinear-collapsed 2D Coulomb integrals of
 $E_\pm(\mathbf k)=\pm v|\mathbf k|$ ($v = 1\times10^8$ cm/s, $g=4$):
 
 carrier density inversion (per branch):
-$n(\mu) = \frac{g}{2\pi}\int_0^\infty kf\!\big(\tfrac{vk-\mu}{k_BT}\big)dk
-\Rightarrow \mu_c(n),\ \mu_v(p)$ (bisection);
+$ n(\mu) = \frac{g}{2\pi}\int_0^\infty k f \big(\tfrac{vk-\mu}{k_BT}\big) dk
+ \Rightarrow  \mu_c(n),\ \mu_v(p)$ (bisection);
 
 screening [R07 Eq. 13]:
-$Q_{\rm TF} = \frac{4 k_BT}{\varepsilon_r v^2}\Big[\ln\!\big(e^{\mu_c/k_BT}+1\big)+\ln\!\big(e^{-\mu_v/k_BT}+1\big)\Big];$
+$ Q_{\rm TF} = \frac{4 k_BT}{\varepsilon_r v^2}\Big[\ln \big(e^{\mu_c/k_BT}+1\big)+\ln \big(e^{-\mu_v/k_BT}+1\big)\Big];$
 
 CCCV recombination rate per area [R07 Eq. 14, the √ in the numerator]:
 
 $$
-R_{\rm CCCV} = \frac{1}{v}\int_0^\infty\!\frac{dk_1}{2\pi}\int_0^\infty\!\frac{dk_2}{2\pi}\int_{k_2}^\infty\!\frac{dQ}{2\pi}
-|M|^2\sqrt{(k_1{+}Q)(Q{-}k_2)k_1 k_2}
+R_{\rm CCCV} = \frac{1}{v}\int_0^\infty \frac{dk_1}{2\pi}\int_0^\infty \frac{dk_2}{2\pi}\int_{k_2}^\infty \frac{dQ}{2\pi} 
+|M|^2 \sqrt{(k_1{+}Q)(Q{-}k_2) k_1 k_2} 
 f_c(k_1)f_c(k_2)\big[1{-}f_c(k_1{+}Q)\big]\big[1{-}f_v(Q{-}k_2)\big],
 $$
 
 $$
 |M|^2 = M_d^2 + M_e^2 + (M_d-M_e)^2,\qquad
-M_d = \frac{2\pi}{\varepsilon_r(Q+Q_{\rm TF})},\quad
-M_e = \frac{2\pi}{\varepsilon_r(|Q+k_1-k_2|+Q_{\rm TF})};
+M_d = \frac{2\pi}{\varepsilon_r (Q+Q_{\rm TF})},\quad
+M_e = \frac{2\pi}{\varepsilon_r (|Q+k_1-k_2|+Q_{\rm TF})};
 $$
 
 CVVV = the hole mirror ($n\leftrightarrow p$); the generation partners
 $G$ [Eq. 17] have the occupations reversed. The live channel applies the **net**
 
-$$\frac{dn}{dt} = -(R_{\rm CCCV}+R_{\rm CVVV}) + (G_{\rm CVCC}+G_{\rm VCCC}) \equiv -\frac{n-n_0(T)}{\tau_r(n)}$$
+$$\frac{dn}{dt} = -(R_{\rm CCCV}+R_{\rm CVVV}) + (G_{\rm CVCC}+G_{\rm VCCC})  \equiv  -\frac{n-n_0(T)}{\tau_r(n)}$$
 
 as a uniform-fractional CB→VB population transfer (VB→CB when $G>R$ —
 thresholdless **carrier multiplication**), quasi-Fermi levels re-inverted from
 the gathered populations every step, saturation-capped against both source and
 destination, trace exact. At equilibrium $R=G$ identically. Validated:
-$\tau_r(10^{12}{\rm cm^{-2}}, 300{\rm K}, \varepsilon_r{=}10) = 1.48$ ps
+$\tau_r(10^{12} {\rm cm^{-2}}, 300 {\rm K}, \varepsilon_r{=}10) = 1.48$ ps
 (R07 Fig. 4).
 
 #### 4.4.3 k-local $Cn^3$ legacy
@@ -533,14 +533,14 @@ $$
 then mix with $\alpha = 1-e^{-\nu_{cc}\tau}$:
 
 $$
-\tilde\rho_{aa} \to (1-\alpha)\tilde\rho_{aa} + \alpha\texttt{occ}f^{\rm FD}_a,
-\qquad \tilde\rho_{ab} \to (1-\alpha)\tilde\rho_{ab}\ (a\neq b),
+\tilde\rho_{aa} \to (1-\alpha) \tilde\rho_{aa} + \alpha \texttt{occ} f^{\rm FD}_a,
+\qquad \tilde\rho_{ab} \to (1-\alpha) \tilde\rho_{ab}\ (a\neq b),
 $$
 
 a convex combination of CPTP maps ⇒ CPTP; the off-diagonal factor is the
 excitation-induced dephasing (EID). Rate scale $\nu_{cc}$ =
-`sbe_eeh_nu_sat` (cited $10^{13}$–$10^{14}\rm s^{-1}$ at
-$n=10^{17}$–$10^{19}\rm cm^{-3}$, Goodnick–Lugli / Fischetti–Laux); screening
+`sbe_eeh_nu_sat` (cited $10^{13}$–$10^{14} \rm s^{-1}$ at
+$n=10^{17}$–$10^{19} \rm cm^{-3}$, Goodnick–Lugli / Fischetti–Laux); screening
 from Part G (§4.6). Provenance-gated (forbidden for CdS/graphene — no cited rate).
 
 ### 4.6 The screening library (Part G — used by §2, §4.3, §4.4, §4.5)
@@ -552,7 +552,7 @@ $$
 $$
 
 $$
-\varepsilon_{\rm Lind}(q) = 1 + \frac{\kappa^2}{q^2}F\!\Big(\frac{q}{2k_F}\Big),\quad
+\varepsilon_{\rm Lind}(q) = 1 + \frac{\kappa^2}{q^2} F \Big(\frac{q}{2k_F}\Big),\quad
 F(x) = \frac12 + \frac{1-x^2}{4x}\ln\Big|\frac{1+x}{1-x}\Big|
 \ \text{(static Lindhard, default e-e screen)};
 $$
@@ -568,8 +568,8 @@ static screen inside $|V(q)|^2$.
 ## 5. Observables
 
 **Current (gauge-invariant):**
-$\mathbf J(t) = \frac{1}{\Omega_{\rm cell}}\sum_{\mathbf k} w_{\mathbf k}
-\mathrm{Tr}\big[(\boldsymbol\pi(\mathbf k) + \mathbf A(t))\rho(\mathbf k,t)\big]$ —
+$ \mathbf J(t) = \frac{1}{\Omega_{\rm cell}}\sum_{\mathbf k} w_{\mathbf k} 
+\mathrm{Tr}\big[(\boldsymbol\pi(\mathbf k) + \mathbf A(t)) \rho(\mathbf k,t)\big]$ —
 the $\mathbf A$ diamagnetic term is internal, inter/intra-band compensation is
 exact in the velocity gauge (no perturbative splitting). HHG spectrum
 $\propto|\omega J(\omega)|^2$; the intra/inter split is meaningful only in the

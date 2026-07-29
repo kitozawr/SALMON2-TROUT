@@ -126,7 +126,7 @@ self-energy decomposition (§0.2), or it double-counts. **What is genuinely shar
 
 1. **The metric-aware *bare* Coulomb building block** `coulomb_kernel(sbe,gs,ik,iq)`
    (bloch_solver):
-   $$V_{\rm bare}(\mathbf q)=\frac{\texttt{strength}\cdot 4\pi}{\varepsilon_{\rm bg}\Omega_{\rm cell}N_k(q^2+\kappa_0^2)},$$
+   $$V_{\rm bare}(\mathbf q)=\frac{\texttt{strength}\cdot 4\pi}{\varepsilon_{\rm bg} \Omega_{\rm cell} N_k (q^2+\kappa_0^2)},$$
    metric-aware **minimum-image** $|\mathbf k-\mathbf q|$ via `gs%b_matrix` (correct
    on the non-orthogonal primitive cells), $q{=}k$ self-term excluded, prefactor
    `sbe%coul_pref`, Yukawa regulariser $\kappa_0^2=$`sbe%coul_screen2`. Today it is
@@ -141,7 +141,7 @@ self-energy decomposition (§0.2), or it double-counts. **What is genuinely shar
    (\mathrm{mod}\ \mathbf G)$ from nonlocal-II) — the umklapp $\mathbf G$-sum is the
    loop over the lattice shifts folding $\mathbf k_4$ into the first BZ.
 4. **The GKLS/Lindblad primitive** `amp_damp_channel` — Auger is two such maps
-   (recombination $c_1\!\to\!v_1$ + hot promotion $c_1\!\to\!c_{\rm hot}$), exactly
+   (recombination $c_1 \to v_1$ + hot promotion $c_1 \to c_{\rm hot}$), exactly
    as the current k-local `apply_auger_recombination`; only the source/target
    $(\mathbf k,\text{band})$ pairs and the **rate** change.
 
@@ -175,10 +175,10 @@ correlation, dissipative only; the static screened-exchange shift stays in Σ^HF
 
 **(b) BGR vs HF — they renormalise the SAME gap; do not apply both.**
 Σ^HF already renormalises the band energies dynamically — its diagonal gives
-$\tilde\varepsilon^\lambda_k=\varepsilon^\lambda_k-\sum_q V_{k-q}\delta f^\lambda_q$,
+$\tilde\varepsilon^\lambda_k=\varepsilon^\lambda_k-\sum_q V_{k-q} \delta f^\lambda_q$,
 so when `yn_sbe_coulomb='y'` the impact-ionization rate is evaluated in the
 Σ^HF-renormalized Houston basis and **already sees the carrier-shrunk gap**. The
-**BGR** model (Part C7) ADDS a phenomenological $E_{\rm th}(n)=E_{\rm th0}-|Kn^{1/3}|$
+**BGR** model (Part C7) ADDS a phenomenological $E_{\rm th}(n)=E_{\rm th0}-|K n^{1/3}|$
 [Vashishta–Kalia] on top of the threshold. Vashishta–Kalia's $n^{1/3}$ law contains
 **both** exchange and correlation; Σ^HF captures **only** exchange. So:
 - **Σ^HF on ⇒ keep BGR off** (its exchange part is already in the renormalized
@@ -262,7 +262,7 @@ removed from the code** (CdS Auger is gated off). Never re-introduce this number
 [K15] Eqs. (1)–(8); [L90] Eqs. (1)–(8). Composite indices **1**≡(n₁,k₁).
 
 - **Rate (Fermi golden rule):**
-  $$R = 2\frac{2\pi}{\hbar}\sum_{1234} P|M_{1234}|^2\delta(\epsilon_1+\epsilon_2-\epsilon_3-\epsilon_4)$$
+  $$R = 2 \frac{2\pi}{\hbar}\sum_{1234} P |M_{1234}|^2 \delta(\epsilon_1+\epsilon_2-\epsilon_3-\epsilon_4)$$
   (the leading 2 = spin; momentum conservation is enforced inside M).
 - **Occupation factor:** $P = f_1 f_2 (1-f_3)(1-f_4)$. (eeh ⇒ ∝ n²p; hhe ⇒ ∝ np².
   At n=p: R = Cₙn³ (eeh) and R = Cₚn³ (hhe).)
@@ -270,7 +270,7 @@ removed from the code** (CdS Auger is gated off). Never re-introduce this number
   $$|M_{1234}|^2=|M^d-M^x|^2+|M^d|^2+|M^x|^2,$$
   with $M^d=\langle\psi_1\psi_2|W|\psi_3\psi_4\rangle$, $M^x=\langle\psi_1\psi_2|W|\psi_4\psi_3\rangle$.
 - **Screened-Coulomb matrix element (with the umklapp sum):**
-  $$\langle\psi_1\psi_2|W|\psi_3\psi_4\rangle=\frac1V\sum_{\mathbf G}\delta_{\mathbf k_1+\mathbf k_2,\mathbf k_3+\mathbf k_4+\mathbf G'}\tilde W(\mathbf k_1-\mathbf k_3+\mathbf G)I_{1,3}(\mathbf G)I_{2,4}(\mathbf G'-\mathbf G)$$
+  $$\langle\psi_1\psi_2|W|\psi_3\psi_4\rangle=\frac1V\sum_{\mathbf G}\delta_{\mathbf k_1+\mathbf k_2, \mathbf k_3+\mathbf k_4+\mathbf G'} \tilde W(\mathbf k_1-\mathbf k_3+\mathbf G) I_{1,3}(\mathbf G) I_{2,4}(\mathbf G'-\mathbf G)$$
   $$\tilde W(\mathbf q)=\frac{1}{\varepsilon(\mathbf q)}\frac{4\pi e^2}{q^2+\lambda^2},\qquad I_{\alpha\beta}(\mathbf G)=\sum_{\mathbf G_1}c_\alpha^*(\mathbf G_1)c_\beta(\mathbf G_1-\mathbf G)$$
   (the overlap integrals I use the periodic parts u of the Bloch functions — the
   EPM plane-wave coefficients we already have).
@@ -293,7 +293,7 @@ removed from the code** (CdS Auger is gated off). Never re-introduce this number
 the Γ-pinning of the initial states.
 
 - **Rate (2nd order):**
-  $$R=2\frac{2\pi}{\hbar}\sum_{1234,\nu\mathbf q}\tilde P|\tilde M_{1234;\nu\mathbf q}|^2\delta(\epsilon_1+\epsilon_2-\epsilon_3-\epsilon_4\mp\hbar\omega_{\nu\mathbf q})$$
+  $$R=2\frac{2\pi}{\hbar}\sum_{1234,\nu\mathbf q}\tilde P |\tilde M_{1234;\nu\mathbf q}|^2 \delta(\epsilon_1+\epsilon_2-\epsilon_3-\epsilon_4\mp\hbar\omega_{\nu\mathbf q})$$
   (upper/lower sign = phonon emission/absorption).
 - **Factor:** $\tilde P=f_1f_2(1-f_3)(1-f_4)(n_{\nu\mathbf q}+\tfrac12\pm\tfrac12)$,
   $n_{\nu\mathbf q}$ = Bose. (The emission channel survives at T=0 — needed for
@@ -319,7 +319,7 @@ only the occupation factors differ.
 | process | occupation factor |
 |---|---|
 | **Auger (recombination)** | $f_1 f_2 (1-f_3)(1-f_4)$ |
-| **Impact ionization (generation)** | $(1-f_1)(1-f_2)f_3 f_4$ |
+| **Impact ionization (generation)** | $(1-f_1)(1-f_2) f_3 f_4$ |
 
 → Compute the nonlocal Auger rate with the **same kernel** as the working
 nonlocal impact ionization, swapping in the recombination Fermi factors (and
@@ -341,7 +341,7 @@ implement as its own branch.
 - δ-collapsed to a 3D integral [R07 Eq. (14), the paper's main result — **the √ is
   a NUMERATOR factor**; an earlier draft of this line had it inverted, corrected
   2026-07-03 against the journal text, `rana_rcccv`]:
-  $$R_{\rm CCCV}=\frac{1}{\hbar^2v}\!\int_0^\infty\!\frac{dk_1}{2\pi}\!\int_0^\infty\!\frac{dk_2}{2\pi}\!\int_{k_2}^\infty\!\frac{dQ}{2\pi}|M(k_1,k_2,Q)|^2\sqrt{(k_1{+}Q)(Q{-}k_2)k_1k_2}[1{-}f_{-1}(Q{-}k_2)][1{-}f_{+1}(k_1{+}Q)]f_{+1}(k_1)f_{+1}(k_2)$$
+  $$R_{\rm CCCV}=\frac{1}{\hbar^2v} \int_0^\infty \frac{dk_1}{2\pi} \int_0^\infty \frac{dk_2}{2\pi} \int_{k_2}^\infty \frac{dQ}{2\pi} |M(k_1,k_2,Q)|^2 \sqrt{(k_1{+}Q)(Q{-}k_2)k_1k_2} [1{-}f_{-1}(Q{-}k_2)][1{-}f_{+1}(k_1{+}Q)]f_{+1}(k_1)f_{+1}(k_2)$$
   $R=R_{\rm CCCV}(n,p)+R_{\rm CVVV}(n,p)$, $R_{\rm CVVV}(n,p)=R_{\rm CCCV}(p,n)$,
   $1/\tau_r=R/\min(n,p)$. Units: **cm⁻²·s⁻¹** (2D!). **No single C [cm⁶/s]** —
   validate by lifetime curves, not by C. ✅ **IMPLEMENTED & validated**
