@@ -164,22 +164,34 @@ the mechanism. The $E_F=0.6$ eV used in the $48^2$ runs of §4a.3 is therefore a
 *mesh-affordable proxy*, higher than a typical sample, and its curve maps onto the
 sample by the rescaling of step 3.
 
-**Temperatures.** Two distinct ones enter, and they are not the same number.
-`sbe_temp_init_k` sets the occupation the run starts from and
-`sbe_eph_temperature_k` the phonon bath the dissipators relax into -- both 300 K for
-a room-temperature measurement. The *carrier* temperature is an output: at
-100 kV/cm the dissipative doped run absorbs $2.26\times10^{-3}$ eV per cell and
-hands $1.10\times10^{-3}$ of it to the phonons within the pulse, i.e. 210 meV per
-carrier at the peak falling to 142 meV by 384 fs, which for a Dirac gas at that
-density is
-$$
-T_e\simeq2460\ \text{K (peak)}\ \longrightarrow\ 2040\ \text{K at 384 fs}, \tag{4a.4}
-$$
-the lattice staying at 300 K. That is the regime where the Drude weight of §4a.3 has
-moved by about 10 % -- consistent with the statement that heating alone cannot
-account for the measured bleaching. With `yn_sbe_rana_te = 'y'` (the `mem` variant)
-the same $T_e$ is fitted from the distribution each ring step and written to
-`*_sbe_te.data`, instead of being inferred from the ledger as here.
+**Temperatures.** Three distinct ones enter and must not be conflated.
+`sbe_temp_init_k` sets the occupation the run starts from, `sbe_eph_temperature_k`
+the phonon bath the dissipators relax into -- both 300 K for a room-temperature
+measurement -- while the *carrier* temperature is an output. It follows from the
+change of the electronic energy $\Delta E_{\rm all}$, which for a Dirac gas at fixed
+density fixes $T_e$ through $\varepsilon(\mu,T_e)$:
+
+| $E_0$ [kV/cm] | $\Delta E_{\rm all}$ [eV/cell] | $T_e$ (peak) | $T_e$ (384 fs) | $\tau$ [fs] | mean free path [nm] |
+|---|---|---|---|---|---|
+| 10 | $2.5\times10^{-5}$ | 361 K | 361 K | 141 | 136 |
+| 100 | $2.28\times10^{-3}$ | **2050 K** | 2038 K | **60** | 58 |
+
+(48², $E_F=0.6$ eV, `diss`, lattice at 300 K throughout.) At 2050 K the Drude weight
+of §4a.3 has moved by about 10 %, while $\tau$ has fallen by a factor 2.3 and the
+mean free path from 136 to 58 nm -- the quantitative statement that the bleaching is
+carried by the scattering time and the drift, not by the Drude weight. With
+`yn_sbe_rana_te = 'y'` (the `mem` variant) the same $T_e$ is fitted from the
+distribution each ring step and written to `*_sbe_te.data`.
+
+*Caveat on the channel ledger.* For a doped initial state the per-channel column
+`dE_eph` of `*_sbe_channels.data` is a **gross** exchange counter, not a net loss: it
+grows at $\approx7\times10^{-6}$ eV/cell/fs from $t=0$ in both runs above, i.e.
+identically with and without an appreciable field. That this is bookkeeping and not
+physics is settled by the total electronic energy, which at 10 kV/cm moves by only
+$+2.5\times10^{-5}$ eV/cell over 384 fs: the doped Fermi sea is stationary under the
+dissipators to one part in $10^{5}$ of its energy, and its carrier number is conserved
+to 0.14 % (1.3 % at 100 kV/cm). Use $\Delta E_{\rm all}$, not `dE_eph`, for the energy
+balance of a doped run.
 
 **Step 3 -- check the doping against the mesh you can afford, and rescale if not.**
 §4a.2 requires $k_F\gtrsim3\,|\mathbf b|/N$, i.e.
@@ -396,6 +408,169 @@ not "the carriers disappear". Note that the onset
 Eq. (7a) sits at 27 kV/cm for that doping -- inside the measured range, and the
 approach to saturation is gradual ($\propto k_F/A_0$), which is why the
 transmission creeps up by ten points instead of jumping.
+
+### 4a.5 Why the transmission of a doped sheet falls and then rises
+
+At normal incidence the transmission of a free-standing sheet is fixed by its sheet
+conductance alone (Eq. 4),
+$$
+T=\Big|\frac{2}{2+Z_0\sigma}\Big|^{2},
+$$
+a monotone decreasing function of $|\sigma|$. The whole of the non-monotonic $T(E_0)$
+therefore reduces to one question: how does the sheet conductance of a doped Dirac
+sheet depend on the strength of the drive? Three contributions enter $\sigma$, and
+they respond to the field in different ways and on different scales.
+
+#### 4a.5.1 The Fermi radius $k_F$: the yardstick the doping sets
+
+Doping puts electrons into the conduction cone up to $E_F$, i.e. it fills a disc in
+reciprocal space of radius
+$$
+k_F=\frac{E_F}{\hbar v_F}=\sqrt{\pi n_{2D}}\qquad(g=g_sg_v=4), \tag{4a.5}
+$$
+$k_F$ being the only reciprocal length the doping introduces ($n_{2D}=k_F^2/\pi$;
+$E_F=0.2$ eV gives $k_F=0.0167\ a_0^{-1}$ and $3.2\times10^{12}$ cm⁻²). It is not a
+fitted quantity and not a numerical parameter: it is the radius of the initial
+occupation Eq. (5) puts on the mesh, and `plot_occupation.py` prints and draws it.
+
+The drive enters through the vector potential, and in the velocity gauge $\mathbf A$
+is *literally a displacement in reciprocal space*: $H_{\mathbf k}(\mathbf A)$ has the
+spectrum of $\mathbf k+\mathbf A$, so the occupied set is rigidly displaced by
+$\mathbf A(t)$ while its canonical labels stay put. The relevant measure of the drive
+is therefore the excursion
+$$
+A_0=\max_t|\mathbf A(t)|\ \ \big(=6.213\times10^{-4}\,a_0^{-1}\ \text{per kV/cm for
+the scaled DAST transient}\big),
+$$
+and the single dimensionless control parameter of the problem is
+$$
+u=\frac{A_0}{k_F}=\frac{\text{displacement of the Fermi sea}}{\text{its own radius}}. \tag{4a.6}
+$$
+Everything below is a statement about $u$. (With scattering the sea only reaches
+$A\simeq eE\tau/\hbar$ before it is randomised, so strictly $u=\min(A_0,eE\tau/\hbar)/k_F$;
+at 3 THz with $\tau\approx60$ fs the two agree to tens of per cent, §4a.0.)
+
+#### 4a.5.2 Regime I, $u\ll1$: the linear Drude sheet
+
+The displaced disc carries $J=(D/\pi)A$ with $D=E_F$, so
+$\sigma(\omega)=(D/\pi)/(\tau^{-1}-i\omega)$ and $T$ is *field-independent*. This is
+the plateau at $T=0.7286$ (1 kV/cm) to $0.7257$ (10 kV/cm) in §4a.3, and it is where
+the measured low-field conductance of §4a.4 is read.
+
+#### 4a.5.3 Regime II, $u\gtrsim1$: drift saturation — the brightening
+
+This is the mechanism behind the rise, and it is peculiar to a Dirac cone. The band
+velocity $\mathbf v=v_F(\mathbf k+\mathbf A)/|\mathbf k+\mathbf A|$ has **fixed
+modulus**: the field can only turn it, never lengthen it. Once every occupied state
+has been turned into alignment with $\mathbf A$, the current stops growing. Summing
+the displaced disc exactly,
+$$
+J(A)=n e v_F\,G(u),\qquad
+G(u)=\frac{1}{\pi}\int_{|\mathbf x|\le1}\frac{x_\parallel+u}{|\mathbf x+u\hat e|}\,d^2x,
+\qquad G(u)\to\begin{cases}u,&u\ll1\\ 1,&u\gg1\end{cases} \tag{4a.7}
+$$
+so that the differential (i.e. measured) conductance is
+$$
+\frac{\sigma_{\rm eff}(E_0)}{\sigma_{\rm lin}}=G'(u)\ \longrightarrow\ \frac{k_F}{A_0}
+\propto\frac{1}{E_0}\quad(A_0\gg k_F). \tag{4a.8}
+$$
+Evaluated at 300 K (thermal smearing changes it by less than $10^{-3}$):
+
+| $u=A_0/k_F$ | 0.05 | 0.2 | 0.4 | 0.6 | 0.8 | 1.0 | 1.5 | 2 | 3 | 5 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| $\sigma_{\rm eff}/\sigma_{\rm lin}$ | 1.000 | 0.995 | 0.979 | 0.952 | 0.912 | 0.851 | 0.630 | 0.487 | 0.332 | 0.200 |
+
+The sheet loses four fifths of its conductance by $u=5$, and $T$ rises accordingly.
+Three properties make this the natural explanation of the measurement. It is
+**kinematic**: no phonons, no heating, no change of carrier number — it survives with
+every dissipator switched off, which is how §4a.3 computes it. It is **gradual**,
+$\propto1/E_0$, so the transmission creeps up over a decade of field rather than
+switching. And its onset is fixed by the doping alone, $A_0=k_F$, i.e. 27 / 54 /
+81 kV/cm at $E_F=0.2$ / 0.4 / 0.6 eV — inside the experimental range for an ordinary
+sample. The 147² scan at the sample's doping locates the peak of the
+doping-induced extinction at 30 kV/cm against the 27 kV/cm Eq. (4a.6) predicts.
+
+#### 4a.5.4 Regime III, high field: interband pair creation — the darkening
+
+The displaced-sea picture is adiabatic. It fails where the instantaneous gap
+$2v_F|\mathbf k+\mathbf A|$ closes, i.e. within the Landau–Zener tube around
+$\mathbf k=-\mathbf A$, and there the field creates real electron–hole pairs (§7).
+Those pairs are *extra carriers*: they raise $\sigma$ and darken the sheet — this is
+the whole of the intrinsic sheet's behaviour, $T:1.000\to0.90$ (§7.7 of the x14
+README). In a doped sheet the same channel is **Pauli-suppressed as long as
+$A_0<k_F$**, because the displaced Dirac point then lies inside the occupied disc and
+the pair state at that $\mathbf k$ is already full; it switches on at essentially the
+same $u\simeq1$ at which saturation begins.
+
+Its size is measurable in the runs as the excess of the simulated current over the
+adiabatic displaced-sea sum evaluated on the same mesh ($48^2$, $E_F=0.6$ eV):
+
+| $E_0$ [kV/cm] | 1 | 10 | 30 | 60 | 100 | 200 | 300 | 500 | 1000 |
+|---|---|---|---|---|---|---|---|---|---|
+| $J_{\rm sim}/J_{\rm adiabatic}$ | 0.975 | 0.972 | 0.966 | 1.020 | 1.005 | 0.997 | 1.003 | 1.171 | 1.611 |
+
+Up to 300 kV/cm the sheet is the adiabatically displaced Fermi sea to within 3 %;
+only above that do created pairs add current. **So $T(E_0)$ of a doped sheet is the
+competition of two channels with a common onset scale: brightening by drift
+saturation, which starts at $A_0=k_F$ and grows as $1/E_0$, and darkening by pair
+creation, which starts at the Landau–Zener threshold and grows as $E_0^{3/2}$.**
+Saturation wins first because it acts on the pre-existing carriers, which at
+$3\times10^{12}$–$3\times10^{13}$ cm⁻² outnumber the created ones until several
+hundred kV/cm.
+
+#### 4a.5.5 What the dissipators add, and what the mesh takes away
+
+*Scattering.* $\sigma_{dc}=D\tau/\pi$, so any shortening of $\tau$ darkens the sheet
+at fixed drive and brightens it as the field grows. Above the optical-phonon
+thresholds (E$_{2g}$ 196 meV, A$_1'$ 160 meV) every emission randomises momentum, and
+$v_FA_0=0.74$ eV at 100 kV/cm puts the whole distribution over them twice per cycle.
+Measured against the coherent run on the same mesh at 100 kV/cm, $\tau$ falls from
+$7.9\times10^3$ fs (collisionless) to **60 fs**, the mean free path to 58 nm,
+$\mathrm{Re}\,\sigma$ from 30.3 to $14.5\,\sigma_{\rm univ}$, and the sheet turns from
+an inductive mirror ($R=0.33$, $A=0.007$) into a Drude absorber ($R=0.048$,
+$A=0.231$) -- which is what a real sample is. Within the dissipative runs the field
+dependence of $\tau$ is direct:
+
+| $E_0$ [kV/cm] | $\tau$ [fs] | mean free path [nm] | $T_e$ | $\mathrm{Re}\,\sigma/\sigma_{\rm univ}$ | $T$ | $R$ | $A$ |
+|---|---|---|---|---|---|---|---|
+| 10 | 141 | 136 | 361 K | 18.1 | 0.6442 | 0.061 | 0.294 |
+| 100 | 60 | 58 | 2050 K | 14.5 | 0.7213 | 0.048 | 0.231 |
+
+$\tau$ falls by 2.3 and the mean free path by the same factor as the carriers are
+driven over the optical-phonon thresholds; $\sigma$ falls by 20 % and $T$ rises from
+0.644 to 0.721, against the measured $0.68\to0.79$ of the sheet with the substrate
+divided out. Scattering therefore reinforces the brightening of §4a.5.3 rather than
+opposing it, and it supplies the absolute absorption the coherent runs cannot; the
+coherent runs give the shape, the dissipative ones the magnitude.
+
+*Discretization.* The one caveat. Equation (4a.7) is a continuum statement; a mesh
+represents it only as well as it fills the Fermi disc. Evaluating the same adiabatic
+sum on real meshes:
+
+![drift saturation of a doped Dirac sheet and its representation on a k-mesh](figures/graphene_drift_saturation.png)
+
+| $u=A_0/k_F$ | 0.05 | 0.2 | 0.4 | 0.6 | 1.0 | 2.0 | 5.0 |
+|---|---|---|---|---|---|---|---|
+| continuum | 1.000 | 0.995 | 0.979 | 0.952 | 0.851 | 0.487 | 0.200 |
+| $300^2$, $E_F=0.2$ eV (140 partial pts) | 0.930 | 1.062 | 1.015 | 0.978 | 0.878 | 0.543 | 0.249 |
+| $147^2$, $E_F=0.2$ eV (36) | 6.2 | 1.225 | 1.000 | 0.984 | 0.829 | 0.532 | 0.243 |
+| $48^2$, $E_F=0.6$ eV (12) | 0.901 | 1.015 | 1.171 | 1.062 | 1.003 | 0.635 | 0.333 |
+
+A disc holding one shell of mesh points reproduces the linear limit to $\sim10\,\%$
+but develops a spurious **bump of 15–20 % near $u\simeq0.2$–$0.5$**, and on the
+coarsest Fermi surfaces the small-$u$ limit itself breaks down (the $147^2$ entry at
+$u=0.05$ is the K-point shell dominating a nine-point disc). That bump is exactly the
+*dip* in the $48^2$ transmission scan of §4a.3: $T$ is lowest at 60 kV/cm, which is
+$u=0.386$, where the mesh curve peaks at 1.171. As the disc is filled the bump
+shrinks ($300^2$: 1.06 at its worst) and the curve converges onto Eq. (4a.7).
+
+**The converged prediction is therefore monotone**: the transmission of a doped
+sheet is flat while $A_0\lesssim0.5\,k_F$ and rises thereafter, with no intrinsic
+darkening until pair creation takes over at several hundred kV/cm. The darkening seen
+before the rise in an under-resolved run is numerical, and a scan meant to be
+compared with experiment quantitatively must satisfy Eq. (4a.3),
+$k_F\gtrsim3\Delta k$. Reproduce the figure and the table with
+`python3 drift_saturation.py GSDIR/graphene_sit --ef-ev 0.2`.
 
 ## 5. Sheet electrodynamics
 
