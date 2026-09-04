@@ -114,7 +114,13 @@ def band_tra(t, E_inc, E_t, E_r, J_sheet, n_sub=1.0, halfwidth=None):
     T = n_sub * np.sum(np.abs(Et[m])**2) / np.sum(P[m])
     R = np.sum(np.abs(Er[m])**2) / np.sum(P[m])
     re_sig = np.sum((Js[m] * np.conj(Ei[m])).real) / np.sum(P[m])
-    return T, R, 1.0 - T - R, re_sig / SIGMA_UNIV, w0
+    # complex band-averaged sheet conductivity referred to the LOCAL (transmitted)
+    # field -- the least-squares sigma of J_s = sigma E_t over the band. Its real part
+    # is the dissipative conductance, its imaginary part the inductive (Drude
+    # reactive) one; both are needed for the sheet impedance z = Z0 sigma.
+    den = np.sum(np.abs(Et[m])**2)
+    sig_c = (np.sum(Js[m] * np.conj(Et[m])) / den) if den > 0 else 0.0 + 0.0j
+    return T, R, 1.0 - T - R, re_sig / SIGMA_UNIV, w0, sig_c / SIGMA_UNIV
 
 
 def spectral_tra(t, E_inc, E_t, E_r, n_sub=1.0, w0=None):
@@ -219,9 +225,33 @@ def run_variable(rt_path, key, default=None):
     return default
 
 
-def analyze(path, lz=LZ_BOHR, area=AREA_BOHR2, n_sub=1.0, n_layers=None):
+class TruncatedRun(RuntimeError):
+    """The *_sbe_rt.data record is shorter than the nt the run was asked for.
+
+    Analysing a still-running (or crashed) job silently gives wrong physics: the
+    fluence integrals stop mid-pulse, so T is meaningless and A is whatever fraction
+    of the drive happened to have arrived. Every entry point raises this instead."""
+
+
+def check_complete(path, nrows, allow_partial=False):
+    """Raise TruncatedRun unless the record holds the nt steps of variables.log."""
+    nt = run_variable(path, 'nt', None)
+    try:
+        nt = int(float(nt))
+    except (TypeError, ValueError):
+        return None                      # no variables.log next to the file: nothing to check
+    if nrows < nt and not allow_partial:
+        raise TruncatedRun(
+            f'{path}: {nrows} rows against nt = {nt} ({100.0 * nrows / nt:.0f} % of the '
+            f'requested propagation) -- the run is still going or died. Wait for it, or '
+            f'pass allow_partial/--allow-partial if you really want the partial record.')
+    return nt
+
+
+def analyze(path, lz=LZ_BOHR, area=AREA_BOHR2, n_sub=1.0, n_layers=None, allow_partial=False):
     d = read_rt(path)
     t = d['Time']
+    check_complete(path, len(t), allow_partial)
     ax = max('xyz', key=lambda a: np.max(np.abs(d[f'E_ext_{a}'])))
     E_inc = d[f'E_ext_{ax}']
     Jm = d[f'Jm_{ax}']
@@ -243,11 +273,11 @@ def analyze(path, lz=LZ_BOHR, area=AREA_BOHR2, n_sub=1.0, n_layers=None):
     else:
         E_t, E_r, dEt = E_bc, E_rbc, 0.0
     T, R, A = fluence_tra(t, E_inc, E_t, E_r, n_sub)
-    Tb, Rb, Ab, resig, w0 = band_tra(t, E_inc, E_t, E_r, J_s, n_sub)
+    Tb, Rb, Ab, resig, w0, sig_c = band_tra(t, E_inc, E_t, E_r, J_s, n_sub)
     E0 = float(np.max(np.abs(E_inc)))
     res = dict(file=path, axis=ax, mode='SC' if selfc else 'pert', dEt=dEt, E0_au=E0, E0_kvcm=E0 * AU_E_VM / 1e5, n_layers=n_layers,
                I_wcm2=(E0 * AU_E_VM)**2 / (2.0 * Z0_SI) / 1e4, hw_ev=w0 * AU_EV,
-               T=T, R=R, A=A, T_band=Tb, R_band=Rb, A_band=Ab, resig=resig,
+               T=T, R=R, A=A, T_band=Tb, R_band=Rb, A_band=Ab, resig=resig, sig_c=sig_c,
                S_rr=radiation_reaction_term(t, E_inc, J_s), A_energy=np.nan, nk=count_kpoints(path))
     epath = path.replace('_sbe_rt.data', '_sbe_rt_energy.data')
     if os.path.exists(epath):
@@ -269,6 +299,9 @@ def main(argv=None):
                     help='identical decoupled sheets in the same field (default: sbe_sheet_nlayers of the run, else 1); '
                          'pert mode only -- a self-consistent run already carries it in E_tot')
     ap.add_argument('--plot', action='store_true', help='write transmission_scan.png (needs matplotlib)')
+    ap.add_argument('--allow-partial', action='store_true',
+                    help='analyse records shorter than the run\'s own nt (default: refuse -- '
+                         'the fluence integrals of a half-finished run are meaningless)')
     args = ap.parse_args(argv)
 
     files = sorted(sum((glob.glob(f) for f in args.files), []))
@@ -287,7 +320,12 @@ def main(argv=None):
           f'{"S_rr":>9} {"T_band":>8} {"Res/s0":>7} {"shell":>6}  file')
     rows = []
     for f in files:
-        r, _ = analyze(f, args.lz_bohr, args.area_bohr2, args.n_sub, args.n_layers)
+        try:
+            r, _ = analyze(f, args.lz_bohr, args.area_bohr2, args.n_sub, args.n_layers,
+                           allow_partial=args.allow_partial)
+        except TruncatedRun as exc:
+            print(f'# SKIPPED (incomplete): {exc}')
+            continue
         rows.append(r)
         sp = r.get('shell_pts', np.nan)
         print(f'{r["E0_kvcm"]:10.3f} {r["I_wcm2"]:10.3e} {r["hw_ev"]:7.3f} {r["mode"]:>4} {r["dEt"]:8.1e} {r["T"]:9.6f} '

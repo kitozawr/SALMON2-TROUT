@@ -382,12 +382,20 @@ A = 0.0304 against the single layer's T = 0.9867, R = 0.0030, A = 0.0103. The
 naive estimate T₁² = 0.9736 is 1.5 % (absolute) too high: in the coherent
 non-linear regime the two layers do not simply multiply — they share one local
 field (A_tot/A_ext = 0.92 instead of 0.96) and the re-radiated field reshapes
-the waveform each layer sees. For the *linear* Drude-dominated regime of real
-CVD samples the sum-of-conductances formula T(2σ) = 1/(1 + Z₀σ)² applies
-(d ≪ λ): T₁² is 0.03 % low at T₁ = 0.98, 0.6 % at 0.89, 7 % at 0.66, 25 % at
-0.40 — so "T·T" is fine only while the single-layer transmission stays above
-≈ 0.9, and the substrate's own Fresnel factor must be divided out *before*
-squaring. For Bernal (AB) bilayer or small-angle moiré the electronic structure
+the waveform each layer sees. For the *linear* regime of real CVD samples the
+sum-of-conductances formula applies (d ≪ λ): with z = Z₀σ complex,
+
+    T₁ = |2/(2+z)|²,   T₂ = |2/(2+2z)|²,   T₁²/T₂ = 16|1+z|²/|2+z|⁴
+                                                  = 1 + ½[(Im z)² − (Re z)²] + O(z³)
+
+**The sign of the T·T error depends on what kind of sheet it is.** For a purely
+dissipative (real σ) sheet T₁² is LOW: 0.03 % at T₁ = 0.98, 0.6 % at 0.89,
+9.6 % at the sample's z = 0.565 (T₁²/T₂ = 0.904), 25 % at T₁ = 0.40. For a
+purely reactive (inductive, imaginary σ) sheet — which is what the coherent
+doped runs here are — T₁² is HIGH: the same |z| = 0.565 gives T₁²/T₂ = 1.133,
++13 %. A doped THz sheet is a mixture, so |z| alone does not even fix the sign;
+only |z| ≤ 0.15 (T₁ ≥ 0.87) keeps the error under 1 % either way. The
+substrate's own Fresnel factor must also be divided out *before* squaring. For Bernal (AB) bilayer or small-angle moiré the electronic structure
 itself changes and neither estimate applies.
 
 **Answer to "does the direction matter?"** For the linear and the χ⁽³⁾ response
@@ -607,24 +615,35 @@ coherent runs:
 | 100 | 60 | 58 | 2050 K | 14.5 | 0.7213 | 0.048 | 0.231 |
 | 100, coherent | 7930 | 7613 | — | 30.3 | 0.6622 | 0.330 | 0.007 |
 
-Three things. **(i)** Within this mesh τ falls by a factor 2.3 and the mean free path
-from 136 to 58 nm between 10 and 100 kV/cm, as the carriers are driven over the
-optical-phonon thresholds (v_F A₀ = 0.74 eV at 100 kV/cm against E₂g 196 meV,
-A₁′ 160 meV): the mobility drop. **(ii)** Scattering turns the sheet from an
-inductive mirror (R = 0.33, A = 0.007) into a Drude absorber (R = 0.048, A = 0.231) —
-a real sample, not a mirror. **(iii)** T rises 0.644 → 0.721 and the high-field
-conductivity is 14.5 σ_univ, against a measured 0.68 → 0.79 and 14.3 σ_univ.
+Two things are robust here. **(i)** Scattering turns the sheet from an inductive
+mirror (R = 0.33, A = 0.007) into a Drude absorber (R = 0.048, A = 0.231) — a real
+sample, not a mirror. **(ii)** T rises 0.644 → 0.721 and the high-field conductivity
+is 14.5 σ_univ, against a measured 0.68 → 0.79 and 14.3 σ_univ.
 
-**Caveat: the absolute τ is not mesh-converged.** Repeating 10 kV/cm on 72² (2.25×
-the k-points) gives τ = 32 fs instead of 141 fs, Re σ = 10.5 instead of 18.1 σ_univ
-and T = 0.778 instead of 0.644, while the e-ph ledger rate doubles. The inter-k
-golden-rule sum is not resolved at these densities — the σ_E = 0.1 eV energy window
-holds too few final states, so the rate samples the mesh. What is robust is the
-direction of every effect (scattering shortens τ, converts reflection into
-absorption, lowers σ, raises T) and the field dependence within one mesh. Quoting an
-absolute τ, or comparing the absolute transmission with the measurement
-quantitatively, needs the ring on a Fermi-surface-resolving mesh: the O(N_k²)
-production run of §6.
+**Caveat: neither the absolute τ nor its field dependence is mesh-converged.**
+Repeating the scan on 72² (2.25× the k-points):
+
+| mesh | E₀ [kV/cm] | τ [fs] | mean free path [nm] | Re σ/σ_univ | T |
+|---|---|---|---|---|---|
+| 48² | 10 | 141 | 136 | 18.1 | 0.644 |
+| 48² | 100 | 60 | 58 | 14.5 | 0.721 |
+| 72² | 10 | 32 | 31 | 10.5 | 0.778 |
+| 72² | 100 | 72 | 69 | 8.4 | 0.828 |
+
+The magnitude moves by 4× at fixed field, and the *trend* reverses: at 48² τ falls
+2.3× from 10 to 100 kV/cm, at 72² it rises by 2.2× over the same interval. An earlier
+version of this file read the 48² fall as the carriers crossing the optical-phonon
+thresholds (v_F A₀ = 0.74 eV at 100 kV/cm against E₂g 196 meV, A₁′ 160 meV); the
+finer mesh does not reproduce it, so **that reading is withdrawn** — it was mesh
+noise, not a mobility drop that the calculation can claim. The e-ph ledger rate
+doubles between the two meshes for the same reason: the inter-k golden-rule sum is
+unresolved, the σ_E = 0.1 eV energy window holding too few final states, so the rate
+samples the mesh. What is robust is the sign
+of every effect at fixed mesh when the ring is switched on: scattering shortens τ
+against the collisionless run, converts reflection into absorption, lowers σ and
+raises T. Quoting an absolute τ, or comparing the absolute transmission with the
+measurement quantitatively, needs the ring on a Fermi-surface-resolving mesh: the
+O(N_k²) production run of §6.
 
 The carrier temperature comes from the total electronic energy (361 K and 2050 K),
 *not* from the per-channel `dE_eph` column, which for a doped initial state is a

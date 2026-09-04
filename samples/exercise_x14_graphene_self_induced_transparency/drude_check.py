@@ -39,7 +39,8 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from transmission import (read_rt, band_tra, sheet_fields, fluence_tra, run_variable,  # noqa: E402
+from transmission import (read_rt, band_tra, sheet_fields, fluence_tra, run_variable,
+                          check_complete, TruncatedRun,  # noqa: E402
                           LZ_BOHR, AREA_BOHR2, AU_E_VM, AU_EV, C_AU, SIGMA_UNIV, VF_EPM_AU)
 
 KB_AU = 3.166811563e-6          # Hartree/K
@@ -102,6 +103,7 @@ def sheet_from_transmission(T_meas, n_sub, faces=2):
 def analyze(path, ef_ev, temp_k, lz=LZ_BOHR, area=AREA_BOHR2):
     d = read_rt(path)
     t = d['Time']
+    check_complete(path, len(t))
     ax = max('xyz', key=lambda a: np.max(np.abs(d[f'E_ext_{a}'])))
     E_inc = d[f'E_ext_{ax}']
     n_layers = int(run_variable(path, 'sbe_sheet_nlayers', 1) or 1)
@@ -112,7 +114,7 @@ def analyze(path, ef_ev, temp_k, lz=LZ_BOHR, area=AREA_BOHR2):
     else:
         E_r = E_t - E_inc
     T, R, A = fluence_tra(t, E_inc, E_t, E_r)
-    Tb, Rb, Ab, resig, w0 = band_tra(t, E_inc, E_t, E_r, J_s)
+    Tb, Rb, Ab, resig, w0, _sig_c = band_tra(t, E_inc, E_t, E_r, J_s)
     # Direct Drude extraction from the trajectory: the intraband sheet current of a
     # metal obeys   dJ_s/dt = (D/pi) E_local - J_s/tau,
     # so a least-squares fit of dJ/dt against (E_tot, J_s) returns the Drude weight D
@@ -182,7 +184,11 @@ def main(argv=None):
     print(f'{"E0[kV/cm]":>9} {"hw[eV]":>7} {"E_F[eV]":>8} {"n0[cm^-2]":>10} {"D_eq[eV]":>9} {"D_fit[eV]":>10}'
           f' {"tau[fs]":>8} {"l[nm]":>7} {"s_fit/s0":>9} {"Re s/s0":>8} {"T":>8} {"R":>8} {"A":>8}  file')
     for f in files:
-        r = analyze(f, args.ef_ev, args.temp_k)
+        try:
+            r = analyze(f, args.ef_ev, args.temp_k)
+        except TruncatedRun as exc:
+            print(f'# SKIPPED (incomplete): {exc}')
+            continue
         print(f'{r["E0_kvcm"]:9.2f} {r["hw_ev"]:7.4f} {r["ef_ev"]:8.3f} {r["n0_cm2"]:10.2e} {r["D_ev"]:9.4f}'
               f' {r["D_fit_ev"]:10.4f} {r["tau_fit_fs"]:8.2f} {r["mfp_fit_nm"]:7.1f} {r["sig_fit_s0"]:9.2f}'
               f' {r["resig"]:8.3f} {r["T"]:8.5f} {r["R"]:8.5f} {r["A"]:8.5f}  {f}')

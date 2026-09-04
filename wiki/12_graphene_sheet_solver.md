@@ -354,8 +354,8 @@ break the linear relation between current and field. All three are separable:
    same solver settings; only the initial occupation differs.* **Left** --
    transmission against peak field: the intrinsic sheet (dark squares) darkens
    monotonically as Landau-Zener pairs are created (§7), while the doped sheet (red
-   circles) is flat in the linear regime, darkens slightly as the field first adds
-   conductivity, and then **brightens** past the shaded region, which begins at
+   circles) is flat in the linear regime, dips into the mesh artifact of §4a.5.5,
+   and then **brightens** past the shaded region, which begins at
    $A_0=k_F$. Dotted green: the transmission of the measured sample with the PET
    Fresnel loss divided out, $0.68\to0.79$. **Middle** -- the extinction the doping
    carriers alone contribute, $1-T_{\rm doped}/T_{\rm intrinsic}$: dividing by the
@@ -643,20 +643,28 @@ quoted as a first-principles number:
 | $48^2$ | 10 | 141 | 136 | 18.1 | 0.644 |
 | $48^2$ | 100 | 60 | 58 | 14.5 | 0.721 |
 | $72^2$ | 10 | **32** | 31 | 10.5 | 0.778 |
+| $72^2$ | 100 | **72** | 69 | 8.4 | 0.828 |
 
-The same field on a mesh with 2.25× the points gives a $\tau$ four times shorter, and
-the e-ph energy-exchange rate of the channel ledger doubles ($4.5\to9.2\times10^{-6}$
-eV/cell/fs). The inter-k golden-rule sum is not resolved at these densities: the
-energy-matching window $\sigma_E=0.1$ eV contains too few final states, so the rate
-samples the mesh rather than the phonon spectrum. What survives mesh refinement is the
-*direction* of every effect -- scattering shortens $\tau$, converts reflection into
-absorption, lowers $\sigma$ and raises $T$ -- and the field dependence within one mesh
-($\tau$ falls 2.3× between 10 and 100 kV/cm at $48^2$ as the carriers are driven over
-the optical-phonon thresholds). A converged $\tau$ needs the ring on a
-Fermi-surface-resolving mesh, which is the $O(N_k^2)$ production run of the x14 README
-§6, not a laptop calculation. Accordingly the comparison of the *absolute*
-transmission with the measured $0.68\to0.79$ is indicative, not quantitative; the
-coherent runs give the shape of $T(E_0)$, the dissipative ones its character.
+Two things are wrong with $\tau$ at these mesh densities, and they must both be said.
+*Its magnitude is not converged*: the same field on a mesh with 2.25× the points gives
+a $\tau$ four times shorter, and the e-ph energy-exchange rate of the channel ledger
+doubles ($4.5\to9.2\times10^{-6}$ eV/cell/fs). *Its field dependence is not converged
+either, and it reverses sign*: at $48^2$ $\tau$ falls by 2.3× from 10 to 100 kV/cm, at
+$72^2$ it rises by 2.2× over the same interval. An earlier version of this page read the
+$48^2$ fall as the optical-phonon thresholds switching on; the finer mesh gives the
+opposite trend, so **that reading is withdrawn** — it was mesh noise, not threshold
+physics. The cause is the same in both cases: the inter-$k$ golden-rule sum is
+unresolved, the energy-matching window $\sigma_E=0.1$ eV containing too few final
+states, so the rate samples the mesh rather than the phonon spectrum.
+
+What *does* survive mesh refinement is the sign of every effect at fixed mesh when the
+ring is switched on: scattering shortens $\tau$ against the collisionless run, converts
+reflection into absorption, lowers $\mathrm{Re}\,\sigma$ and raises $T$. A converged
+$\tau$ needs the ring on a Fermi-surface-resolving mesh, i.e. the $O(N_k^2)$ production
+run of the x14 README §6, not a laptop calculation. Accordingly the comparison of the
+*absolute* transmission with the measured $0.68\to0.79$ is indicative, not
+quantitative; the coherent runs give the shape of $T(E_0)$, the dissipative ones its
+character.
 
 *Discretization.* The one caveat. Equation (4a.7) is a continuum statement; a mesh
 represents it only as well as it fills the Fermi disc. Evaluating the same adiabatic
@@ -809,7 +817,11 @@ where $\phi_{n\mathbf k}(\mathbf A)$, $E_{n\mathbf k}(\mathbf A)$ are the eigenv
 
 The 24² mesh (smallest π–π* gap 0.78 eV, K half a spacing off the mesh) has no interband channel at 14 meV and no k-point inside the Landau–Zener tube, so the physical answer at this resolution is $T\simeq1$, which $n_b=2,3,4$ give identically ($n_b=3$: $T=0.999996$ as well). The earlier $A=0.049$ at $n_b=8$ without restoration was part of the artifact, not absorption; the remaining 2.7 % of $n_b=8$ *with* restoration at $\Delta t=0.1$ fs is a **time-step effect of the stiff high bands**: the deposited energy sits in bands 4–8 (22–58 eV above π, $5.6\times10^{-6}$ per cell carrying the whole ledger), which a 14 meV field cannot populate; at $\Delta t=0.05$ fs the same run gives $T=0.999985$, ledger $1.1\times10^{-7}$ eV per cell (2400× less). The S4/CF4 exponential is exact per step, but the composition with a backward sub-step applied to levels 34–90 eV up (13.7 rad per step) leaks population; $n_b\le4$ ($\le39$ eV) is clean at 0.1 fs. **Production recipe: $n_b=2$ with the restoration** (the restoration makes $n_b=2,3,4$ agree to $10^{-6}$ in $T$, the THz physics lives on the cone, and the ring cost is lowest); $n_b\ge8$ only with $\Delta t\le0.05$ fs. The absorption physics (Eq. 8, §7) lives on the 147² mesh with K on it (§8 and x14 README §7).
 
-**Remark for the experiment.** Real CVD samples *are* strongly absorbing at THz — but through the Drude conductance of doping-induced carriers ($\sigma_{dc}\sim20$–$50\,\sigma_{\rm univ}$, sheet transmission 0.5–0.7 already in the linear regime), not through the artifact above; reproducing that requires the FD$(E_F,T)$ initial state (§9). A measured transmission below 90 % "without subtracting the substrate" also contains the substrate's own Fresnel loss ($\approx11\%$ per face for $n\approx2$); the sheet contribution is the ratio to the bare-substrate reference, Eq. (4) with $n_s$. Two electronically decoupled layers (a large-angle twisted or incoherently stacked bilayer) at $d\ll\lambda$ sit in the same local field and add their sheet currents: `sbe_sheet_nlayers = 2` (Eq. 7 with $2L_zJ_m$); the naive estimate $T_2\approx T_1^2$ holds to second order in $Z_0\sigma$ ($T_1^2/T(2\sigma)=1-(Z_0\sigma)^2/2+\dots$, i.e. $\lesssim1\%$ low for $T_1\ge0.9$) but ignores that both layers see the field reduced by *both* currents, which matters for the field-dependent (non-linear) part.
+**Remark for the experiment.** Real CVD samples *are* strongly absorbing at THz — but through the Drude conductance of doping-induced carriers ($\sigma_{dc}\sim20$–$50\,\sigma_{\rm univ}$, sheet transmission 0.5–0.7 already in the linear regime), not through the artifact above; reproducing that requires the FD$(E_F,T)$ initial state (§9). A measured transmission below 90 % "without subtracting the substrate" also contains the substrate's own Fresnel loss ($\approx11\%$ per face for $n\approx2$); the sheet contribution is the ratio to the bare-substrate reference, Eq. (4) with $n_s$. Two electronically decoupled layers (a large-angle twisted or incoherently stacked bilayer) at $d\ll\lambda$ sit in the same local field and add their sheet currents: `sbe_sheet_nlayers = 2` (Eq. 7 with $2L_zJ_m$). The naive estimate $T_2\approx T_1^2$ is then only second-order accurate, and **its sign depends on whether the sheet is resistive or reactive**. With $z=Z_0\sigma$ complex, Eq. (4) at $n_s=1$ gives
+$$
+\frac{T_1^2}{T_2}=\frac{16\,|1+z|^2}{|2+z|^4}=1+\tfrac12\big[(\mathrm{Im}\,z)^2-(\mathrm{Re}\,z)^2\big]+\mathcal O(z^3). \tag{6a}
+$$
+For a purely **dissipative** sheet ($z$ real) $T_1^2<T_2$: squaring *under*estimates the bilayer transmission — at the sample's $z=0.565$ by $-9.6\,\%$ ($T_1^2/T_2=0.904$). For a purely **reactive** (inductive) sheet ($z$ imaginary), the same $|z|$ gives $T_1^2/T_2=1.133$, a $+13\,\%$ *over*estimate. A doped THz sheet is a mixture of the two, so the error can have either sign and $|z|$ alone does not bound it; only $\lesssim1\,\%$ for $|z|\le0.15$ ($T_1\ge0.87$) is safe. Both estimates also ignore that each layer sees the field reduced by *both* currents, which is what makes the non-linear (field-dependent) part genuinely non-multiplicative.
 
 ## 7. Expected physics (analytic anchors for the validation)
 
