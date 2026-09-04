@@ -417,6 +417,30 @@ only |z| ≤ 0.15 (T₁ ≥ 0.87) keeps the error under 1 % either way. The
 substrate's own Fresnel factor must also be divided out *before* squaring. For Bernal (AB) bilayer or small-angle moiré the electronic structure
 itself changes and neither estimate applies.
 
+**The same comparison on a DOPED sheet (72², +100 fs tail, coherent), which is what
+a real CVD bilayer is:**
+
+| E₀ [kV/cm] | 3 | 10 | 30 | 100 | 300 |
+|---|---|---|---|---|---|
+| E_F = 0.6 eV: T₁ | 0.7093 | 0.7053 | 0.6679 | 0.6713 | 0.7739 |
+| T₂ | 0.4362 | 0.4341 | 0.4128 | 0.3778 | 0.4715 |
+| T₁²/T₂ | 1.153 | 1.146 | 1.081 | 1.193 | 1.270 |
+| E_F = 0.4 eV: T₁ | 0.8487 | 0.8422 | 0.7939 | 0.8358 | 0.8772 |
+| T₂ | 0.6493 | 0.6434 | 0.5847 | 0.5894 | 0.7226 |
+| T₁²/T₂ | 1.109 | 1.103 | 1.078 | 1.185 | 1.065 |
+
+T₁² is HIGH at every field and both dopings — the reactive branch, because a coherent
+doped sheet at 14 meV is an inductor (band-averaged z = 0.017 − 1.195i at 0.6 eV).
+Inverting a measured bilayer transmission as √T₂ therefore understates the monolayer
+conductance by ~5 %. Two further checks: `--predict-layers 2`, which uses the run's
+own σ(ω), reproduces T₂ to 1.5 % in the linear regime (against 14 % for the
+single-frequency formula) and degrades to 27 % at u = 5.6, always predicting the
+stack too bright; and bin by bin across the driven band the two-layer run returns
+exactly twice the one-layer σ(ω) (median ratio 1.997 and 2.007), which is the check
+that `sbe_sheet_nlayers` itself is right. The band-averaged Re σ ratio is 1.83 rather
+than 2 because the two-layer transmitted field is filtered more strongly where |σ| is
+largest — a property of that diagnostic, not of the solver.
+
 **Answer to "does the direction matter?"** For the linear and the χ⁽³⁾ response
 the hexagonal sheet is isotropic in-plane (any 2nd- and 4th-rank tensor of C₆ᵥ
 is); anisotropy (zigzag vs armchair) enters at χ⁽⁵⁾ through trigonal warping,

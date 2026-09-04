@@ -387,7 +387,52 @@ with a measurement.**
   $d\ll\lambda$ the driver adds their currents in the same local field,
   $J_s\to NL_zJ_m$ (§5) — the incoherent or large-angle-twisted stack. Bernal and
   small-angle moiré bilayers change the electronic structure itself and are outside
-  the model. LAYERTABLE
+  the model.
+
+**One layer against two, at two dopings.** Same $72^2$ mesh, same transient with its
+100 fs ring-down, coherent, self-consistent sheet; only `sbe_sheet_nlayers` and
+`sbe_ef_ev` differ. $u=A_0/k_F$ is the drift parameter of §4a.5.1.
+
+| $E_0$ [kV/cm] | 3 | 10 | 30 | 100 | 300 |
+|---|---|---|---|---|---|
+| **$E_F=0.6$ eV** ($E_{\rm sat}=81$ kV/cm) | $u=0.04$ | 0.12 | 0.37 | 1.24 | 3.71 |
+| one layer, $T_1$ | 0.7093 | 0.7053 | 0.6679 | 0.6713 | 0.7739 |
+| two layers, $T_2$ | 0.4362 | 0.4341 | 0.4128 | 0.3778 | 0.4715 |
+| $T_1^2$ (the naive estimate) | 0.5031 | 0.4975 | 0.4461 | 0.4506 | 0.5989 |
+| $T_1^2/T_2$ | **1.153** | **1.146** | 1.081 | 1.193 | 1.270 |
+| **$E_F=0.4$ eV** ($E_{\rm sat}=54$ kV/cm) | $u=0.06$ | 0.19 | 0.56 | 1.86 | 5.57 |
+| one layer, $T_1$ | 0.8487 | 0.8422 | 0.7939 | 0.8358 | 0.8772 |
+| two layers, $T_2$ | 0.6493 | 0.6434 | 0.5847 | 0.5894 | 0.7226 |
+| $T_1^2$ | 0.7203 | 0.7093 | 0.6303 | 0.6986 | 0.7695 |
+| $T_1^2/T_2$ | **1.109** | **1.103** | 1.078 | 1.185 | 1.065 |
+
+Three things to read off it.
+
+* **The measured $T\cdot T$ of a bilayer is an *over*estimate here, at every field and
+  both dopings** — by 15 % at $E_F=0.6$ eV and 10 % at 0.4 eV in the linear regime.
+  That is the reactive branch of Eq. (6a): a coherent doped sheet at 14 meV is an
+  inductor, $\mathrm{Im}\,z\gg\mathrm{Re}\,z$ (band-averaged $z=0.017-1.195i$ at
+  $E_F=0.6$ eV), and for $\mathrm{Im}\,z$ the second-order term raises $T_1^2/T_2$
+  above 1. Inverting a measured bilayer transmission as $\sqrt{T_2}$ therefore
+  *understates* the monolayer conductance. A sample whose absorption is dominated by
+  momentum relaxation instead sits on the dissipative branch and the error changes
+  sign, so the direction has to be decided from $\sigma$'s phase, not assumed.
+* **The single-frequency formula is not enough for this pulse.** Eq. (6a) with the
+  band-averaged $z$ predicts $T_1^2/T_2=1.31$ where the propagated pair gives 1.153.
+  Using the sheet's own frequency-resolved $\sigma(\omega)$ instead
+  (`transmission.py --predict-layers 2`) gives 1.169 — within 1.5 % — because a
+  single-cycle transient has a band as wide as its centre and $|\sigma|\propto1/\omega$
+  across it. The prediction stays that good only while the response is linear: it is
+  off by 8 % at $u=0.56$ and by 27 % at $u=5.6$, always in the same direction, because
+  each layer of the real stack sees the field reduced by *both* currents and therefore
+  sits at a smaller $u$, where it is more conductive — the true stack is darker than
+  any scaling of one run.
+* **The stacking itself is exact.** Bin by bin across the driven band the two-layer
+  run returns exactly twice the one-layer $\sigma(\omega)$ (median $|\sigma_2/\sigma_1|
+  = 1.997$ at $E_F=0.6$ eV, $2.007$ at 0.4 eV). The band-*averaged*
+  $\mathrm{Re}\,\sigma$ ratio is only 1.83, which is a property of the diagnostic and
+  not of the solver: the two-layer transmitted field is filtered more strongly at the
+  low-frequency end of the band, where $|\sigma|$ is largest, so the average moves.
 
 **At the sample's own doping.** The same scan at $E_F=0.2$ eV on the production
 $147^2$ mesh is quieter in the raw transmission, because a $3\times10^{12}$ cm⁻²
