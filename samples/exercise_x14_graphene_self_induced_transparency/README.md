@@ -495,7 +495,9 @@ doping carriers stand alone:
 | Re σ/σ_univ (doped) | 2.73 | 2.86 | 3.45 | 2.81 | 3.73 | 6.11 |
 
 The doping-induced extinction **peaks at 30 kV/cm**, against the 27 kV/cm that
-A₀ = k_F predicts from k_F alone, then collapses by a factor of five. At 300 kV/cm
+A₀ = k_F predicts from k_F alone (k_F = E_F/ħv_F = √(πn) is the radius of the
+occupied disc, and in the velocity gauge A is literally its displacement in
+reciprocal space — wiki/12 §4a.5.1), then collapses by a factor of five. At 300 kV/cm
 it is *negative*: the doped sheet transmits better than the undoped one, because its
 Drude response has saturated while its occupied states Pauli-block part of the
 Landau–Zener pair creation. Figure: `doped_vs_intrinsic.png` (three panels: T(E₀),
@@ -567,10 +569,35 @@ or four. The deficit is a scale error common to all fields, so the *shape* of th
 T(E₀) curve above is unaffected; absolute conductivities want k_F ≳ 3 mesh
 spacings (N ≳ 280 at E_F = 0.2 eV).
 
-*Still to run (cluster).* The τ half of the story: `--ef-ev 0.2 --temp-init-k 300
---variants diss,mem` on a Fermi-surface-resolving mesh (147² or denser), where
-the phonon ring can shorten τ and `*_sbe_te.data` records the carrier
-temperature. Cost as in §6.
+**7.11 With the phonon ring on: the scattering time and the mean free path.**
+Same 48² mesh and doping, `diss` (e-ph ring at a 300 K lattice), against the
+coherent runs:
+
+| E₀ [kV/cm] | τ [fs] | mean free path [nm] | T_e | Re σ/σ_univ | T | R | A |
+|---|---|---|---|---|---|---|---|
+| 10 | 141 | 136 | 361 K | 18.1 | 0.6442 | 0.061 | 0.294 |
+| 100 | 60 | 58 | 2050 K | 14.5 | 0.7213 | 0.048 | 0.231 |
+| 100, coherent | 7930 | 7613 | — | 30.3 | 0.6622 | 0.330 | 0.007 |
+
+Three things. **(i)** τ falls by a factor 2.3 and the mean free path from 136 to
+58 nm between 10 and 100 kV/cm, as the carriers are driven over the optical-phonon
+thresholds (v_F A₀ = 0.74 eV at 100 kV/cm against E₂g 196 meV, A₁′ 160 meV): the
+mobility drop, measured. **(ii)** Scattering turns the sheet from an inductive
+mirror (R = 0.33, A = 0.007) into a Drude absorber (R = 0.048, A = 0.231) — a real
+sample, not a mirror. **(iii)** T rises 0.644 → 0.721 against the measured
+0.68 → 0.79 of the sheet with the substrate divided out, and the high-field
+conductivity 14.5 σ_univ against the measured 14.3.
+
+The carrier temperature comes from the total electronic energy (361 K and 2050 K),
+*not* from the per-channel `dE_eph` column, which for a doped initial state is a
+gross exchange counter: it grows at 7×10⁻⁶ eV/cell/fs from t = 0 regardless of
+field, while the electronic energy of the doped sea moves by only 2.5×10⁻⁵ eV/cell
+over 384 fs at 10 kV/cm and the carrier number is conserved to 0.14 %. The doped
+Fermi sea is stationary under the dissipators; the ledger column is not a net loss.
+
+*Still to run (cluster).* The same with `--ef-ev 0.2 --temp-init-k 300 --variants
+diss,mem` on a Fermi-surface-resolving mesh (147² or denser, §3b), which replaces
+the E_F = 0.6 eV proxy by the sample's own doping. Cost as in §6.
 
 ## 8. What to look for at production (147², DAST)
 
