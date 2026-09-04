@@ -375,7 +375,7 @@ against the intrinsic control:
 | $E_0$ [kV/cm] | 1 | 10 | 30 | 100 | 300 | 1000 |
 |---|---|---|---|---|---|---|
 | $T$ doped ($E_F=0.2$ eV) | 0.9682 | 0.9666 | 0.9595 | 0.9629 | 0.9442 | 0.9090 |
-| $T$ intrinsic | 1.0000 | 1.0000 | 0.9995 | 0.9867 | 0.9336 | 0.9163 |
+| $T$ intrinsic | 0.999995 | 0.999993 | 0.999498 | 0.986694 | 0.933550 | 0.916273 |
 | extinction added by the doping | 3.18 % | 3.34 % | **4.00 %** | 2.41 % | −1.14 % | 0.79 % |
 
 The doping-induced extinction **peaks at 30 kV/cm** -- the predicted saturation field
