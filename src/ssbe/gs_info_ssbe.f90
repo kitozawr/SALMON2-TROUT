@@ -152,6 +152,44 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
         gs%occup(1:(ne/2),:) = 2d0 !!Experimental!!
     end if
 
+    ! T -> 0 limit at an exactly degenerate, partially filled level group (a Dirac
+    ! point sitting on the k-mesh, a metal's Fermi crossing on a mesh point): the
+    ! integer filling above picks LAPACK's arbitrary basis inside the degenerate
+    ! subspace -- a broken-symmetry state that carries a spurious current of order
+    ! v_F/N_k per such k-point (decisive for a 2D sheet at low THz fields: with the
+    ! self-consistent sheet field it acts as a relay that pins the local field to
+    ! zero). The correct zero-temperature density matrix is the group average
+    ! (identity on the degenerate block): equal fractional occupation, no current,
+    ! invariant under any rotation of the block -- and the pure-gauge reference of
+    ! wiki/12 sec. 6a becomes continuous in A. Inert for gapped materials.
+    block
+        integer :: ik, i1, i2, nsym
+        real(8) :: osum
+        real(8), parameter :: deg_tol = 1d-6   ! Ha
+        nsym = 0
+        do ik = 1, nk
+            i1 = 1
+            do while (i1 <= nb)
+                i2 = i1
+                do while (i2 < nb)
+                    if (abs(gs%eigen(i2 + 1, ik) - gs%eigen(i2, ik)) > deg_tol) exit
+                    i2 = i2 + 1
+                end do
+                if (i2 > i1) then
+                    if (maxval(gs%occup(i1:i2, ik)) - minval(gs%occup(i1:i2, ik)) > 1d-12) then
+                        osum = sum(gs%occup(i1:i2, ik))
+                        gs%occup(i1:i2, ik) = osum / dble(i2 - i1 + 1)
+                        nsym = nsym + 1
+                    end if
+                end if
+                i1 = i2 + 1
+            end do
+        end do
+        if (irank == 0 .and. nsym > 0) write(*, '(a,i0,a)') &
+            '# occupations: degenerate partially filled level groups averaged at ', nsym, &
+            ' k-point(s) (T -> 0 density matrix; e.g. the Dirac point on the mesh)'
+    end block
+
     ! Calculate minimum band gap in atomic units (for gauge-covariant decoherence)
     call calc_eg_au()
 

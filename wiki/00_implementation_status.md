@@ -94,10 +94,17 @@ ready»*. Delivered (branch `claude/si-direct-gap-isosurfaces-mp0mbd`, restarted
     restoration** — subtract the adiabatic ground-state current of the same truncated H_k(A(t))
     (Eq. 10 of wiki/12; zero in a complete basis, exact for any population, one ZHEEV/k/step).
     Result: sheet stationary after the pulse, residual A-projection < 1e-4 at n_b = 2/4/8.
-    x14 production = **nstate = 8 + restoration**, dissipators on the π/π* window (frozen
-    thresholds −15/+14 eV). `test_vg_sumrule` (Hellmann–Feynman), `sumrule_check.py`.
+    With the restoration T is nstate-independent (2/3/4 agree to 1e-6; 8 too at dt = 0.05 fs —
+    at 0.1 fs its 34–90 eV bands leak population in the S4 step), so **x14 production =
+    nstate = 2 + restoration**. `test_vg_sumrule` (Hellmann–Feynman), `sumrule_check.py`.
     The maintainer's <90 % THz transmission of real samples is the Drude absorption of
     doping-induced carriers (+ substrate Fresnel), i.e. the FD(E_F,T) initial-state increment.
+  - **Dirac point on the mesh (147²) — second artifact found and fixed.** Integer filling at
+    an exactly degenerate K picks an arbitrary basis inside the pair: a broken-symmetry state
+    with ~v_F velocity, a field-independent current 2v_F/N_k per valley; harmless at 100 kV/cm,
+    the whole "response" at 10 kV/cm, and at 1 kV/cm with the sheet field a relay that pins
+    A_tot to 0 (R > 1). `gs_info_ssbe` now gives degenerate partially filled groups their
+    group-average occupation (the T → 0 density matrix; inert for gapped materials).
   - New this round: `sbe_sheet_nlayers` (decoupled layers in one local field — incoherent
     bilayer), `make_inputs.py --pol x|y --n-layers --snap-fs`, `plot_levels.py` (k-resolved
     level-population snapshots → BZ-averaged band populations vs t + k-maps around K).

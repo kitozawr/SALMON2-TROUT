@@ -208,7 +208,7 @@ def scaled_dast(t, A, e_target_kvcm, window_fs=10.0):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--nk', type=int, default=147)
-    ap.add_argument('--nstate', type=int, default=8, help='bands in the basis (velocity-gauge f-sum rule: 2 -> eta=0.30, 4 -> 0.10, 8 -> 0.036, 16 -> 0.030; see README)')
+    ap.add_argument('--nstate', type=int, default=2, help='bands in the basis (2 = production with the pure-gauge restoration; static eta 2/4/8/16 -> 0.30/0.10/0.036/0.030 is removed exactly at any nstate; nstate >= 8 needs --dt-fs 0.05: the 34-90 eV bands leak population in the S4 step at 0.1 fs; see README sec. 7)')
     ap.add_argument('--no-sumrule', action='store_true', help='switch the VG pure-gauge restoration of the current off')
     ap.add_argument('--n-layers', type=int, default=1, help='identical electronically decoupled sheets in the same local field (incoherent/twisted bilayer = 2)')
     ap.add_argument('--snap-fs', type=float, default=50.0, help='interval of the k-resolved level-population snapshots [fs] (0 = final only)')
@@ -263,7 +263,12 @@ def main():
             if args.field == 'dast':
                 As, e_chk, a0 = scaled_dast(t, A, ekv)
                 fname = f'DAST_E{ekv:g}kVcm.txt'
-                np.savetxt(os.path.join(args.outdir, fname), np.column_stack([t, As]), fmt='%.6f %.10e %.10e %.10e',
+                # the 'input' field file carries the three Cartesian components itself
+                # (epdir is not applied to it): put the waveform into the --pol column
+                As_pol = As.copy()
+                if args.pol == 'y':
+                    As_pol[:, 1] = As[:, 0]; As_pol[:, 0] = 0.0
+                np.savetxt(os.path.join(args.outdir, fname), np.column_stack([t, As_pol]), fmt='%.6f %.10e %.10e %.10e',
                            header=f'DAST single-cycle 3.36 THz proxy rescaled to peak |E| = {e_chk:.3f} kV/cm; '
                                   f't[fs] Ax Ay Az [fs*V/Ang]; offset removed, 10 fs cos^2 end windows')
                 emfield = EM_DAST.format(fname=fname, ekv=ekv, epdir=epdir, pol=args.pol)
