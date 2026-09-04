@@ -1,8 +1,8 @@
 !########################################################################################!
-! x14 graphene self-induced transparency -- mem  variant, peak E = 3 kV/cm
+! x14 graphene self-induced transparency -- mem  variant, peak E = 300 kV/cm
 !----------------------------------------------------------------------------------------!
-! DAST single-cycle 3.36 THz proxy (x12), rescaled to peak |E| = 3.00 kV/cm (DAST_E3kVcm.txt).
-! I_peak = 1.194e+04 W/cm^2, A0 = 1.86e-03 a.u. (peak k excursion) -- perturbative interband (A0 << mesh spacing)
+! DAST single-cycle 3.36 THz proxy (x12), rescaled to peak |E| = 300.00 kV/cm (DAST_E300kVcm.txt).
+! I_peak = 1.194e+08 W/cm^2, A0 = 1.86e-01 a.u. (peak k excursion) -- THz: A0 >> mesh spacing -> Zener/Landau-Zener pair creation at the Dirac point
 ! Field BEFORE = E_ext column; field AFTER = E_tot column (2D-sheet self-consistent field,
 ! yn_sbe_sheet_field) -> transmission.py.  Compare coh / diss / mem at the same field.
 !########################################################################################!
@@ -39,7 +39,7 @@
 
 &emfield
   ae_shape1   = 'input'
-  file_input1 = 'DAST_E3kVcm.txt'             ! DAST single-cycle 3.36 THz proxy, scaled to 3 kV/cm peak
+  file_input1 = 'DAST_E300kVcm.txt'             ! DAST single-cycle 3.36 THz proxy, scaled to 300 kV/cm peak
   epdir_re1(1:3) = 1.0d0, 0.0d0, 0.0d0     ! in-plane polarisation (x); the THz beam is at normal incidence (k || z)
 /
 
@@ -52,6 +52,9 @@
 /
 
 &sbe
+  ! ---- doped / finite-temperature initial occupation (wiki/12 sec. 4a) ----
+  sbe_ef_ev             = 0.2000d0  ! Fermi level from the Dirac point -> Drude carriers
+  sbe_temp_init_k       = 300.0d0    ! temperature of the initial occupation
   yn_sbe_superres       = 'y'    ! ring (mandatory for both graphene channels)
   yn_sbe_eph            = 'y'    ! E2g(196 meV) + A1'(160 meV) Kohn-anomaly modes
   yn_sbe_eph_acoustic   = 'y'    ! D = 16 eV [Hwang-Das Sarma], TF-screened

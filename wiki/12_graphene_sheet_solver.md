@@ -460,36 +460,113 @@ the measured low-field conductance of §4a.4 is read.
 
 #### 4a.5.3 Regime II, $u\gtrsim1$: drift saturation — the brightening
 
-This is the mechanism behind the rise, and it is peculiar to a Dirac cone. The band
-velocity $\mathbf v=v_F(\mathbf k+\mathbf A)/|\mathbf k+\mathbf A|$ has **fixed
-modulus**: the field can only turn it, never lengthen it. Once every occupied state
-has been turned into alignment with $\mathbf A$, the current stops growing. Summing
-the displaced disc exactly,
+This is the mechanism behind the rise. It is a property of the Dirac cone, it is
+derived here from the same Hamiltonian the solver propagates, and it involves no
+dissipation, no heating and no change of carrier number.
+
+**Model.** Near K the two-band EPM *is* the Dirac model: the momentum matrix is
+$\mathbf p_{\mathbf k}=\partial H/\partial\mathbf k=v_F\boldsymbol\sigma$, so the
+velocity-gauge Hamiltonian of §2 becomes exact,
 $$
-J(A)=n e v_F\,G(u),\qquad
-G(u)=\frac{1}{\pi}\int_{|\mathbf x|\le1}\frac{x_\parallel+u}{|\mathbf x+u\hat e|}\,d^2x,
-\qquad G(u)\to\begin{cases}u,&u\ll1\\ 1,&u\gg1\end{cases} \tag{4a.7}
+H_{\mathbf k}(\mathbf A)=\varepsilon_{\mathbf k}+\mathbf A\cdot\mathbf p_{\mathbf k}
+=v_F\,\boldsymbol\sigma\cdot(\mathbf k+\mathbf A), \tag{4a.9}
 $$
-so that the differential (i.e. measured) conductance is
+with eigenvalues $\pm v_F|\mathbf k+\mathbf A|$ and band velocity
 $$
-\frac{\sigma_{\rm eff}(E_0)}{\sigma_{\rm lin}}=G'(u)\ \longrightarrow\ \frac{k_F}{A_0}
-\propto\frac{1}{E_0}\quad(A_0\gg k_F). \tag{4a.8}
+\mathbf v_\pm(\mathbf k,\mathbf A)=\pm v_F\frac{\mathbf k+\mathbf A}{|\mathbf k+\mathbf A|}
+\qquad\Longrightarrow\qquad |\mathbf v_\pm|=v_F\ \ \text{always}. \tag{4a.10}
 $$
-Evaluated at 300 K (thermal smearing changes it by less than $10^{-3}$):
+Equation (4a.10) is the whole of the effect: the field can only **turn** the velocity,
+never lengthen it.
+
+**Occupations.** In the velocity gauge the canonical labels $\mathbf k$ do not move;
+the field enters only through $H_{\mathbf k}(\mathbf A(t))$. While the evolution is
+adiabatic the occupation numbers attached to the labels are constant, so the occupied
+set stays the disc $|\mathbf k|\le k_F$ *in label space*, while every state's velocity
+is that of the displaced point $\mathbf k+\mathbf A$. (Adiabaticity is not an
+assumption here but a consequence: the only place it can fail is the instantaneous
+degeneracy at $\mathbf k=-\mathbf A$, and for $A<k_F$ that point lies inside the disc,
+where both branches are occupied and no transition is possible — §4a.5.4.)
+
+**Current.** With $g=g_sg_v=4$ and $\hat e=\hat{\mathbf A}$, the valence sea cancelling
+against the undoped pure-gauge reference of §6a,
+$$
+J(A)=\frac{g}{(2\pi)^2}\int_{|\mathbf k|\le k_F}v_F\,
+\frac{(\mathbf k+\mathbf A)\cdot\hat e}{|\mathbf k+\mathbf A|}\,d^2k. \tag{4a.11}
+$$
+Scale $\mathbf k=k_F\mathbf x$ and put $u=A/k_F$. With $n=gk_F^2/4\pi=k_F^2/\pi$,
+$$
+J(A)=n\,e\,v_F\,G(u),\qquad
+G(u)=\frac1\pi\int_{|\mathbf x|\le1}\frac{x_\parallel+u}{|\mathbf x+u\hat e|}\,d^2x. \tag{4a.12}
+$$
+
+**Reduction.** The integrand is $\partial|\mathbf x+u\hat e|/\partial u$, so
+$\pi G=\partial_u\!\int_{|\mathbf x|\le1}|\mathbf x+u\hat e|\,d^2x$. More useful is the
+shift $\mathbf y=\mathbf x+u\hat e$, which turns Eq. (4a.12) into the mean of
+$\cos\varphi_y$ over a unit disc whose centre is at distance $u$ from the origin.
+Integrating over $\varphi$ at fixed $|\mathbf y|=\rho$ (the disc boundary is
+$\cos\varphi\ge(\rho^2+u^2-1)/2\rho u$, and shells that lie wholly inside contribute
+zero) collapses the double integral to a single quadrature,
+$$
+G(u)=\frac{1}{\pi u}\int_{|1-u|}^{1+u}\!\!
+\sqrt{\big[(\rho+u)^2-1\big]\big[1-(\rho-u)^2\big]}\;d\rho, \tag{4a.13}
+$$
+a complete elliptic integral (the radicand is a quartic with roots
+$\rho=\pm1\pm u$), evaluated by quadrature in `drift_saturation.py`. Exact properties,
+all verified against the two-dimensional integral to $10^{-8}$:
+$$
+G(1)=\frac{8}{3\pi}=0.848826\ldots,\qquad G'(1)=\frac{4}{3\pi}=\tfrac12G(1),
+\qquad G(u)=u\,G(1/u), \tag{4a.14}
+$$
+$$
+G(u)=u\Big(1-\frac{u^2}{8}+O(u^4)\Big),\qquad
+G(u)=1-\frac{1}{8u^2}+O(u^{-4}). \tag{4a.15}
+$$
+The duality in Eq. (4a.14) maps the weak-field and strong-field branches onto each
+other, and the same coefficient $1/8$ governs the leading correction on both.
+
+**The two response ratios.** A field scan reports the current the *same* peak field
+produces, i.e. the chord (secant) response, while a weak probe on top of a strong
+pump would see the slope:
+$$
+\boxed{\ \frac{\sigma_{\rm eff}(E_0)}{\sigma_{\rm lin}}=\frac{G(u)}{u}
+\ \xrightarrow[\ u\gg1\ ]{}\ \frac{1}{u}=\frac{k_F}{A_0}\propto\frac{1}{E_0}\ },
+\qquad
+\frac{\sigma_{\rm diff}}{\sigma_{\rm lin}}=G'(u)\ \xrightarrow[\ u\gg1\ ]{}\ \frac{1}{4u^3}. \tag{4a.16}
+$$
+Both at 300 K (thermal smearing changes them by less than $10^{-3}$ while
+$E_F\gg k_BT$; the finite-$T$ version simply replaces the sharp disc in Eq. (4a.11)
+by the Fermi weight $f_{\rm FD}(v_Fk;\mu,T)$):
 
 | $u=A_0/k_F$ | 0.05 | 0.2 | 0.4 | 0.6 | 0.8 | 1.0 | 1.5 | 2 | 3 | 5 |
 |---|---|---|---|---|---|---|---|---|---|---|
-| $\sigma_{\rm eff}/\sigma_{\rm lin}$ | 1.000 | 0.995 | 0.979 | 0.952 | 0.912 | 0.851 | 0.630 | 0.487 | 0.332 | 0.200 |
+| $G(u)/u$ — chord, what a scan measures | 1.000 | 0.995 | 0.980 | 0.953 | 0.912 | **0.849** | 0.627 | 0.484 | 0.329 | 0.199 |
+| $G'(u)$ — differential | 0.999 | 0.985 | 0.938 | 0.853 | 0.713 | **0.424** | 0.085 | 0.033 | 0.010 | 0.002 |
 
-The sheet loses four fifths of its conductance by $u=5$, and $T$ rises accordingly.
-Three properties make this the natural explanation of the measurement. It is
-**kinematic**: no phonons, no heating, no change of carrier number — it survives with
-every dissipator switched off, which is how §4a.3 computes it. It is **gradual**,
-$\propto1/E_0$, so the transmission creeps up over a decade of field rather than
-switching. And its onset is fixed by the doping alone, $A_0=k_F$, i.e. 27 / 54 /
-81 kV/cm at $E_F=0.2$ / 0.4 / 0.6 eV — inside the experimental range for an ordinary
-sample. The 147² scan at the sample's doping locates the peak of the
-doping-induced extinction at 30 kV/cm against the 27 kV/cm Eq. (4a.6) predicts.
+**Limits recovered.** At $u\to0$, Eq. (4a.12) with Eq. (4a.15) gives
+$J=nev_Fu=E_FA/\pi$, i.e. exactly the Drude form $J=(D/\pi)A$ with $D=E_F$ of §4a.3 —
+the derivation reproduces the linear Drude weight rather than assuming it. At
+$u\to\infty$, $J\to nev_F$: the drift velocity saturates at $v_F$ and every further
+increment of field produces no further current.
+
+**Why this is what the solver computes.** `calc_current_bloch` evaluates
+$\mathrm{Tr}[(\mathbf p+\mathbf A)\rho]/V$ and subtracts the adiabatic ground-state
+current of the *undoped* filled sea (§6a, Eq. 10). Writing
+$\rho=\rho^{(0)}_{\rm undoped}+\delta\rho$, the subtraction removes the first term
+identically and leaves $\sum_{\mathbf k}\delta f\,\langle p+A\rangle$, which is
+Eq. (4a.11) plus the doped carriers' own uncancelled diamagnetic unit
+($k_F/v_F=3.8\,\%$ at $E_F=0.2$ eV, 11 % at 0.6 eV, §4a.1). Evaluated on the actual
+mesh this reproduces the simulated peak current to 3 % up to 300 kV/cm (§4a.5.4),
+which is the direct check that Eq. (4a.12) is the solver's own physics and not a
+side model.
+
+**Consequences.** The saturation is *kinematic* (no dissipator required), *gradual*
+($\propto1/E_0$, so the transmission creeps up over a decade of field rather than
+switching), and its onset is set by the doping alone through $A_0=k_F$: 27 / 54 /
+81 kV/cm at $E_F=0.2$ / 0.4 / 0.6 eV. With scattering the sea only reaches
+$A\simeq eE\tau/\hbar$ before being randomised, so $u=\min(A_0,eE\tau/\hbar)/k_F$; at
+3 THz with $\tau\approx60$ fs the two agree to tens of per cent and the onset is
+unchanged.
 
 #### 4a.5.4 Regime III, high field: interband pair creation — the darkening
 

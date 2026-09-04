@@ -186,14 +186,41 @@ records t, T_e, μ_c, μ_h, n, p, n_i(T_e), T_bath; `saturation_check.py` plots 
 
 ## 6. Run
 
+**The production scans, shipped ready to run on the cluster.** Three input sets sit
+in the exercise; they are the server runs this exercise exists for.
+
+| set | mesh | occupation | variants | fields [kV/cm] | what it gives | cost |
+|---|---|---|---|---|---|---|
+| `prod_nk300_doped/` | 300² | E_F = 0.2 eV, 300 K | coh | 1…1000 (7) | **the converged T(E₀) curve — the headline result** | O(N_k): minutes/field per node, few core-hours total |
+| `prod_nk300_intrinsic/` | 300² | undoped | coh | 1…1000 (7) | the control the doping is measured against | same |
+| `prod_nk147/` | 147² | E_F = 0.2 eV, 300 K | diss, mem | 1…300 (5) + dark | τ, the mean free path, T_e, the absolute absorption | ring is O(N_k²): ≈7.5 h/run on 48 threads |
+
 ```bash
 cd samples/exercise_x14_graphene_self_induced_transparency
-python3 make_inputs.py --nk 147                 # == prod_nk147/ (shipped): DAST 1..100 kV/cm x {coh,diss,mem} + dark
-python3 make_inputs.py --nk 24 --outdir smoke_nk24   # pipeline smoke (shipped)
-cd prod_nk147 && cp ../run_scan.sh . && OMP_NUM_THREADS=48 SALMON=../../../build/salmon bash run_scan.sh 'rt_E100kVcm_*.inp'
-python3 ../transmission.py runs/*/graphene_sit_sbe_rt.data --plot
-python3 ../saturation_check.py runs/E100kVcm_{coh,diss,mem}/graphene_sit runs/dark_mem/graphene_sit --plot
+# 1) the converged transmission curve (cheap, this is the main result)
+for d in prod_nk300_doped prod_nk300_intrinsic; do
+  ( cd $d && cp ../run_scan.sh . && OMP_NUM_THREADS=48 SALMON=../../../build/salmon bash run_scan.sh )
+done
+python3 field_scan_plot.py --doped 'prod_nk300_doped/runs/*/graphene_sit_sbe_rt.data'                            --intrinsic 'prod_nk300_intrinsic/runs/*/graphene_sit_sbe_rt.data'                            --t-meas 0.60 0.70 --n-sub 1.65 --out T_of_field_nk300.png
+python3 plot_occupation.py prod_nk300_doped/graphene_sit --ef-ev 0.2   # pre-flight: 140 partial k-points
+python3 drift_saturation.py prod_nk300_doped/graphene_sit --ef-ev 0.2  # the saturation curve vs continuum
+
+# 2) the dissipative half (tau and the absolute absorption)
+cd prod_nk147 && cp ../run_scan.sh . && OMP_NUM_THREADS=48 SALMON=../../../build/salmon bash run_scan.sh
+python3 ../drude_check.py 'runs/*/graphene_sit_sbe_rt.data' --t-meas 0.60 0.70 --n-sub 1.65
+python3 ../saturation_check.py runs/E100kVcm_mem/graphene_sit runs/dark_mem/graphene_sit --plot
 ```
+Everything can also be driven end to end by `run_field_scan.sh` with `NK`, `EF`,
+`FIELDS` and `VARIANTS`. A 24² smoke set is in `smoke_nk24/`.
+
+**Why 300² for the transmission and 147² for the dissipators.** The Fermi surface
+must be resolved (§3b: k_F ≳ 3 mesh spacings means N ≳ 280 at E_F = 0.2 eV), and at
+300² the drift-saturation curve is converged onto the continuum (§7.12). The unitary
+propagation is O(N_k), so that mesh is cheap. The graphene ring is **O(N_k²)**, so
+the same mesh costs (90000/21609)² ≈ 17× the 147² dissipative run; the dissipative
+production therefore runs at 147², where the Fermi surface is marginal but the
+scattering physics is not mesh-critical. A converged dissipative 300² scan needs MPI
+over k across nodes (`wiki/11`).
 Variants: `coh` (no dissipation), `diss` (ring e-ph + acoustic + Rana at the lattice
 T, Markovian — as x11), `mem` (diss + 2D colmem analog + dressed reference + T_e).
 All carry the sheet field (`--no-sheet` to switch it off) and the velocity-gauge
