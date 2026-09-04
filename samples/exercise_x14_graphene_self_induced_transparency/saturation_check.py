@@ -73,6 +73,13 @@ def analyze(prefix, lz, area, T, vf_ms, plot=False):
         c = np.loadtxt(p, comments='#')
         tc, dn_rana = c[:, 0] * AU_T_FS, c[:, 7] / area_cm2      # cumulative pairs per cm^2
         out.update(tc=tc, dn_rana=dn_rana, rana_final=dn_rana[-1], rana_min=dn_rana.min(), rana_max=dn_rana.max())
+    p = prefix + '_sbe_te.data'
+    if os.path.exists(p):
+        te = np.loadtxt(p, comments='#')
+        if te.ndim == 1:
+            te = te[None, :]
+        out.update(t_te=te[:, 0], Te=te[:, 1], mu_c=te[:, 2], mu_h=te[:, 3], ni_te=te[:, 6],
+                   Te_peak=te[:, 1].max(), Te_final=te[:, 1][-1], T_bath=te[0, 7])
     ni = n_intrinsic_cm2(T, vf_ms)
     out['n_i'] = ni
     print(f'--- {prefix}')
@@ -84,6 +91,9 @@ def analyze(prefix, lz, area, T, vf_ms, plot=False):
         phase = 'net carrier multiplication' if out['rana_final'] > 0 else 'net Auger recombination'
         print(f'  Rana ledger:       final {out["rana_final"]:+.3e} pairs/cm^2 ({phase}); '
               f'min {out["rana_min"]:+.2e} max {out["rana_max"]:+.2e}')
+    if 'Te' in out:
+        print(f'  two-temperature: T_e peak {out["Te_peak"]:.0f} K, final {out["Te_final"]:.0f} K (lattice {out["T_bath"]:.0f} K);'
+              f' balance n_i(T_e) peak {out["ni_te"].max():.3e}, final {out["ni_te"][-1]:.3e} cm^-2')
     print(f'  balance density n_i({T:.0f} K) = {ni:.3e} cm^-2  ->  n_final/n_i = {out["nH_final"] / ni:.3f}'
           f'   [n_i(1000 K) = {n_intrinsic_cm2(1000, vf_ms):.2e}, n_i(3000 K) = {n_intrinsic_cm2(3000, vf_ms):.2e}]')
     return out
@@ -107,7 +117,8 @@ def main(argv=None):
         except ImportError:
             print('# matplotlib not available -- no plot')
             return 0
-        fig, ax = plt.subplots(1, 2, figsize=(10, 3.8))
+        has_te = any('Te' in r for r in res)
+        fig, ax = plt.subplots(1, 3 if has_te else 2, figsize=(14 if has_te else 10, 3.8))
         for r in res:
             lab = os.path.basename(os.path.dirname(r['prefix'])) or r['prefix']
             ax[0].plot(r['t'], r['nH'], label=f'{lab}: Houston')
@@ -120,6 +131,14 @@ def main(argv=None):
         ax[0].set_yscale('log'); ax[0].set_xlabel('t [fs]'); ax[0].set_ylabel('n_2d [cm$^{-2}$]'); ax[0].legend(fontsize=7)
         ax[1].axhline(0, c='k', lw=0.5); ax[1].set_xlabel('t [fs]'); ax[1].set_ylabel('cumulative Rana dN [pairs/cm$^2$]')
         ax[1].set_title('>0 carrier multiplication, <0 Auger recombination', fontsize=9); ax[1].legend(fontsize=7)
+        if has_te:
+            for r in res:
+                if 'Te' in r:
+                    lab = os.path.basename(os.path.dirname(r['prefix'])) or r['prefix']
+                    ax[2].plot(r['t_te'], r['Te'], label=f'{lab}: T_e')
+            ax[2].axhline(res[0].get('T_bath', args.temp_k), ls=':', c='gray', lw=0.8, label='lattice T')
+            ax[2].set_yscale('log'); ax[2].set_xlabel('t [fs]'); ax[2].set_ylabel('T_e [K]')
+            ax[2].set_title('two-temperature model: carrier T_e (cools via e-ph)', fontsize=9); ax[2].legend(fontsize=7)
         fig.tight_layout(); fig.savefig('saturation_check.png', dpi=140)
         print('# wrote saturation_check.png')
     return 0

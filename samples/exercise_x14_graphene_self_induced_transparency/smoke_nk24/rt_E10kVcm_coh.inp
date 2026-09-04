@@ -1,10 +1,10 @@
 !########################################################################################!
-! x14 graphene self-induced transparency -- coh  variant, peak E = 10 kV/cm                 !
+! x14 graphene self-induced transparency -- coh  variant, peak E = 10 kV/cm
 !----------------------------------------------------------------------------------------!
-! In-plane (x) Acos2 pulse, hbar*omega = 0.800 eV, 8.0 cycles (tw) + 60.0 fs tail.        !
-! I = 1.327e+05 W/cm^2, A0 = E0/omega = 6.61e-05 a.u. (k excursion), Rabi area ~ 0.02 rad.   !
-! Field before = E_ext column, field after = sheet BC on the Jm column: transmission.py.  !
-! Compare coh / diss / mem at the same field: the memory+dressed-reference variant is the one whose ring sees only REAL carriers (wiki/10 sec. 8.11).   
+! DAST single-cycle 3.36 THz proxy (x12), rescaled to peak |E| = 10.00 kV/cm (DAST_E10kVcm.txt).
+! I_peak = 1.327e+05 W/cm^2, A0 = 6.21e-03 a.u. (peak k excursion) -- perturbative interband (A0 << mesh spacing)
+! Field BEFORE = E_ext column; field AFTER = E_tot column (2D-sheet self-consistent field,
+! yn_sbe_sheet_field) -> transmission.py.  Compare coh / diss / mem at the same field.
 !########################################################################################!
 
 &calculation
@@ -16,16 +16,16 @@
 /
 
 &units
-  unit_system = 'au'
+  unit_system = 'A_eV_fs'
 /
 
 &system
   yn_periodic  = 'y'
-  al_vec1(1:3) = 4.648726d0, 0.0d0, 0.0d0
-  al_vec2(1:3) = 2.324363d0, 4.025915d0, 0.0d0
-  al_vec3(1:3) = 0.0d0, 0.0d0, 37.794523d0          ! 20 Ang vacuum: L_z of the sheet cell
+  al_vec1(1:3) = 2.46000197d0, 0.00000000d0,  0.00000000d0
+  al_vec2(1:3) = 1.22999834d0, 2.13042512d0,  0.00000000d0
+  al_vec3(1:3) = 0.00000000d0, 0.00000000d0, 19.99999867d0     ! 20 Ang vacuum: L_z of the sheet cell
   nelec  = 2
-  nstate = 2
+  nstate = 8
 /
 
 &kgrid
@@ -33,20 +33,18 @@
 /
 
 &tgrid
-  dt = 4.0000d0
-  nt = 1048
+  dt = 0.1000d0                     ! fs
+  nt = 3844
 /
 
 &emfield
-  ae_shape1      = 'Acos2'
-  epdir_re1(1:3) = 1.0d0, 0.0d0, 0.0d0
-  E_amplitude1   = 1.944690e-06
-  tw1            = 1709.742d0
-  omega1         = 0.02939946d0
+  ae_shape1   = 'input'
+  file_input1 = 'DAST_E10kVcm.txt'             ! DAST single-cycle 3.36 THz proxy, scaled to 10 kV/cm peak
+  epdir_re1(1:3) = 1.0d0, 0.0d0, 0.0d0     ! in-plane polarisation (x); the THz beam is at normal incidence (k || z)
 /
 
 &analysis
-  out_projection_k_step = 1048
+  out_projection_k_step = 500   ! k-resolved level-population snapshots every 50 fs (plot_levels.py)
 /
 
 &epm
@@ -54,5 +52,11 @@
 /
 
 &sbe
-  ! coherent SBE only: Pauli-blocking / Rabi bleaching baseline (no ring)
+  ! coherent SBE only (no dissipation)
+  yn_sbe_sheet_field    = 'y'    ! 2D-sheet self-consistent (radiation-reaction) field
+  yn_sbe_vg_sumrule     = 'y'    ! velocity-gauge pure-gauge restoration: J(t) -= adiabatic ground-
+                                 ! state current of the same truncated H_k(A(t)) (parameter-free;
+                                 ! = eta N_e A/V at linear order, exact beyond; wiki/12 sec. 6a)
+  frozen_core_threshold_ev = -15.0d0 ! active (dissipated) window around E_F(Gamma): pi, pi* (+ the
+  frozen_free_threshold_ev =  14.0d0 ! state degenerate with pi* at Gamma); the unitary runs on all nstate
 /

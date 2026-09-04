@@ -1,10 +1,10 @@
 !########################################################################################!
-! x14 graphene self-induced transparency -- mem  variant, peak E = 30 kV/cm                 !
+! x14 graphene self-induced transparency -- mem  variant, peak E = 30 kV/cm
 !----------------------------------------------------------------------------------------!
-! In-plane (x) Acos2 pulse, hbar*omega = 0.800 eV, 8.0 cycles (tw) + 60.0 fs tail.        !
-! I = 1.194e+06 W/cm^2, A0 = E0/omega = 1.98e-04 a.u. (k excursion), Rabi area ~ 0.07 rad.   !
-! Field before = E_ext column, field after = sheet BC on the Jm column: transmission.py.  !
-! Compare coh / diss / mem at the same field: the memory+dressed-reference variant is the one whose ring sees only REAL carriers (wiki/10 sec. 8.11).   
+! DAST single-cycle 3.36 THz proxy (x12), rescaled to peak |E| = 30.00 kV/cm (DAST_E30kVcm.txt).
+! I_peak = 1.194e+06 W/cm^2, A0 = 1.86e-02 a.u. (peak k excursion) -- perturbative interband (A0 << mesh spacing)
+! Field BEFORE = E_ext column; field AFTER = E_tot column (2D-sheet self-consistent field,
+! yn_sbe_sheet_field) -> transmission.py.  Compare coh / diss / mem at the same field.
 !########################################################################################!
 
 &calculation
@@ -16,16 +16,16 @@
 /
 
 &units
-  unit_system = 'au'
+  unit_system = 'A_eV_fs'
 /
 
 &system
   yn_periodic  = 'y'
-  al_vec1(1:3) = 4.648726d0, 0.0d0, 0.0d0
-  al_vec2(1:3) = 2.324363d0, 4.025915d0, 0.0d0
-  al_vec3(1:3) = 0.0d0, 0.0d0, 37.794523d0          ! 20 Ang vacuum: L_z of the sheet cell
+  al_vec1(1:3) = 2.46000197d0, 0.00000000d0,  0.00000000d0
+  al_vec2(1:3) = 1.22999834d0, 2.13042512d0,  0.00000000d0
+  al_vec3(1:3) = 0.00000000d0, 0.00000000d0, 19.99999867d0     ! 20 Ang vacuum: L_z of the sheet cell
   nelec  = 2
-  nstate = 2
+  nstate = 8
 /
 
 &kgrid
@@ -33,20 +33,18 @@
 /
 
 &tgrid
-  dt = 4.0000d0
-  nt = 1048
+  dt = 0.1000d0                     ! fs
+  nt = 3844
 /
 
 &emfield
-  ae_shape1      = 'Acos2'
-  epdir_re1(1:3) = 1.0d0, 0.0d0, 0.0d0
-  E_amplitude1   = 5.834071e-06
-  tw1            = 1709.742d0
-  omega1         = 0.02939946d0
+  ae_shape1   = 'input'
+  file_input1 = 'DAST_E30kVcm.txt'             ! DAST single-cycle 3.36 THz proxy, scaled to 30 kV/cm peak
+  epdir_re1(1:3) = 1.0d0, 0.0d0, 0.0d0     ! in-plane polarisation (x); the THz beam is at normal incidence (k || z)
 /
 
 &analysis
-  out_projection_k_step = 1048
+  out_projection_k_step = 500   ! k-resolved level-population snapshots every 50 fs (plot_levels.py)
 /
 
 &epm
@@ -54,16 +52,23 @@
 /
 
 &sbe
-  yn_sbe_superres       = 'y'
-  yn_sbe_eph            = 'y'
-  yn_sbe_eph_acoustic   = 'y'
-  yn_sbe_auger          = 'y'
-  sbe_eph_temperature_k = 300.0d0
-  sbe_coulomb_epsilon   = 10.0d0
-  sbe_search_sigma_e_ev = 0.100d0
-  ! ---- graphene 2D collisional-memory analog (wiki/10 sec. 8.11) ----
+  yn_sbe_superres       = 'y'    ! ring (mandatory for both graphene channels)
+  yn_sbe_eph            = 'y'    ! E2g(196 meV) + A1'(160 meV) Kohn-anomaly modes
+  yn_sbe_eph_acoustic   = 'y'    ! D = 16 eV [Hwang-Das Sarma], TF-screened
+  yn_sbe_auger          = 'y'    ! 2D Rana Auger / carrier multiplication [R07]
+  sbe_eph_temperature_k = 300.0d0  ! lattice / phonon-bath temperature
+  sbe_coulomb_epsilon   = 10.0d0   ! substrate eps_r of the Rana rates (10 = R07 benchmark)
+  sbe_search_sigma_e_ev = 0.100d0 ! ring energy-matching width
+  ! ---- graphene 2D collisional-memory analog (wiki/10 sec. 8.11 / wiki/12) ----
   yn_sbe_colmem         = 'y'    ! e-ph gout memory: graphene phonon lines
-  yn_sbe_colmem_pop     = 'y'    ! e-ph source filtered with the phonon lines;
-                                 ! Rana (Coulomb) source with the 2D Dirac-plasmon line
+  yn_sbe_colmem_pop     = 'y'    ! e-ph source: phonon lines; Rana source: 2D Dirac-plasmon line
   yn_sbe_dressed_ref    = 'y'    ! Option A: removes the Dirac-point rotation background
+  yn_sbe_rana_te        = 'y'    ! two-temperature Coulomb sector: R-G, Q_TF, plasmon at T_e
+                                 ! (T_e from the cone moments; lattice cools via e-ph) -> *_sbe_te.data
+  yn_sbe_sheet_field    = 'y'    ! 2D-sheet self-consistent (radiation-reaction) field
+  yn_sbe_vg_sumrule     = 'y'    ! velocity-gauge pure-gauge restoration: J(t) -= adiabatic ground-
+                                 ! state current of the same truncated H_k(A(t)) (parameter-free;
+                                 ! = eta N_e A/V at linear order, exact beyond; wiki/12 sec. 6a)
+  frozen_core_threshold_ev = -15.0d0 ! active (dissipated) window around E_F(Gamma): pi, pi* (+ the
+  frozen_free_threshold_ev =  14.0d0 ! state degenerate with pi* at Gamma); the unitary runs on all nstate
 /

@@ -204,6 +204,15 @@ module bloch_solver_ssbe
         real(8) :: colmem_tauc_au = 0d0
         complex(8) :: zpl(2, 2) = (0d0, 0d0)        ! (line, {n, p}) auxiliary fields
         logical :: zpl_init = .false., zpl_printed = .false.
+        ! two-temperature Coulomb sector (wiki/12 sec. 3): carrier temperature and
+        ! quasi-Fermi levels fitted from the moments of the gathered Dirac populations
+        ! (diagnostics for *_sbe_te.data; kT_e drives the Rana R-G and the plasmon line)
+        logical :: flag_rana_te = .false.
+        ! velocity-gauge f-sum-rule correction (wiki/12 sec. 6): the fraction eta of
+        ! the diamagnetic current A N_e/V the truncated basis cannot cancel
+        logical :: flag_vg_sumrule = .false.
+        real(8) :: vg_eta(3) = 0d0, vg_scap(3) = 0d0, vg_ne_cell = 0d0
+        real(8) :: te_au = 0d0, te_mu_c = 0d0, te_mu_h = 0d0, te_n2d = 0d0, te_p2d = 0d0
 
         real(8) :: coul_pref     = 0d0  ! strength * 4 pi / (eps * Omega_cell * Nk)
         real(8) :: coul_screen2  = 0d0  ! kappa^2 [1/Bohr^2] (Yukawa regulariser)
@@ -362,10 +371,10 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
                              sbe_ii_phassist, yn_sbe_ii_holes, yn_sbe_eph_acoustic, &
                              sbe_eph_ac_xi_ev, &
                              yn_sbe_colmem, sbe_colmem_tau_fs, yn_sbe_colmem_pop, &
-                             yn_sbe_dressed_ref, &
+                             yn_sbe_dressed_ref, yn_sbe_rana_te, yn_sbe_vg_sumrule, &
                              num_kgrid
     use sbe_superres_ssbe, only: bose_factor, s_material_params, colmem_lines, colmem_response, &
-                                 get_material_params, MAT_SUPPORTED
+                                 get_material_params, MAT_SUPPORTED, vg_sumrule_eta, vg_gs_current_k
     use math_constants, only: pi
     use phys_constants, only: au_fs, kB_au, au_ev
     implicit none
@@ -922,6 +931,35 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     ! (wiki/10 sec. 8.6, maintainer-approved 2026-07-20). The kernel lines are
     ! read from the cited phonon table just built above -- no new constants.
     ! =========================================================================
+    ! =========================================================================
+    ! Velocity-gauge f-sum rule (wiki/12 sec. 6a): measure on the GS data how much
+    ! of the diamagnetic current A N_e/V the nb-band basis cancels (diagnostic
+    ! banner). With yn_sbe_vg_sumrule = 'y' calc_current_bloch subtracts the
+    ! adiabatic ground-state current of the same truncated H_k(A(t)) -- the
+    ! pure-gauge identity, parameter-free and exact at every A (its linear
+    ! limit is this eta N_e A/V).
+    ! =========================================================================
+    sbe%flag_vg_sumrule = (yn_sbe_vg_sumrule == 'y')
+    block
+        real(8) :: eta3(3), scap3(3), wsum
+        call vg_sumrule_eta(gs%nk, sbe%nb, gs%eigen(1:sbe%nb, :), gs%p_tm_matrix(1:sbe%nb, 1:sbe%nb, :, :), &
+                            gs%occup(1:sbe%nb, :), gs%kweight, 1d-3, eta3, scap3)   ! skip |de| < 27 meV (the exact Dirac point)
+        wsum = sum(gs%kweight)
+        sbe%vg_eta = eta3;  sbe%vg_scap = scap3
+        sbe%vg_ne_cell = sum(gs%kweight * sum(gs%occup(1:sbe%nb, :), dim=1)) / max(wsum, 1d-300)
+        if (lprint) then
+            write(*, '(a,3f8.4,a,3f8.4,a)') '# VG f-sum rule (occupied bands, this nb): captured oscillator'// &
+                ' strength S = (', scap3, ' ), uncancelled diamagnetic fraction eta = (', eta3, ' )'
+            if (sbe%flag_vg_sumrule) then
+                write(*, '(a)') '#   pure-gauge restoration ON (yn_sbe_vg_sumrule): J(t) -= adiabatic ground-state'// &
+                    ' current of the same truncated H_k(A(t)) [= eta N_e A/V at linear order, exact beyond]'
+            else if (maxval(abs(eta3(1:2))) > 0.02d0) then
+                write(*, '(a)') '#   NOTE: |eta| > 2 % in-plane -> a spurious reactive current ~ A = E/omega'// &
+                    ' (decisive at THz); raise nstate or set yn_sbe_vg_sumrule = ''y'''
+            end if
+        end if
+    end block
+
     sbe%flag_colmem     = (yn_sbe_colmem == 'y')
     sbe%flag_colmem_pop = (yn_sbe_colmem_pop == 'y')
     sbe%flag_dressed_ref = (yn_sbe_dressed_ref == 'y')
@@ -1057,6 +1095,9 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
         ! filter on, the Rana SOURCE densities are filtered with the 2D
         ! Dirac-plasmon line instead of the phonon lines (apply_ring_channels).
         sbe%flag_colmem_2d = sbe%flag_colmem_pop
+        ! two-temperature Coulomb sector (wiki/12 sec. 3): R - G at the carrier T_e
+        sbe%flag_rana_te = (yn_sbe_rana_te == 'y')
+        sbe%te_au = sbe%rana_kt_au
         ! 2D cell area A = V*|b3|/(2 pi): exact when b3 is the out-of-plane
         ! (vacuum) axis, i.e. b3 || z -- true for the graphene datasets.
         block
@@ -1085,6 +1126,9 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
             write(*, '(a)') '#   k-local C n^3 and gap-threshold ring Auger: OFF (2D branch).'
             if (sbe%flag_colmem_2d) write(*, '(a)') '#   2D colmem analog: R - G evaluated on n, p'// &
                 ' memory-filtered with the 2D Dirac-plasmon line w_pl(n,p; Q_TF) (wiki/10 sec. 8.11)'
+            if (sbe%flag_rana_te) write(*, '(a)') '#   two-temperature model: R - G, Q_TF and the plasmon'// &
+                ' line at the carrier T_e fitted from (n, p, energy) of the cone populations;'// &
+                ' lattice = e-ph bath T (cooling through the phonon channel; wiki/12 sec. 3)'
         end if
     else if (sbe%flag_auger .and. sbe%flag_ring) then
         ! ---- NONLOCAL (ring) Auger: the exact time-reverse of the nonlocal
@@ -1298,6 +1342,8 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
 end subroutine
 
 subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
+    use eigen_lapack, only: eigen_zheev
+    use sbe_superres_ssbe, only: vg_gs_current_k
     implicit none
     type(s_sbe_bloch_solver), intent(in) :: sbe
     type(s_sbe_gs_info), intent(in) :: gs
@@ -1335,7 +1381,64 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
 
     call comm_summation(tmp1, tmp, 3, icomm)
     jmat(:) = real(tmp(:)) / (sum(gs%kweight) * gs%volume)
+
+    ! Velocity-gauge pure-gauge (f-sum-rule) restoration, wiki/12 sec. 6a: subtract
+    ! the adiabatic ground-state current of the SAME truncated H_k(A(t)) = eps + A.p.
+    ! A uniform A is a pure gauge, so a complete basis gives zero here for every A;
+    ! the nb-band basis leaves eta N_e A/V at linear order (banner at start-up)
+    ! and a nonlinear remainder once A ~ the k-distance to the Dirac points --
+    ! the linear static form over-corrects there and, with the self-consistent
+    ! sheet field, an over-corrected (anti-inductive) sheet runs away. Exact for
+    ! any population (Tr_k rho is conserved), one ZHEEV per k per call, no parameter.
+    if (sbe%flag_vg_sumrule) then
+        block
+            complex(8) :: Hk(nb, nb), Wk(nb, nb), pk(nb, nb, 3)
+            real(8) :: evk(nb), jgs(3)
+            tmp1 = 0d0
+            !$omp parallel do default(shared) private(ik, Hk, Wk, pk, evk, jgs) reduction(+:tmp1)
+            do ik = sbe%ik_min, sbe%ik_max
+                call vg_coupling_k(sbe, gs, ik, nb, pk)
+                call build_HVG(nb, gs%eigen(1:nb, ik), pk, Ac, Hk)
+                call eigen_zheev(Hk, evk, Wk)
+                call vg_gs_current_k(nb, Wk, pk, Ac, gs%occup(1:nb, ik), jgs)
+                tmp1(:) = tmp1(:) + gs%kweight(ik) * jgs(:)
+            end do
+            !$omp end parallel do
+            call comm_summation(tmp1, tmp, 3, icomm)
+            jmat(:) = jmat(:) - real(tmp(:)) / (sum(gs%kweight) * gs%volume)
+        end block
+    end if
 end subroutine calc_current_bloch
+
+
+! The field-coupling momentum block the propagator uses at k (p_tm + optional
+! nonlocal correction, optional coset projection) -- the pure-gauge reference in
+! calc_current_bloch must be built from the SAME coupling as the dynamics.
+subroutine vg_coupling_k(sbe, gs, ik, nb, pk)
+    implicit none
+    type(s_sbe_bloch_solver), intent(in) :: sbe
+    type(s_sbe_gs_info), intent(in) :: gs
+    integer, intent(in) :: ik, nb
+    complex(8), intent(out) :: pk(nb, nb, 3)
+    integer :: i, j, idir, s
+    real(8) :: pcoset
+    pk(:, :, :) = gs%p_tm_matrix(1:nb, 1:nb, :, ik)
+    if (sbe%flag_vnl_correction) pk(:, :, :) = pk(:, :, :) + gs%rvnl_tm_matrix(1:nb, 1:nb, :, ik)
+    if (sbe%flag_coset_proj) then
+        do idir = 1, 3
+            do j = 1, nb
+                do i = 1, nb
+                    if (i == j) cycle
+                    pcoset = 0d0
+                    do s = 1, 4
+                        pcoset = pcoset + gs%unfold_w(s, i, ik) * gs%unfold_w(s, j, ik)
+                    end do
+                    pk(i, j, idir) = pk(i, j, idir) * pcoset
+                end do
+            end do
+        end do
+    end if
+end subroutine vg_coupling_k
 
 
 function calc_trace(sbe, gs, nb_max, icomm) result(tr)
@@ -2512,7 +2615,8 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
                                  s_material_params, build_vq_table, build_acscreen_table, &
                                  t_ring_opts, debye_kappa2, tf_kappa2_degenerate, fit_fermi_dirac, &
                                  colmem_pop_filter, colmem_pop_init, dressed_ref_delta, &
-                                 colmem_lines, bose_factor, dirac_mu_2d, dirac_plasmon_2d
+                                 colmem_lines, bose_factor, dirac_mu_2d, dirac_plasmon_2d, &
+                                 dirac_fit_te
     use eigen_lapack, only: eigen_zheev
     use communication, only: comm_summation
     use salmon_global, only: num_kgrid, epm_material, sbe_eph_temperature_k
@@ -2534,6 +2638,7 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
     real(8) :: kappa2_c, pnorm
     ! 2D colmem analog (graphene): raw / memory-filtered Rana source densities
     real(8)    :: n_raw, p_raw, n_fil, p_fil, wpl_au, mu_c2, mu_v2
+    real(8)    :: e_raw, kt_use, ed_au, mu_h2
     complex(8) :: cl2(2), mul2(2)
     integer    :: nl2
     complex(8), allocatable :: U_loc(:,:,:)
@@ -2668,11 +2773,18 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
     ! densities BEFORE the phonon-line population filter -- after the dressed
     ! reference / ring gate, so the basis-level subtraction composes with the
     ! time filter -- they get their own Coulomb-sector memory line (channel 4).
-    n_raw = 0d0;  p_raw = 0d0
-    if (sbe%flag_colmem_2d .and. iv >= 1 .and. ic <= nba) then
+    n_raw = 0d0;  p_raw = 0d0;  e_raw = 0d0
+    if ((sbe%flag_colmem_2d .or. sbe%flag_rana_te) .and. iv >= 1 .and. ic <= nba) then
         n_raw = sum(f_all(ic:nba, :)) / (dble(nk) * sbe%rana_area_au)
         p_raw = max((dble(iv) * sbe%occ_max - sum(f_all(1:iv, :)) / dble(nk)) &
                     / sbe%rana_area_au, 0d0)
+        ! kinetic energy density of electrons + holes from the Dirac point E_D
+        ! (midpoint of the instantaneous band edges: exact by e-h symmetry)
+        ed_au = 0.5d0 * (minval(eval_all(ic, :)) + maxval(eval_all(iv, :)))
+        e_raw = (sum(f_all(ic:nba, :) * (eval_all(ic:nba, :) - ed_au)) &
+               + sum((sbe%occ_max - f_all(1:iv, :)) * (ed_au - eval_all(1:iv, :)))) &
+                / (dble(nk) * sbe%rana_area_au)
+        e_raw = max(e_raw, 0d0)
     end if
     if (sbe%flag_colmem_pop) then
         if (.not. allocated(sbe%zpop)) then
@@ -2883,6 +2995,18 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
 
     ! ---- channel 4: graphene 2D Rana Auger/CM -------------------------------
     if (sbe%flag_rana2d .and. iv >= 1 .and. ic <= nba) then
+        kt_use = sbe%rana_kt_au
+        if (sbe%flag_rana_te) then
+            ! two-temperature model (wiki/12 sec. 3): a COMMON carrier temperature and
+            ! the quasi-Fermi levels from the moments (n, p, eps) of the cone
+            ! populations; the lattice stays at the phonon-bath T and cools the
+            ! carriers through the e-ph channel. T_e is READ from the distribution
+            ! each ring step (no separate T_e rate equation).
+            call dirac_fit_te(n_raw, p_raw, e_raw, sbe%rana_vf_au, sbe%rana_kt_au, 2d0, &
+                              kt_use, mu_c2, mu_h2)
+            sbe%te_au = kt_use;  sbe%te_mu_c = mu_c2;  sbe%te_mu_h = mu_h2
+            sbe%te_n2d = n_raw;  sbe%te_p2d = p_raw
+        end if
         if (sbe%flag_colmem_2d) then
             ! 2D colmem analog: memory-filter the SOURCE densities with the 2D
             ! Dirac-plasmon line of the instantaneous e-h plasma, w_pl(n,p) at
@@ -2894,12 +3018,12 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
             ! for slow populations) while the 2*w_laser breathing of the
             ! virtual share filters out of the collision source. Rank-identical
             ! (built from the gathered f_all); z re-seeds after a restart.
-            mu_c2 =  dirac_mu_2d(max(n_raw, 1d-30), sbe%rana_kt_au, sbe%rana_vf_au)
-            mu_v2 = -dirac_mu_2d(max(p_raw, 1d-30), sbe%rana_kt_au, sbe%rana_vf_au)
-            wpl_au = max(dirac_plasmon_2d(mu_c2, mu_v2, sbe%rana_kt_au, sbe%rana_vf_au, &
+            mu_c2 =  dirac_mu_2d(max(n_raw, 1d-30), kt_use, sbe%rana_vf_au)
+            mu_v2 = -dirac_mu_2d(max(p_raw, 1d-30), kt_use, sbe%rana_vf_au)
+            wpl_au = max(dirac_plasmon_2d(mu_c2, mu_v2, kt_use, sbe%rana_vf_au, &
                                           sbe%rana_eps_r), 1d-6)
             call colmem_lines(1, (/ wpl_au /), (/ 1d0 /), &
-                              (/ min(bose_factor(wpl_au, sbe%rana_kt_au), 1d12) /), &
+                              (/ min(bose_factor(wpl_au, kt_use), 1d12) /), &
                               sbe%colmem_tauc_au, nl2, cl2, mul2)
             if (.not. sbe%zpl_init) then
                 call colmem_pop_init(nl2, mul2(1:nl2), tau, n_raw, sbe%zpl(1:nl2, 1))
@@ -2917,13 +3041,13 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
                 sbe%zpl_printed = .true.
             end if
             call rana_auger_dpop(nk, nba, eval_all, f_all, sbe%occ_max, iv, ic, &
-                                 sbe%rana_area_au, sbe%rana_kt_au, sbe%rana_vf_au, &
+                                 sbe%rana_area_au, kt_use, sbe%rana_vf_au, &
                                  sbe%rana_eps_r, tau, dpop, rnet, &
                                  e_src_lo=sbe%ring_e_lo, e_src_hi=sbe%ring_e_hi, &
                                  n2d_in=n_fil, p2d_in=p_fil)
         else
             call rana_auger_dpop(nk, nba, eval_all, f_all, sbe%occ_max, iv, ic, &
-                                 sbe%rana_area_au, sbe%rana_kt_au, sbe%rana_vf_au, &
+                                 sbe%rana_area_au, kt_use, sbe%rana_vf_au, &
                                  sbe%rana_eps_r, tau, dpop, rnet, &
                                  e_src_lo=sbe%ring_e_lo, e_src_hi=sbe%ring_e_hi)
         end if

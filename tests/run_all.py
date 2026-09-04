@@ -41,6 +41,8 @@ FORTRAN_DEPS = {
     "test_dressed_ref.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
     "test_rana_saturation.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
     "test_colmem_2d.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
+    "test_dirac_te_fit.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
+    "test_vg_sumrule.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
 }
 
 

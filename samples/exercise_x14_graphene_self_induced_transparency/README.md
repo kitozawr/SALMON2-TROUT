@@ -1,265 +1,228 @@
-# exercise x14 — graphene **self-induced transparency** at 1–100 kV/cm: field before / field after
+# exercise x14 — graphene under the DAST THz transient (1–100 kV/cm, normal incidence): field before / field after, Zener pair creation, two-temperature Coulomb sector
 
-**What this exercise delivers.** The readiness check the maintainer asked for
-before the graphene self-induced-transparency (SIT) study: which effects are
-ready, how the **transmission coefficient is obtained from the field before and
-after the sheet**, the **level check** of the Dirac cone the SBE runs on, and
-the **population-saturation check** (Auger recombination and impact ionization /
-carrier multiplication balance each other above a density — F. Rana, PRB 76,
-155431 (2007)). Two things were found and fixed on the way: the production
-graphene EPM basis had a **spurious 0.21 eV gap at the Dirac point**, and
-graphene lacked its own virtual-population filter — it now has the **2D colmem
-analog** ([`wiki/10` §8.11](../../wiki/10_open_quantum_systems_literature.md)).
+**What this exercise delivers.** The cluster-ready study the maintainer asked for
+before launching the graphene self-induced-transparency (SIT) runs: the **dense
+production grid**, the **self-consistent sheet field** (so the solver's total field
+*is* the transmitted field), the **DAST single-cycle THz drive** rescaled to
+1–100 kV/cm, the **two-temperature model** of the Coulomb (Auger / carrier-
+multiplication) sector with cooling through the phonon channel, the **level
+check** that exposed a spurious 0.21 eV Dirac-point gap in the old basis, and
+the **population-saturation check** (Auger and impact ionization balance at
+n_i(T), Rana 2007). The methods write-up is
+[`wiki/12_graphene_sheet_solver.md`](../../wiki/12_graphene_sheet_solver.md);
+the collisional-memory design is `wiki/10` §8.11.
 
-Everything below was run in this repository (24² smoke grid, serial build);
-the shell-resolving production runs are a cluster job whose recipe and budget
-are given in §5.
+Geometry: THz beam at **normal incidence** on a free-standing monolayer, E in the
+sheet plane (x); everything in `A_eV_fs` units.
 
 ---
 
-## 1. Physics in one paragraph
+## 1. Physics and the honest expectation (read before running)
 
-A free-standing graphene sheet absorbs the universal fraction **πα = 2.29 %**
-of normally incident light whenever the interband transition at the photon
-energy is Pauli-allowed (ħω ≫ 2E_F, k_BT). The resonant shell in k-space has
-radius `k_res = ħω/2ħv_F` around K/K′. A strong pulse fills that shell
-(Pauli blocking / Rabi saturation) and the sheet **bleaches** — its
-transmission rises: self-induced transparency. What limits the bleaching is
-how fast the shell refills/empties: optical-phonon emission (E2g 196 meV,
-A1′ 160 meV, ~20 fs) and the **Coulomb channel**, where on the gapless cone
-impact ionization (carrier multiplication, CM) and Auger recombination are
-exact time-reverses. Their balance `R = G` holds when the electron and hole
-quasi-Fermi levels coincide; for a symmetric e–h population that is μ = 0, i.e.
-the **intrinsic thermal density**
+**The drive.** `DAST_singlecycle_100kV.txt` (exercise x12): a Gaussian A(t), so
+E = −dA/dt is one clean cycle at **3.36 THz** (ħω = 13.9 meV, period 298 fs),
+285 fs long. `make_inputs.py` rescales it to the exact peak field (1, 3, 10, 30,
+100 kV/cm), removes the initial offset and cos²-windows the ends (the SALMON
+file reader returns 0 outside the file — an offset would be a δ-spike in E).
+Peak k-excursion `A₀ = E₀/ω`: **0.062 a.u. at 100 kV/cm** = 6 spacings of the
+147² mesh (0.0106 a.u.); 6×10⁻⁴ a.u. at 1 kV/cm.
 
-    n₀ = n_i(T) = (π/6) (k_B T / ħ v_F)²  = 8.1×10¹⁰ cm⁻² at 300 K  (∝ T²)
+**What the field does to the cone.** At THz the photon is far below any
+interband transition the mesh can resolve; the physics is the field *sweeping*
+k + A(t) through the Dirac point: massless **Landau–Zener / Schwinger pair
+creation** with P(k⊥) = exp(−π v_F k⊥²/E) [Allor–Cohen–McGady 2008; Dóra–Moessner
+2010], rate per area Γ = (g/4π²) E^{3/2}/v_F^{1/2} (g = 4) — see `wiki/12` §7:
 
-— below it the plasma net-multiplies, above it net-recombines: **the pair
-population saturates at n_i(T)** (unit-tested, `tests/test_rana_saturation.f90`).
-In the field range 1–100 kV/cm the intensities are 1.3×10³–1.3×10⁷ W/cm² and
-the vector-potential excursion `A₀ = E₀/ω` is tiny (6.6×10⁻⁴ a.u. at 100 kV/cm,
-0.8 eV): this is the **perturbative-interband, weak-dressing** regime — the
-Rabi area of the 8-cycle pulse reaches 0.25 rad at 100 kV/cm, so saturation
-sets in at the top of the range. (The THz regime of the same fields, where
-doped CVD graphene bleaches by Drude-carrier heating, needs two increments the
-code does not have yet — §7.)
+| E₀ [kV/cm] | A₀ [a.u.] | A₀ / Δk (147²) | LZ tube k⊥ = √(E/πv_F) [a.u.] | pairs per passage (analytic) |
+|---|---|---|---|---|
+| 1 | 6.2×10⁻⁴ | 0.06 | 3.7×10⁻⁴ | ~1.5×10⁹ cm⁻² |
+| 10 | 6.2×10⁻³ | 0.6 | 1.2×10⁻³ | ~5×10¹⁰ |
+| 30 | 1.9×10⁻² | 1.8 | 2.0×10⁻³ | ~2.5×10¹¹ |
+| 100 | 6.2×10⁻² | 5.9 | 3.7×10⁻³ | ~1.5×10¹² |
+
+(two passages per cycle, Stückelberg interference neglected). The mesh
+*resolves* this process when A₀ spans ≥ 2 spacings — **E₀ ≳ 30 kV/cm at 147²**;
+below that the created density is the analytic one and the mesh only samples
+the K point itself (147 = odd×3 ⇒ K exactly on the half-shifted MP mesh).
+
+**Expected transmission range.** The sheet starts *empty* (T = 0 filling, no
+thermal or doping carriers — §9), so at low field it is transparent at THz:
+T → 1 (the interband σ_univ response sits at k = ħω/2ħv_F ≈ 6×10⁻⁴ a.u., far
+inside one mesh cell; the universal 2.3 % is *not* available to the mesh at
+3.4 THz). As the field grows, the created pairs absorb: coherently only their
+creation energy (~2v_F k⊥ ≈ 0.1 eV per pair → a few per cent of the pulse energy
+at 100 kV/cm), with phonon scattering also the intraband (Drude) energy they
+acquire while accelerated to v_F A₀ ≈ 0.7 eV. **For the intrinsic sheet the
+model predicts THz-induced *absorption* that grows with the field** — ΔT from
+≈ 0 at 1–10 kV/cm to −(several %) coherent and up to −(tens of %) with
+dissipation at 100 kV/cm — as observed in undoped graphene [Tani et al. 2012].
+The self-induced *transparency* (bleaching) reported for doped CVD graphene
+[Hwang 2013; Paul 2013; Mics 2015] is the Drude-weight reduction of
+*pre-existing* carriers by heating and requires a doped / finite-temperature
+initial occupation, which this solver does not have yet (§9). The numbers from
+the local runs are in §7.
+
+For comparison, the near-IR interband regime (0.8 eV, `--field acos2`) at the
+same fields is perturbative: pulse area 0.25 rad at 100 kV/cm ⇒ ΔA/A ≈ −θ²/12
+≈ −0.5 %, ΔT ~ 10⁻⁴.
 
 ## 2. Readiness matrix (graphene, in-plane field, 1–100 kV/cm)
 
 | effect | status | note |
 |---|---|---|
 | EPM ground state (π/π* Dirac pair) | ✅ **fixed** | 43-PW basis (`epm_pw_cutoff_ry = 29.4`); the old 7-PW basis is gapped at K by 0.21 eV (§4) |
-| coherent velocity-gauge SBE (CF4 + Houston) | ✅ | 2 bands, the VG "basis-edge" monitor fires for ANY excitation (top band = the conduction band) — expected, ignore |
-| e-ph optical E2g/A1′ (inter-k ring) | ✅ | Piscanec/Lazzeri couplings, ring mandatory |
-| e-ph acoustic (D = 16 eV, TF-screened, grid-resolved q) | ✅ | Hwang–Das Sarma |
-| 2D Rana Auger / carrier multiplication (ring) | ✅ | R−G on the gathered n, p; **evaluated at the e-ph bath T** (no carrier T_e yet — §7) |
-| 2D-sheet Σ^HF (`yn_sbe_coulomb`) | ✅ (off by default here) | renormalizes v_F → shifts k_res; enable deliberately |
-| Option A dressed reference (`yn_sbe_dressed_ref`) | ✅ | material-agnostic; on the exactly gapless K point the frozen state maps to equilibrium exactly |
-| **virtual-population filter for graphene — the 2D colmem analog** | ✅ **NEW** | `yn_sbe_colmem` + `yn_sbe_colmem_pop` now run on graphene: phonon lines for the e-ph sectors, the **2D Dirac-plasmon line** ω_pl(n,p; Q_TF) for the Rana source (§3.3, `wiki/10` §8.11) |
-| impact ionization (`yn_sbe_impact_ionization`) | 🚫 physics | gap-threshold law meaningless on a gapless cone — CM *is* the Rana channel |
-| carrier-carrier FD fit (`yn_sbe_eeh`) | 🚫 physics | no cited graphene rate |
-| Kuhn–Zurek dephasing (`sbe_decoh_*`) | 🚫 physics | many-body coherence loss (error stop) |
-| **transmission from field before/after** | ✅ post-processing | sheet boundary condition on the `Jm` column (§3); the single-cell driver itself has no self-consistent field — the `S_rr` diagnostic tells when that matters |
-| doped / finite-T initial occupation | — limit | not available (`gs%occup` = integer filling) — §7 |
-| carrier temperature in the Rana rates | — limit | uses the lattice T — §7 |
+| coherent velocity-gauge SBE (CF4 + Houston) | ✅ | 2 bands; the VG "basis-edge" monitor fires for ANY excitation (top band = the conduction band) — expected |
+| **2D-sheet self-consistent field** (`yn_sbe_sheet_field`) | ✅ **NEW** | radiation reaction in the single-cell driver: `E_tot` = transmitted field, ledger in the local field, checkpointed (§3) |
+| e-ph optical E2g/A1′ + acoustic (inter-k ring) | ✅ | Piscanec/Lazzeri; Hwang–Das Sarma acoustic, TF-screened |
+| 2D Rana Auger / carrier multiplication (ring) | ✅ | R−G on the gathered n, p |
+| **two-temperature Coulomb sector** (`yn_sbe_rana_te`) | ✅ **NEW** | T_e and quasi-Fermi levels from the cone moments; R−G, Q_TF, plasmon line at T_e; lattice = e-ph bath (cooling via phonons); `*_sbe_te.data` (§5) |
+| **2D collisional-memory analog** (`yn_sbe_colmem`, `_pop`) | ✅ | phonon lines for e-ph, 2D Dirac-plasmon line for the Rana source (`wiki/10` §8.11) |
+| Option A dressed reference (`yn_sbe_dressed_ref`) | ✅ | removes the Dirac-point rotation background |
+| 2D-sheet Σ^HF (`yn_sbe_coulomb`) | ✅ (off by default) | renormalizes v_F; enable deliberately |
+| impact ionization / eeh / Kuhn–Zurek | 🚫 physics | gapless cone (error stop) |
+| doped / finite-T initial occupation; hot phonons; substrate in the sheet field | — limits | §9 |
 
 ## 3. Field before → field after → transmission
 
-### 3.1 The sheet boundary condition (`transmission.py`)
-The single-cell driver writes `E_ext` (the incident field it was driven with)
-and the matter current `Jm` (electron current per cell volume, vacuum included)
-to `*_sbe_rt.data`; its `E_tot` column equals `E_ext`. For a 2D sheet at normal
-incidence, E is continuous across the sheet and H jumps by the sheet current, so
-(Hartree a.u., `Z₀ = 4π/c`)
+The driver writes `E_ext` (incident) and, with `yn_sbe_sheet_field = 'y'`,
+propagates in the **local** field of the sheet (Hartree a.u., Z₀ = 4π/c):
 
-    J_s = −Jm · L_z                       physical charge current per unit width
-    E_t = (2 E_inc − Z₀ J_s)/(1 + n_sub)   field AFTER   (n_sub = 1 free-standing)
-    E_r = E_t − E_inc                      reflected
+    E_t = E_inc − (Z₀/2) J_s,   J_s = −Jm·L_z,   dA_ind/dt = −(2π/c) L_z Jm,
+    A_tot = A_ext + A_ind,      E_tot = E_ext + (2π/c) L_z Jm
 
-(`J_phys = −Jm` because the driver's energy ledger is `dW = −E·Jm V dt`.) Power,
-**fluence-integrated** (Parseval-exact — the primary numbers):
+so the `E_tot`/`Ac_tot` columns of `*_sbe_rt.data` **are** the transmitted field
+and the energy ledger is the work of the local field (`wiki/12` §5). Then
 
-    T = n_sub ∫E_t² / ∫E_inc²,   R = ∫E_r² / ∫E_inc²,   A = 1 − T − R
-    (c/4π)(E_inc² − E_t² − E_r²) = E_t J_s   pointwise  ⇒  A = Joule absorption in the transmitted field
+    T = ∫E_t²/∫E_inc²,  R = ∫E_r²/∫E_inc² (E_r = E_t − E_inc),  A = 1 − T − R,
 
-Linear universal sheet (σ = e²/4ħ = ¼ a.u.): `T = 1/(1+π/2c)² = 0.97746`,
-`A = πα/(1+πα/2)² = 0.02241`, `R = 1.3×10⁻⁴` — reproduced by
-`tests/test_sheet_transmission.py`, together with the Fresnel substrate limit
-`T = 4n/(1+n)²` and the pointwise energy identity for an arbitrary current.
+fluence-integrated (Parseval-exact; a single-FFT-bin "T at the carrier" is not
+bounded by 1 for a reshaped pulse and is not used). `transmission.py` detects
+the self-consistent mode (`SC`), prints the deviation of `E_tot` from the
+boundary-condition reconstruction on `Jm` as a consistency number (`dEt`, the
+explicit-Euler lag), and — for runs without the flag (`pert`) — the
+radiation-reaction term `S_rr = (Z₀/2)∫J_s²/F = A_E − A` that tells whether the
+perturbative estimate is trustworthy. Linear universal sheet: T = 0.97746,
+A = 0.02241 (`tests/test_sheet_transmission.py`).
 
-### 3.2 The self-consistency (radiation-reaction) diagnostic
-The SBE was driven by `E_inc`, not by the local field `E_t`. Its own energy
-ledger gives `A_E = ∫E_inc J_s / F_inc`, and **exactly** `A = A_E − S_rr` with
+## 3a. Basis: the velocity-gauge f-sum rule and the pure-gauge restoration
 
-    S_rr = (Z₀/2) ∫J_s² / F_inc .
+In the velocity gauge every electron of the filled π band carries the diamagnetic
+current A·N_e/V; a *complete* basis cancels it exactly (a uniform A is a pure
+gauge), an `nstate`-band basis only to the fraction S = ⟨Σ_m 2|p_nm|²/Δε⟩ (0.70 for
+2 bands, 0.90 for 4, 0.964 for 8, 0.970 for 16 — the rest sits > 10 eV up). The
+remainder η N_e A/V is a reactive current ∝ E/ω: negligible in the near-IR,
+decisive at 3 THz, where the bare 2-band sheet reflects 85 % (a plasma mirror) and
+even 16 bands leave R ≈ 8 %. The solver prints S and η at start-up. With
+`yn_sbe_vg_sumrule = 'y'` it subtracts, at every step, the **adiabatic ground-state
+current of the same truncated H_k(A(t))** (one ZHEEV per k): identically zero in a
+complete basis, exact at every A and for any population, no fitted quantity
+(wiki/12 §6a, `tests/test_vg_sumrule.f90`). A linear static form (−η N_e A) was
+tried first and withdrawn — it over-corrects at 100 kV/cm and the anti-inductive
+sheet runs away under the self-consistent field (T > 1). `sumrule_check.py` reports
+S, η and the residual A-projection of any run (must be ≈ 0).
 
-On a mesh that resolves the shell `S_rr ≈ (Z₀σ)²/2 ≈ 3×10⁻⁴` (negligible against
-2.3 %). On an *unresolved* mesh a few near-resonant k-points carry a huge
-**reactive** current and `S_rr` becomes comparable to `A` — the script prints it
-as the reliability flag. When it is not ≪ A, use an exact route: (a) a
-radiation-reaction term in the single-cell driver, `dA_ind/dt = (2π/c)·J_s`
-(one line in `realtime_ssbe`, not yet added — then `E_tot` *is* the transmitted
-field), or (b) `theory='maxwell_sbe'` (1D FDTD, incident/reflected/transmitted
-written to `*_sbe_wave.data`) with **`hx_m = L_z = 37.79 a.u.`** so the FDTD
-cell carries the same sheet current as the SBE cell, `dt ≤ hx_m/c = 0.28 a.u.`
-(CFL) and enough `nxvac_m` to hold the pulse — a recipe, not shipped/tested here.
+## 4. Level check — the Dirac cone the SBE runs on
 
-A single-FFT-bin "T at the carrier" is deliberately **not** reported: pulse
-reshaping moves spectral weight between bins and such a ratio is not bounded
-by 1 (it came out 1.08 on the smoke mesh). The script gives the band-integrated
-`T_band` over the incident FWHM band and `Re σ/σ_univ` (= 1 for the universal
-sheet) as secondary diagnostics.
-
-### 3.3 The graphene 2D colmem analog (what "ready" required)
-The maintainer's directive: graphene needs its own virtual-population filter
-("2d colmem аналог"). The 2026-07-20 graphene exclusion of `yn_sbe_colmem/_pop`
-was a guard, not physics; it is lifted, and the gapless cone gets the one
-ingredient the 3D machinery lacked. Graphene's population channel is the Rana
-**Coulomb** rate model on the *global* densities n, p — so the memory line of
-that sector is not a phonon energy but the plasma response, the build-up time
-of screening. Implemented (`wiki/10` §8.11; no new inputs, no new parameters):
-
-| sector | memory line |
-|---|---|
-| e-ph coherence / e-ph source | graphene phonon table (E2g, A1′, acoustic) — the standard `colmem_lines` |
-| **Rana (Coulomb) source n, p** | **2D Dirac plasmon** `ω_pl² = 2(W_c+W_v)Q_TF/ε_r`, `W(μ) = 2k_BT ln[2cosh(μ/2k_BT)]` (Falkovsky–Varlamov Drude weight), at the collision's own screening momentum `Q_TF` [R07 Eq. 13] — Hwang & Das Sarma, PRB 75, 205418 (2007) |
-
-At 300 K, ε_r = 10: ω_pl = 31 meV (intrinsic), 133 meV at 10¹² cm⁻² — the phonon
-scale, all ≪ 2ħω. The filter passes a constant density exactly (calibrated R07
-rates untouched) and transmits the 2ω breathing at |R(2ω)| = 0.16
-(`tests/test_colmem_2d.f90`). Together with `yn_sbe_dressed_ref` (which removes
-the Dirac-point rotation background at the source) this is the graphene version
-of the three-sector fix of `wiki/10` §8.10 — the `mem` variant of this exercise.
-
-## 4. Level check — the Dirac cone the SBE actually runs on
-
-`python3 tests/test_graphene_dirac_levels.py` (numpy only):
+`python3 tests/test_graphene_dirac_levels.py`:
 
 | basis (`epm_pw_cutoff_ry`) | PW | gap at K | v_F | Γ bottom / M dip |
 |---|---|---|---|---|
-| 2.94 (the old x11 input) | 7 | **0.2125 eV — spurious** | — | −8.5 / −2.8 eV |
-| **29.4 (x11 + x14 now)** | 43 | 6.5×10⁻⁶ eV (Python), **0.0000 eV (Fortran bandpath)** | 0.960×10⁶ m/s | −7.78 / −2.70 eV (thesis windows) |
+| 2.94 (old x11 input) | 7 | **0.2125 eV — spurious** (Python = Fortran bandpath) | — | −8.5 / −2.8 eV |
+| **29.4 (x11 + x14 now)** | 43 | 6.5×10⁻⁶ eV (Python), 0.0000 (Fortran) | 0.960×10⁶ m/s | −7.78 / −2.70 eV |
 
-The 7-vector set {0, first shell} is not closed under the little group C₃ᵥ of K
-(a rotation about K maps a first-shell G onto b₂−b₁, a second-shell vector), so
-the truncation breaks the symmetry protection of the Dirac degeneracy. 43 PW is
-shell-complete to n = 12 and restores it; the SBE still uses `nstate = 2`, so the
-larger GS basis costs nothing. Also: the SALMON Monkhorst–Pack mesh is
-half-shifted, `(2i−N−1)/2N` — **K = (2/3, 1/3) is on the mesh only for ODD
-multiples of 3** (9, 15, …, 147, 153); 12, 24 and 150 straddle K by half a step.
-The EPM v_F (0.96×10⁶ m/s) is 4 % below the 10⁸ cm/s the Rana constants assume
-(n_i ∝ 1/v_F²: 8 %).
+The 7-vector set is not closed under the little group C₃ᵥ of K, so the
+truncation breaks the symmetry protection of the Dirac degeneracy. Also: the
+half-shifted Monkhorst–Pack mesh (2i−N−1)/2N contains K = (2/3, 1/3) **only for
+odd multiples of 3** (…, 147, 153); 12, 24, 150 straddle K by half a step —
+hence nk = 147 here.
 
-## 5. k-mesh resolution and the production budget
+## 5. Population saturation and the two-temperature model
 
-The resonant shell must be sampled: mesh points per shell radius
-`= (ħω/2v_F)/(|b|/N)`:
-
-| N | 12 | 24 | 48 | 96 | **150** | 300 |
-|---|---|---|---|---|---|---|
-| 0.4 eV | 0.13 | 0.26 | 0.51 | 1.0 | 1.6 | 3.2 |
-| **0.8 eV** | 0.26 | 0.53 | 1.0 | 2.1 | **3.2** | 6.4 |
-| 1.5 eV | 0.48 | 0.97 | 1.9 | 3.9 | 6.0 | 12 |
-
-Below ~1 the mesh sees a few discrete near-resonant k-points instead of a shell
-(the 24² smoke mesh has exactly 4 points at 0.777 eV, 40 meV under the 0.816 eV
-carrier — hence Re σ/σ_univ = 4 there). **Production at 0.8 eV: N ≥ 150** (odd
-multiple of 3 if the exactly gapless K point itself is wanted: 147 or 153).
-
-Cost: the graphene ring is e-ph + Rana only — **O(nk²)**, exp-bound (no O(nk³)
-II/Auger kernel). Measured: ≈ 40 ms/step at 24² (576 k) on 4 threads ⇒ ≈ 1.3
-s/step at 150² on 48 threads ⇒ **≈ 25 min per 100-fs run** (1048 steps at
-dt = 4 a.u.); the coherent runs are seconds. The 15-run scan ≈ 6 h; the
-essential set (100 kV/cm × {coh, diss, mem} + dark) ≈ 1.5 h.
+`tests/test_rana_saturation.f90`: the Coulomb balance R = G holds at the intrinsic
+density n_i(T) = (π/6)(k_BT/ħv_F)² = **8.08×10¹⁰ cm⁻² at 300 K** (∝ T²); the
+CPTP channel relaxes to it monotonically from above (Auger) and below (carrier
+multiplication). Evaluated at the lattice temperature this under-estimates the
+plateau of a hot plasma by (T_e/T_L)². With `yn_sbe_rana_te = 'y'` the common
+carrier temperature and the quasi-Fermi levels are **read from the first two
+moments (n, p, energy) of the gathered cone populations** at every ring step
+(`dirac_fit_te`; `tests/test_dirac_te_fit.f90` recovers T to 10⁻⁴ from
+explicit-mesh moments); R−G, Q_TF and the plasmon line run at T_e, the phonon
+Bose factors at the lattice T — the two-temperature model with cooling through
+the e-ph channel, without a separate T_e rate equation. `*_sbe_te.data`
+records t, T_e, μ_c, μ_h, n, p, n_i(T_e), T_bath; `saturation_check.py` plots it.
 
 ## 6. Run
 
 ```bash
 cd samples/exercise_x14_graphene_self_induced_transparency
-python3 make_inputs.py --nk 24 --outdir smoke_nk24      # pipeline smoke (seconds per run)
-python3 make_inputs.py --nk 150 --outdir prod_nk150     # production (cluster; see wiki/11)
-cd smoke_nk24 && cp ../run_scan.sh . && OMP_NUM_THREADS=4 SALMON=../../../build/salmon bash run_scan.sh
-python3 ../transmission.py runs/E*/graphene_sit_sbe_rt.data --plot        # -> transmission_scan.png
+python3 make_inputs.py --nk 147                 # == prod_nk147/ (shipped): DAST 1..100 kV/cm x {coh,diss,mem} + dark
+python3 make_inputs.py --nk 24 --outdir smoke_nk24   # pipeline smoke (shipped)
+cd prod_nk147 && cp ../run_scan.sh . && OMP_NUM_THREADS=48 SALMON=../../../build/salmon bash run_scan.sh 'rt_E100kVcm_*.inp'
+python3 ../transmission.py runs/*/graphene_sit_sbe_rt.data --plot
 python3 ../saturation_check.py runs/E100kVcm_{coh,diss,mem}/graphene_sit runs/dark_mem/graphene_sit --plot
 ```
-`make_inputs.py` is the single source of truth (GS + RT share nk/cell/sysname;
-`--hw-ev`, `--fields`, `--cycles`, `--sigma-ev`, `--temp-k`, `--eps-r`); the
-variants are `coh` (no dissipation), `diss` (ring: e-ph + acoustic + Rana,
-Markovian — as x11) and `mem` (diss + the 2D colmem analog + dressed reference).
-`rt_dark_*` are the zero-field controls.
+Variants: `coh` (no dissipation), `diss` (ring e-ph + acoustic + Rana at the lattice
+T, Markovian — as x11), `mem` (diss + 2D colmem analog + dressed reference + T_e).
+All carry the sheet field (`--no-sheet` to switch it off) and the velocity-gauge
+**pure-gauge restoration** `yn_sbe_vg_sumrule = 'y'` (`--no-sumrule` to switch it
+off; §3a). `--field acos2 --hw-ev 0.8 --cycles 8` gives the near-IR pulse of the
+first x14 version. Other switches: `--nstate 8` (default; 2 = cheap scan),
+`--pol x|y` (in-plane polarisation; the beam is at normal incidence, k ∥ z, so E is
+always in the sheet plane), `--n-layers 2` (two electronically decoupled sheets in
+the same local field — incoherent/large-angle-twisted bilayer; `sbe_sheet_nlayers`),
+`--snap-fs 50` (k-resolved level-population snapshots for `plot_levels.py`).
 
-## 7. What the 24² smoke scan shows (pipeline validation — the mesh is UNRESOLVED, magnitudes are not physics)
+```bash
+python3 ../plot_levels.py runs/E100kVcm_mem/graphene_sit --times 100,150,200,300   # band populations vs t + k-maps around K
+python3 ../sumrule_check.py graphene_sit --runs 'runs/*/graphene_sit_sbe_rt.data'  # basis f-sum rule + residual reactive current
+```
 
-17 runs, **electrons = 2.000 at every step in every run**, all banners present
-(`# graphene: 2D collisional-memory analog`, `# 2D colmem analog: R − G evaluated
-on n, p memory-filtered with the 2D Dirac-plasmon line …`, field audit
-`peak |E| = 0.100 MV/cm`).
+**Cost (measured 2026-09-04, 4 threads).** Coherent runs: seconds to minutes at
+147². Dissipative runs: the graphene ring (e-ph inter-k + Rana) is O(N_k²) and
+exponential-bound — ≈ 60 ms/step at 24² with the THz drive (all cone states are
+sources) ⇒ ≈ 84 s/step at 147² on 4 threads ⇒ **≈ 7 s/step on 48 threads ⇒ ≈ 7.5 h
+per 3844-step run**. Levers: `--dt-fs 0.2` (halves it; the CF4 unitary is exact
+per step, check `nex` against 0.1 fs), `--tail-fs 0` (−25 %), MPI ranks over k
+(the ring gather is MPI-parallel, `wiki/11`). Essential set = 100 kV/cm ×
+{coh, diss, mem} + `dark_mem`.
 
-| E₀ [kV/cm] | variant | T | R | A (sheet BC) | A_E (ledger) | S_rr | Re σ/σ_univ |
-|---|---|---|---|---|---|---|---|
-| 1 … 100 | coh | 0.95600 | 0.0132 | 0.03078 | 0.05722 | 0.0264 | 4.11 |
-| 1 … 100 | diss | 0.95446 | 0.0133 | 0.03227 | 0.05881 | 0.0265 | 4.18 |
-| 1 … 100 | mem | 0.95592 | 0.0132 | 0.03085 | 0.05731 | 0.0265 | 4.12 |
+## 7. Local validation (this session, 4 threads) — filled in below
 
-- **Linear regime:** T, R, A are field-independent from 1 to 100 kV/cm to 10⁻⁴
-  (the four detuned discrete points do not saturate like a shell; the coherent
-  100 kV/cm run bleaches by only 7×10⁻⁴ of A). Saturation needs the resolved
-  shell (§5).
-- **Bookkeeping closes:** 100 kV/cm makes 9.5×10¹⁰ pairs/cm² (`saturation_check`),
-  which is exactly the ledger's 5.7 % of the 2.05×10⁻⁷ J/cm² fluence at 0.816 eV
-  (πα would give 3.6×10¹⁰ — the 4-point mesh over-absorbs ×2.5); `S_rr ≈ A`
-  flags the unresolved mesh as intended.
-- **The mechanism of `wiki/10` in miniature:** `diss` adds +5 % absorption —
-  Markovian e-ph dephasing converts the reversible resonant polarization into
-  real population (B25's "dephasing ionization"); `mem` returns to the coherent
-  value (+0.2 %): the 2D colmem analog removes the fabricated part. At these
-  fields the *dressing* itself is negligible (virtual fraction at peak 0.000 —
-  A₀ ≪ Δk), so the population filters change little; their job is the strong-field
-  / THz end.
-- **Saturation direction is right:** 100 kV/cm gives 9.5×10¹⁰ cm⁻² > n_i(300 K)
-  = 8.08×10¹⁰ → the Rana ledger ends in **net recombination** (−1.5×10⁸ pairs/cm²
-  over the tail); 10 kV/cm gives 1.0×10⁹ < n_i → **net carrier multiplication**
-  (+7.6×10⁷, +7 %). The dark runs stay exactly at zero: the vacuum is a fixed
-  point of CVCC generation (a hot third carrier is needed), so there is no
-  spurious dark drift.
+*(section written after the runs: near-IR πα check on the resolved 147² mesh;
+THz 147² coherent 1/10/30/100 kV/cm with and without the sheet field; K on/off
+mesh (147 vs 150); dt 0.1 vs 0.05 fs; 300² convergence; 24² ring with T_e.)*
 
-Figures from the smoke scan: `transmission_scan.png`, `saturation_check.png`.
+## 8. What to look for at production (147², DAST)
 
-## 8. What to look for at production (150², 0.8 eV)
+- `coh` 1 kV/cm: T ≈ 1 (empty sheet, THz far below the resolvable interband
+  window); the pair density after the pulse follows the analytic Γ ∝ E^{3/2}
+  table of §1 only from ~30 kV/cm up (mesh-resolved LZ tube).
+- `coh` 100 kV/cm: pairs ~10¹² cm⁻² after the pulse; absorption a few per cent
+  (creation energy only); `R` small.
+- `diss`/`mem` 100 kV/cm: the created carriers are accelerated to ~0.5 eV and
+  cooled by optical-phonon emission — the ledger's absorption grows to tens of
+  per cent; T_e in `*_sbe_te.data` rises to thousands of K during the cycle and
+  decays toward 300 K on the phonon timescale (tens of fs); the Rana channel
+  *multiplies* carriers while n < n_i(T_e) and recombines once T_e has dropped.
+  `mem` differs from `diss` by the removed dephasing-ionization share (`wiki/10`
+  §8.7 logic) and by the T_e-consistent balance.
+- Reflection stays ≪ absorption (R ~ (Z₀σ/2)² — a few 10⁻³ even for σ ~ 5 σ_univ).
 
-- `Re σ/σ_univ → 1` and `S_rr ≪ A` in the `coh` 1 kV/cm run — the linear
-  universal-sheet check (T → 0.9775). If not, the shell is still unresolved.
-- **T(E₀) rising** toward 100 kV/cm: the coherent bleaching fraction scales with
-  the Rabi area² (≈ 0.06 at 100 kV/cm ⇒ ΔA/A ≈ −3 %); `diss` recovers part of
-  it (phonon emission empties the shell in ~20 fs); `mem` is the physically
-  correct dissipative answer.
-- The post-pulse density: above `n_i(T)` it decays on the R07 lifetime (~ps at
-  10¹² cm⁻²; only the first ~60 fs of the tail are in the run — the slope, not
-  the plateau, is what you see). Remember the plateau the code relaxes to is
-  `n_i(T_bath)`; a hot plasma (T_e ~ 1000–3000 K ⇒ n_i ~ 10¹²–10¹³) would sit
-  higher (§9).
+## 9. Limits recorded (not blockers for this study)
 
-## 9. Limits recorded (not blockers for the near-IR study)
+1. **Initial state at T = 0, undoped** (`gs%occup` = integer filling): no thermal
+   / doping Drude background, hence no *bleaching* channel; the FD(E_F, T)
+   initial occupation is the next increment (it also generalizes the dressed
+   reference to fractional filling).
+2. Below ~30 kV/cm at 147² the LZ tube is thinner than the mesh spacing — the
+   pair creation is then analytic rather than mesh-resolved.
+3. Hot phonons are not included (fixed-temperature bath).
+4. The Coulomb sector and the T_e fit assume quasi-thermal branch distributions.
+5. The sheet field is free-standing; a substrate index enters the boundary
+   condition trivially (`wiki/12` Eq. 4) but is not yet a driver option.
 
-1. **No doping / finite-T initial state.** `gs%occup` is integer filling. The
-   THz-regime SIT of doped CVD graphene (E_F ≈ 0.1–0.4 eV, Drude heating,
-   Hwang 2013 / Mics 2015 / Hafez 2018) needs (a) an FD(E_F, T) initial state
-   (touches the dressed-reference formula, which assumes full/empty bands) and
-   (b) a k-mesh refined around K by ~10² beyond what a uniform MP grid affords.
-2. **T_e in the Rana channel.** The balance density is evaluated at the bath T;
-   a carrier temperature from the two moments (n, energy) of the gathered Dirac
-   populations would move the plateau to `n_i(T_e)`. Bounded increment.
-3. **Self-consistent sheet field.** The radiation-reaction term in the single-cell
-   driver (§3.2) — one line plus a flag; until then `S_rr` is the flag.
-4. The VG basis-edge monitor warns on the 2-band model whenever the conduction
-   band is populated; the warning is expected here.
+## 10. Tests added by this exercise
 
-## 10. Tests added
-
-`tests/test_graphene_dirac_levels.py` (43-PW cone: gapless, v_F, e–h symmetry,
-linearity, thesis windows; the 7-PW trap; the resolution advisory),
-`tests/test_sheet_transmission.py` (Fresnel, universal sheet, energy identity,
-spectral/fluence), `tests/test_rana_saturation.f90` (n₀ = n_i(T), T² law,
-two-sided monotone CPTP saturation), `tests/test_colmem_2d.f90` (plasmon-line
-limits, filter fixed point and |R(2ω)|, Rana source overrides). Suite:
+`test_graphene_dirac_levels.py`, `test_sheet_transmission.py`,
+`test_rana_saturation.f90`, `test_colmem_2d.f90`, `test_dirac_te_fit.f90` —
 `python3 tests/run_all.py`.

@@ -98,7 +98,7 @@ once, watch the carriers roll into the valleys in 3D:
 | [`exercise_x10_Si_full_dissipation/`](samples/exercise_x10_Si_full_dissipation/) | Si with all channels — the bleaching-ready copy of x8 (BGR+KZ variant) |
 | [`exercise_x11_full_dissipation_showcase/`](samples/exercise_x11_full_dissipation_showcase/) | **the flagship demo**: all 4 materials × every valid channel (Σ^HF instead of BGR, collisional decoherence instead of KZ, nonlocal ring II), valley-rolling 3D movies |
 | [`exercise_x13_GaAs_sfsb_nonmarkovian/`](samples/exercise_x13_GaAs_sfsb_nonmarkovian/) | **non-Markovian dissipation**: the SFSB memory kernel vs the relaxation-time approximation (dephasing ionization ×30, low-T suppression ×25, the Im C flip) |
-| [`exercise_x14_graphene_self_induced_transparency/`](samples/exercise_x14_graphene_self_induced_transparency/) | **graphene self-induced transparency** (1–100 kV/cm): field before/after → sheet transmission, Rana CM/Auger saturation at n_i(T), the graphene **2D colmem analog**, the 43-PW Dirac-point fix |
+| [`exercise_x14_graphene_self_induced_transparency/`](samples/exercise_x14_graphene_self_induced_transparency/) | **graphene under the DAST THz transient** (1–100 kV/cm, normal incidence): self-consistent sheet field → transmission from the field before/after, Zener pair creation at the Dirac point, Rana CM/Auger balance at the carrier T_e (two-temperature), the graphene **2D colmem analog**, the 43-PW Dirac-point fix — methods paper in `wiki/12` |
 | [`exercise_04_bulkSi_gs/`](samples/exercise_04_bulkSi_gs/) | plain DFT ground state + `dft_band` band structure |
 
 ## Configuration philosophy

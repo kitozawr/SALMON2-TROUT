@@ -37,14 +37,15 @@ module sbe_superres_ssbe
               eps_thomas_fermi, tf_kappa2_degenerate, debye_kappa2, &
               lindhard_F, eps_lindhard_static, plasmon_freq2, lopc_branches, &
               eps_cdrb, interk_vq, build_vq_table, build_acscreen_table, t_ring_opts, &
-              dirac_n_2d, dirac_mu_2d, rana_qtf, dirac_plasmon_2d, rana_rcccv, rana_auger_dpop, &
+              dirac_n_2d, dirac_mu_2d, dirac_e_2d, dirac_fit_te, rana_qtf, dirac_plasmon_2d, &
+              rana_rcccv, rana_auger_dpop, &
               energy_partner_weights, fermi_dirac, fit_fermi_dirac, &
               carrier_carrier_relax, eph_interk_dpop, ii_interk_dpop, &
               auger_interk_dpop, mp_grid_triple, mp_partner_triple, &
               vg_eta_admixture, vg_trunc_shift2, vg_conv_error, vg_ptop_exceeds, &
               bath_t2_high_t, bath_corr_table, sfsb_nc_series, &
               colmem_lines, colmem_response, colmem_pop_filter, colmem_pop_init, &
-              dressed_ref_delta, &
+              dressed_ref_delta, vg_sumrule_eta, vg_gs_current_k, &
               get_material_params
 
     ! =====================================================================
@@ -978,6 +979,81 @@ contains
         end do
         n = n * dk * 4d0 / (2d0 * pi)
     end function dirac_n_2d
+
+    ! Kinetic-energy density (per area, a.u.) of one Dirac branch at (mu, kT),
+    ! measured from the Dirac point: eps = (g/2pi) int_0^inf k (v k) f(vk - mu) dk.
+    ! Intrinsic (mu = 0): eps = (2/pi)(3 zeta(3)/2)(kT)^3/v^2 (closed form, unit-tested).
+    pure function dirac_e_2d(mu, kT, v) result(e)
+        implicit none
+        real(8), intent(in) :: mu, kT, v
+        real(8) :: e, k, dk, kmax, f
+        integer :: i
+        integer, parameter :: NGRID = 400
+        kmax = (max(mu, 0d0) + 20d0 * kT) / v
+        dk = kmax / NGRID
+        e = 0d0
+        do i = 1, NGRID
+            k = (i - 0.5d0) * dk
+            f = 1d0 / (exp(min((v * k - mu) / kT, 60d0)) + 1d0)
+            e = e + k * (v * k) * f
+        end do
+        e = e * dk * 4d0 / (2d0 * pi)
+    end function dirac_e_2d
+
+    ! =====================================================================
+    ! Two-temperature model of the Coulomb sector (graphene, wiki/12 sec. 3):
+    ! from the gathered electron density n, hole density p and total kinetic
+    ! energy density eps (all per area, a.u.) solve for a COMMON carrier
+    ! temperature kT_e and the two quasi-Fermi levels,
+    !     n = n(mu_c, T_e),  p = n(mu_h, T_e),  eps = e(mu_c, T_e) + e(mu_h, T_e).
+    ! At fixed (n, p) the energy is monotone increasing in T -> bisection in
+    ! ln T with the density inversions nested inside. The lattice (phonon bath)
+    ! stays at kT_min: T_e is READ from the distribution every ring step; the
+    ! cooling toward the lattice is done by the e-ph kinetics themselves, so
+    ! this is the two-temperature model without a separate T_e rate equation.
+    ! Falls back to kT_min when there are no carriers or when the energy is at
+    ! or below its value at the bath temperature (carriers not hotter than the
+    ! lattice); clamps at kT_max. mu_h is the HOLE quasi-Fermi level measured
+    ! downward (the valence-branch electron level is mu_v = -mu_h).
+    ! =====================================================================
+    pure subroutine dirac_fit_te(n, p, eps, v, kT_min, kT_max, kTe, mu_c, mu_h)
+        implicit none
+        real(8), intent(in)  :: n, p, eps, v, kT_min, kT_max
+        real(8), intent(out) :: kTe, mu_c, mu_h
+        real(8) :: lo, hi, mid, nn, pp
+        integer :: it
+        real(8), parameter :: n_eps = 1d-14
+        nn = max(n, 0d0);  pp = max(p, 0d0)
+        kTe = kT_min
+        if (nn < n_eps .and. pp < n_eps) then
+            mu_c = dirac_mu_2d(nn, kTe, v);  mu_h = dirac_mu_2d(pp, kTe, v)
+            return
+        end if
+        if (eps <= e_of(kT_min)) then
+            kTe = kT_min
+        else if (eps >= e_of(kT_max)) then
+            kTe = kT_max
+        else
+            lo = log(kT_min);  hi = log(kT_max)
+            do it = 1, 60
+                mid = 0.5d0 * (lo + hi)
+                if (e_of(exp(mid)) < eps) then
+                    lo = mid
+                else
+                    hi = mid
+                end if
+            end do
+            kTe = exp(0.5d0 * (lo + hi))
+        end if
+        mu_c = dirac_mu_2d(nn, kTe, v)
+        mu_h = dirac_mu_2d(pp, kTe, v)
+    contains
+        pure function e_of(kT) result(e)
+            real(8), intent(in) :: kT
+            real(8) :: e
+            e = dirac_e_2d(dirac_mu_2d(nn, kT, v), kT, v) + dirac_e_2d(dirac_mu_2d(pp, kT, v), kT, v)
+        end function e_of
+    end subroutine dirac_fit_te
 
     ! Quasi-Fermi level of a 2D Dirac branch from its carrier density (bisection).
     pure function dirac_mu_2d(n_au, kT, v) result(mu)
@@ -2326,6 +2402,87 @@ contains
             if (a <= nv) delta(a) = delta(a) - occ
         end do
     end subroutine dressed_ref_delta
+
+    ! =====================================================================
+    ! Velocity-gauge f-sum-rule completeness of a truncated band basis
+    ! (wiki/12 sec. 6). J = Tr[(p + A) rho]/V carries the DIAMAGNETIC term
+    ! A N_e/V for every electron; for a filled band it is cancelled by the
+    ! paramagnetic (interband) response only with a COMPLETE basis:
+    !   S_n^a(k) = sum_{m/=n} 2|p_nm^a|^2/(eps_m - eps_n) = 1 - d2eps_n/dk_a2,
+    ! whose full-band average is 1. With nb bands S < 1 and the fraction
+    !   eta_a = 1 - <S_n^a>_{k, n occupied}
+    ! of A N_e/V survives as a spurious REACTIVE current ~ A = E/omega
+    ! (negligible in the near-IR, a plasma mirror at THz: graphene nb = 2 gives
+    ! eta = 0.29, R = 0.85 at 100 kV/cm, 3.4 THz). The missing bands lie far
+    ! above (Delta >> hbar w, A.p) and respond adiabatically, so subtracting
+    ! eta_a (N_e/V) A_a(t) from the current is exact to linear order in A and
+    ! removes the artifact at any nb (calc_current_bloch, yn_sbe_vg_sumrule).
+    ! Inputs: eigen(nb,nk) [Ha], p(nb,nb,3,nk) velocity matrix elements [a.u.],
+    ! occ(nb,nk) ground-state occupations, w(nk) k-weights. Degenerate pairs
+    ! (|de| < de_min, e.g. the exactly gapless K point) are skipped.
+    ! =====================================================================
+    pure subroutine vg_sumrule_eta(nk, nb, eigen, p, occ, w, de_min, eta, scap)
+        implicit none
+        integer, intent(in) :: nk, nb
+        real(8), intent(in) :: eigen(nb, nk), occ(nb, nk), w(nk), de_min
+        complex(8), intent(in) :: p(nb, nb, 3, nk)
+        real(8), intent(out) :: eta(3), scap(3)
+        real(8) :: norm, de
+        integer :: ik, n, m, a
+        scap = 0d0;  norm = 0d0
+        do ik = 1, nk
+            do n = 1, nb
+                if (occ(n, ik) <= 0d0) cycle
+                norm = norm + w(ik) * occ(n, ik)
+                do m = 1, nb
+                    if (m == n) cycle
+                    de = eigen(m, ik) - eigen(n, ik)
+                    if (abs(de) < de_min) cycle
+                    do a = 1, 3
+                        scap(a) = scap(a) + w(ik) * occ(n, ik) * 2d0 * abs(p(n, m, a, ik))**2 / de
+                    end do
+                end do
+            end do
+        end do
+        if (norm > 0d0) scap = scap / norm
+        eta = 1d0 - scap
+    end subroutine vg_sumrule_eta
+
+    ! Adiabatic ground-state current of the truncated velocity-gauge Hamiltonian
+    ! H_k(A) = eps + A.p at ONE k (wiki/12 sec. 6a). Input: its eigenvectors W
+    ! (columns, ascending eigenvalues) and the ground-state occupations occ(n)
+    ! of the n-th lowest level (adiabatic continuation from A = 0);
+    !     jgs_a = sum_n occ_n <phi_n(A)| p_a + A_a |phi_n(A)>
+    !           = d/dA_a sum_n occ_n [E_n(A) + A^2/2]          (Hellmann-Feynman).
+    ! A uniform static A is a pure gauge: in a COMPLETE basis this vanishes after
+    ! the BZ sum for every A; the truncated basis leaves the diamagnetic
+    ! remainder eta N_e A/V at linear order (vg_sumrule_eta) plus a nonlinear
+    ! part once A ~ the k-distance to the band-touching points. calc_current_bloch
+    ! subtracts the BZ sum of this from the SBE current: the k-trace of rho is
+    ! conserved, so the artifact lives only in this ground-state sum and the
+    ! subtraction is exact for ANY population, with no adjustable parameter.
+    pure subroutine vg_gs_current_k(nb, W, p, A, occ, jgs)
+        implicit none
+        integer, intent(in) :: nb
+        complex(8), intent(in) :: W(nb, nb), p(nb, nb, 3)
+        real(8), intent(in) :: A(3), occ(nb)
+        real(8), intent(out) :: jgs(3)
+        integer :: n, ia, i, j
+        complex(8) :: acc
+        jgs = 0d0
+        do n = 1, nb
+            if (occ(n) <= 0d0) cycle
+            do ia = 1, 3
+                acc = (0d0, 0d0)
+                do j = 1, nb
+                    do i = 1, nb
+                        acc = acc + conjg(W(i, n)) * p(i, j, ia) * W(j, n)
+                    end do
+                end do
+                jgs(ia) = jgs(ia) + occ(n) * (real(acc) + A(ia))
+            end do
+        end do
+    end subroutine vg_gs_current_k
 
     ! Steady-state damping response of the line set at coherence modulation
     ! frequency w (a.u.): R(0) = 1 (the Markov anchor) by construction.

@@ -807,3 +807,6 @@ graphene basis (`epm_pw_cutoff_ry = 2.94`) is not closed under the little group
 of K → a **spurious 0.21 eV gap at the Dirac point**; 43 PW (29.4 a.u.) restores
 the degeneracy (7 µeV) and the thesis v_F = 0.96×10⁶ m/s. The x11 and x14 inputs
 now use 29.4. Calc-validation of the 2D analog: exercise x14 README.
+
+**Methods-paper write-up of the whole graphene branch (2D colmem analog, two-temperature
+Coulomb sector, self-consistent sheet field, k-mesh rules, validation): [`wiki/12_graphene_sheet_solver.md`](12_graphene_sheet_solver.md).**

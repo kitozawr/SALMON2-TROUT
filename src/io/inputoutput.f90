@@ -636,6 +636,10 @@ contains
       & sbe_colmem_tau_fs, &
       & yn_sbe_colmem_pop, &
       & yn_sbe_dressed_ref, &
+      & yn_sbe_rana_te, &
+      & yn_sbe_sheet_field, &
+      & sbe_sheet_nlayers, &
+      & yn_sbe_vg_sumrule, &
       & yn_sbe_full_dressed, &
       & yn_sbe_eeh, &
       & sbe_eeh_nu_sat, &
@@ -1132,6 +1136,10 @@ contains
     yn_sbe_colmem_pop       = 'n'        ! 'y': memory-filtered source populations for the ring kernels
                                          !      (graphene: Rana source filtered with the 2D Dirac-plasmon line)
     yn_sbe_dressed_ref      = 'n'        ! 'y': Option A dressed-reference carrier measure (ring)
+    yn_sbe_rana_te          = 'n'        ! 'y': two-temperature Coulomb sector (graphene Rana R-G at the carrier T_e)
+    yn_sbe_sheet_field      = 'n'        ! 'y': 2D-sheet self-consistent field (E_tot = transmitted field; needs a slab cell)
+    sbe_sheet_nlayers       = 1          ! identical decoupled sheets in the same self-consistent field (incoherent bilayer = 2)
+    yn_sbe_vg_sumrule       = 'n'        ! 'y': velocity-gauge pure-gauge restoration (subtract the adiabatic ground-state current of the truncated basis)
     yn_sbe_full_dressed     = 'y'        ! 'y' (default): ring dressed projection on the FULL basis (correct); 'n': frozen-window truncation (fast, over-generates)
     yn_sbe_eeh              = 'n'        ! 'y': carrier-carrier (e-e/e-h) thermalization channel
     sbe_eeh_nu_sat          = -1.0d0     ! carrier-carrier rate scale [s^-1]; <=0: 1e14 default
@@ -1828,6 +1836,10 @@ contains
     call comm_bcast(sbe_colmem_tau_fs,       nproc_group_global)
     call comm_bcast(yn_sbe_colmem_pop,       nproc_group_global)
     call comm_bcast(yn_sbe_dressed_ref,      nproc_group_global)
+    call comm_bcast(yn_sbe_rana_te,          nproc_group_global)
+    call comm_bcast(yn_sbe_sheet_field,      nproc_group_global)
+    call comm_bcast(sbe_sheet_nlayers,       nproc_group_global)
+    call comm_bcast(yn_sbe_vg_sumrule,       nproc_group_global)
     call comm_bcast(yn_sbe_full_dressed,     nproc_group_global)
     call comm_bcast(yn_sbe_eeh,              nproc_group_global)
     call comm_bcast(sbe_eeh_nu_sat,          nproc_group_global)
@@ -2884,6 +2896,10 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_colmem_tau_fs', sbe_colmem_tau_fs
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_colmem_pop', yn_sbe_colmem_pop
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_dressed_ref', yn_sbe_dressed_ref
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_rana_te', yn_sbe_rana_te
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_sheet_field', yn_sbe_sheet_field
+      write(fh_variables_log, '("#",4X,A,"=",I4)')      'sbe_sheet_nlayers', sbe_sheet_nlayers
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_vg_sumrule', yn_sbe_vg_sumrule
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_full_dressed', yn_sbe_full_dressed
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_eeh', yn_sbe_eeh
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_eeh_nu_sat', sbe_eeh_nu_sat

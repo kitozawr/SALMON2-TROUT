@@ -11,7 +11,8 @@ subroutine main_realtime_ssbe(icomm)
     use datafile_ssbe
     use input_checker_sbe
     use filesystem, only: get_filehandle
-    use phys_constants, only: au_fs
+    use phys_constants, only: au_fs, cspeed_au, kB_au, au_ev
+    use math_constants, only: pi
     use sbe_superres_ssbe, only: vg_ptop_exceeds
     use iso_fortran_env, only: error_unit
     implicit none
@@ -21,6 +22,10 @@ subroutine main_realtime_ssbe(icomm)
     type(s_sbe_gs_info) :: gs
     real(8) :: t, E(3), jmat(3)
     real(8), allocatable :: Ac_ext_t(:, :)
+    real(8), allocatable :: Ac_tot_t(:, :)    ! external + sheet-induced field (yn_sbe_sheet_field)
+    real(8) :: Ac_ind(3), E_tot(3), lz_sheet, rr_coef
+    logical :: flag_sheet
+    integer :: fh_sbe_te, ios_ck
     integer :: it
     real(8) :: energy, tr_all, tr_vb, nex_nonad, nex_nonad_A
     integer :: nproc, irank, ierr
@@ -107,6 +112,45 @@ subroutine main_realtime_ssbe(icomm)
                 'peak |E| = ', emx, ' a.u. = ', emx * 5.14220675d3, ' MV/cm'
         end block
     end if
+
+    ! -----------------------------------------------------------------------
+    ! 2D-sheet self-consistent (radiation-reaction) field (wiki/12 sec. 4).
+    ! The field AT a current sheet at normal incidence is the transmitted field
+    !     E_t = E_ext - (Z0/2) J_s,   Z0 = 4 pi/c,   J_s = (-Jm) L_z
+    ! (Jm = electron current per cell volume, L_z = cell height along the vacuum
+    ! axis, so -Jm L_z is the physical charge current per unit width). In the
+    ! velocity gauge (E = -dA/dt) this is an induced vector potential
+    !     dA_ind/dt = -(2 pi/c) L_z Jm(t),
+    ! integrated explicitly with the current of the previous step (lag error
+    ! O(dt w Z0 sigma/2), negligible for a sheet). The propagator then sees
+    ! A_tot = A_ext + A_ind: Ac_tot/E_tot in *_sbe_rt.data ARE the transmitted
+    ! ("after") field, E_ext is the incident ("before") field, and the energy
+    ! ledger uses E_tot (the work done by the local field). Free-standing sheet
+    ! (vacuum on both sides); requires a 2D slab cell (b3 || z).
+    ! -----------------------------------------------------------------------
+    flag_sheet = (yn_sbe_sheet_field == 'y')
+    Ac_ind(:) = 0d0;  lz_sheet = 0d0;  rr_coef = 0d0
+    if (flag_sheet) then
+        block
+            real(8) :: b3len
+            b3len = sqrt(dot_product(gs%b_matrix(3, 1:3), gs%b_matrix(3, 1:3)))
+            if (b3len < 1d-12 .or. abs(gs%b_matrix(3, 1)) + abs(gs%b_matrix(3, 2)) > 1d-8 * b3len) then
+                if (irank == 0) write(*, '(a)') '# ERROR: yn_sbe_sheet_field needs a 2D slab cell'// &
+                    ' (b3 || z, vacuum along a3)'
+                error stop 'sheet self-consistent field: not a 2D slab geometry'
+            end if
+            lz_sheet = 2d0 * pi / b3len              ! = V / A_2D for b3 || z
+        end block
+        ! nlayers identical, electronically decoupled sheets (d << lambda) sit in the
+        ! same local field and add their currents: J_s = -nlayers L_z Jm.
+        rr_coef = 2d0 * pi / cspeed_au * lz_sheet * dble(max(1, sbe_sheet_nlayers))
+        if (irank == 0) write(*, '(a,f9.4,a,i0,a,es11.4,a)') &
+            '# 2D-sheet self-consistent field ON: L_z = ', lz_sheet, &
+            ' bohr, nlayers = ', max(1, sbe_sheet_nlayers), &
+            '; dA_ind/dt = -(2pi/c) nlayers L_z Jm (coef ', rr_coef, '); E_tot/Ac_tot = transmitted field'
+    end if
+    allocate(Ac_tot_t(1:3, -1:nt+1))
+    Ac_tot_t(:, :) = Ac_ext_t(:, :)
 
     ! Initial energy and fields
     energy = 0.0d0
@@ -253,6 +297,19 @@ subroutine main_realtime_ssbe(icomm)
                 & action="write", status=trim(ost), position=trim(opos))
             if (.not. is_ckrst) call write_sbe_intra_current_header(fh_sbe_intra_current)
         end if
+        ! two-temperature diagnostics (graphene Rana with yn_sbe_rana_te)
+        if (sbe%flag_rana_te) then
+            fh_sbe_te = get_filehandle()
+            open(unit=fh_sbe_te, file=trim(base_directory)//trim(sysname)//"_sbe_te.data", &
+                & action="write", status=trim(ost), position=trim(opos))
+            if (.not. is_ckrst) then
+                write(fh_sbe_te, '(a)') '# two-temperature Coulomb sector (wiki/12 sec. 3): carrier T_e and'
+                write(fh_sbe_te, '(a)') '# quasi-Fermi levels fitted from (n, p, energy) of the gathered cone'
+                write(fh_sbe_te, '(a)') '# populations; n_i(T_e) = (pi/6)(k_B T_e/hbar v_F)^2 = the Rana balance density'
+                write(fh_sbe_te, '(a)') '# 1:t[fs]  2:T_e[K]  3:mu_c[eV]  4:mu_h[eV]  5:n2d[cm^-2]' // &
+                    '  6:p2d[cm^-2]  7:n_i(T_e)[cm^-2]  8:T_bath[K]'
+            end if
+        end if
         ! Stdout logs:
         write(*, "(a)") " time-step time[fs] Current(xyz)[a.u.]                     electrons   Total energy[au]"
         write(*, "(a)") "---------------------------------------------------------------------------------------"
@@ -310,7 +367,13 @@ subroutine main_realtime_ssbe(icomm)
         read(ck_unit) it0, energy, sbe%led_dn, sbe%led_de
         read(ck_unit) sbe%rho(:, :, sbe%ik_min:sbe%ik_max)
         if (allocated(sbe%X_branch)) read(ck_unit) sbe%X_branch(:, sbe%ik_min:sbe%ik_max)
+        read(ck_unit, iostat=ios_ck) Ac_ind, Jmat    ! absent in pre-sheet checkpoints -> zeros
+        if (ios_ck /= 0) then
+            Ac_ind(:) = 0d0;  Jmat(:) = 0d0
+        end if
         close(ck_unit)
+        ! the sheet-induced potential at the checkpoint step belongs to A_tot(it0-1)
+        if (flag_sheet) Ac_tot_t(:, it0) = Ac_ext_t(:, it0) + Ac_ind(:)
         it0 = it0 + 1
         if (irank == 0) write(*,'(a,i8)') '# B4: resumed from checkpoint, continuing at step ', it0
     end if
@@ -326,12 +389,17 @@ subroutine main_realtime_ssbe(icomm)
         ! internal Gauss-Legendre/Yoshida sub-nodes from the field values
         ! at the step endpoints supplied here.
         !---------------------------------------------------------------
-        call dt_evolve_bloch_cf4(sbe, gs, t - dt, dt, Ac_ext_t(:, it - 1), Ac_ext_t(:, it))
+        if (flag_sheet) then
+            ! explicit step of the sheet-induced potential with the last current
+            Ac_ind(:) = Ac_ind(:) - dt * rr_coef * Jmat(:)
+            Ac_tot_t(:, it) = Ac_ext_t(:, it) + Ac_ind(:)
+        end if
+        call dt_evolve_bloch_cf4(sbe, gs, t - dt, dt, Ac_tot_t(:, it - 1), Ac_tot_t(:, it))
         
         !---------------------------------------------------------------
         ! Calculate Current J(t) at t=it*dt (after evolution)
         !---------------------------------------------------------------
-        call calc_current_bloch(sbe, gs, Ac_ext_t(:, it), Jmat, icomm)
+        call calc_current_bloch(sbe, gs, Ac_tot_t(:, it), Jmat, icomm)
         
         !---------------------------------------------------------------
         ! Calculate E-field at t=it*dt
@@ -339,20 +407,23 @@ subroutine main_realtime_ssbe(icomm)
         ! Ac_ext_t is allocated from -1 to nt+1, safe for all it >= 1
         !---------------------------------------------------------------
         E(:) = -(Ac_ext_t(:, it+1) - Ac_ext_t(:, it-1)) / (2.0d0 * dt)
+        ! total (local) field: E_ind = -dA_ind/dt = +(2pi/c) L_z Jm, algebraic (no lag)
+        E_tot(:) = E(:)
+        if (flag_sheet) E_tot(:) = E(:) + rr_coef * Jmat(:)
         
-        ! Energy update: dW = -E·J·V·dt (work done by field on electrons)
-        energy = energy + dot_product(E(1:3), -Jmat(1:3)) * gs%volume * dt
+        ! Energy update: dW = -E_tot·J·V·dt (work done by the LOCAL field on electrons)
+        energy = energy + dot_product(E_tot(1:3), -Jmat(1:3)) * gs%volume * dt
         
         if (irank == 0) then
             call write_sbe_rt_line(fh_sbe_rt, &
-                & t, Ac_ext_t(1:3, it), E(1:3), Ac_ext_t(1:3, it), E(1:3), Jmat(1:3))
+                & t, Ac_ext_t(1:3, it), E(1:3), Ac_tot_t(1:3, it), E_tot(1:3), Jmat(1:3))
         end if
 
         ! Intra-band (Houston-basis) current -- physical intra/inter split in
         ! the velocity gauge (the total J above is the gauge-invariant sum).
         ! Written every step like the total current, for direct comparison.
         if (yn_out_intraband_current == 'y') then
-            call calc_intraband_current_houston(sbe, gs, Ac_ext_t(:, it), jmat_intra, icomm)
+            call calc_intraband_current_houston(sbe, gs, Ac_tot_t(:, it), jmat_intra, icomm)
             if (irank == 0) &
                 call write_sbe_intra_current_line(fh_sbe_intra_current, t, jmat_intra(1:3))
         end if
@@ -361,6 +432,11 @@ subroutine main_realtime_ssbe(icomm)
             tr_all = calc_trace(sbe, gs, nstate_sbe(1), icomm)
             if (irank == 0) then
                 call write_sbe_rt_energy_line(fh_sbe_rt_energy, t, energy, energy)
+                if (sbe%flag_rana_te) write(fh_sbe_te, '(f14.4,7es14.5)') t * au_fs, &
+                    sbe%te_au / kB_au, sbe%te_mu_c * au_ev, sbe%te_mu_h * au_ev, &
+                    sbe%te_n2d / (0.52917721067d-8)**2, sbe%te_p2d / (0.52917721067d-8)**2, &
+                    (pi / 6d0) * (sbe%te_au / sbe%rana_vf_au)**2 / (0.52917721067d-8)**2, &
+                    sbe%rana_kt_au / kB_au
                 write(*, "(i6,f12.3,3es12.3,2f12.3)") it, t * au_fs, Jmat(1:3), tr_all, energy
                 ! C1: cumulative per-channel ledger (identical on all ranks)
                 write(fh_sbe_channels, '(f14.4,8es14.5)') t, &
@@ -377,6 +453,7 @@ subroutine main_realtime_ssbe(icomm)
                 write(ck_unit) it, energy, sbe%led_dn, sbe%led_de
                 write(ck_unit) sbe%rho(:, :, sbe%ik_min:sbe%ik_max)
                 if (allocated(sbe%X_branch)) write(ck_unit) sbe%X_branch(:, sbe%ik_min:sbe%ik_max)
+                write(ck_unit) Ac_ind, Jmat            ! sheet self-field state (zeros when off)
                 close(ck_unit)
             end if
         end if
@@ -387,7 +464,7 @@ subroutine main_realtime_ssbe(icomm)
             ! Non-adiabatic (real) excitation in the instantaneous dressed basis
             ! (collective over k): col 2 = dressed-conduction projection, col 3 =
             ! the Option-A dressed-reference density the ring dissipators see.
-            call calc_nex_nonad(sbe, gs, Ac_ext_t(:, it), icomm, nex_nonad, nex_nonad_A)
+            call calc_nex_nonad(sbe, gs, Ac_tot_t(:, it), icomm, nex_nonad, nex_nonad_A)
             if (irank == 0) then
                 call write_sbe_nex_line(fh_sbe_nex, t, (tr_all - tr_vb) / gs%volume, (nelec - tr_vb) / gs%volume)
                 call write_sbe_nex_line(fh_sbe_nex_nonad, t, nex_nonad / gs%volume, nex_nonad_A / gs%volume)
@@ -398,7 +475,7 @@ subroutine main_realtime_ssbe(icomm)
         ! Written far less often than _sbe_nex.data (out_projection_k_step,
         ! default 10x out_projection_step) since this output scales with nk.
         if (mod(it, out_projection_k_step) == 0) then
-            call calc_bloch_population_k(sbe, gs, Ac_ext_t(:, it), ib_lcb, pop_k, icomm)
+            call calc_bloch_population_k(sbe, gs, Ac_tot_t(:, it), ib_lcb, pop_k, icomm)
             ! Real carriers only (diabatic / fixed-basis LCB occupation)
             call calc_diabatic_population_k(sbe, ib_lcb, pop_k_real, icomm)
             if (irank == 0) then
@@ -417,7 +494,7 @@ subroutine main_realtime_ssbe(icomm)
             end if
             ! Physical (unfolded) CB1 populations per primitive BZ point
             if (gs%have_unfold) then
-                call calc_unfolded_population_k(sbe, gs, Ac_ext_t(:, it), pop_lev_k, icomm)
+                call calc_unfolded_population_k(sbe, gs, Ac_tot_t(:, it), pop_lev_k, icomm)
                 call calc_diabatic_unfolded_population_k(sbe, gs, pop_lev_k_real, icomm)
                 if (irank == 0) then
                     call write_sbe_nex_k_unfold_block(fh_sbe_nex_k_unfold, t, nk, &
@@ -435,7 +512,7 @@ subroutine main_realtime_ssbe(icomm)
             ! CONTINUE; the user re-runs with more bands and an N_b convergence
             ! study (criterion (b)) to confirm.
             if (ib_top > 0) then
-                call calc_bloch_population_k(sbe, gs, Ac_ext_t(:, it), ib_top, pop_top_k, icomm)
+                call calc_bloch_population_k(sbe, gs, Ac_tot_t(:, it), ib_top, pop_top_k, icomm)
                 ptop = maxval(pop_top_k)
                 if (irank == 0 .and. vg_ptop_exceeds(ptop, PTOP_TOL)) then
                     write(error_unit, '(a,es10.3,a,es10.3,a,f10.3,a,i0,a)') &
@@ -461,6 +538,7 @@ subroutine main_realtime_ssbe(icomm)
                     flush(fh_sbe_nex_k_lev_real)
                 end if
                 if (yn_out_intraband_current == 'y') flush(fh_sbe_intra_current)
+                if (sbe%flag_rana_te) flush(fh_sbe_te)
             end if
         end if
     end do
@@ -481,6 +559,7 @@ subroutine main_realtime_ssbe(icomm)
             close(fh_sbe_nex_k_lev_real)
         end if
         if (yn_out_intraband_current == 'y') close(fh_sbe_intra_current)
+        if (sbe%flag_rana_te) close(fh_sbe_te)
     end if
 
     deallocate(pop_k, pop_k_real)

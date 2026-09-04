@@ -2,7 +2,7 @@
 ! x14 graphene PRIMITIVE-CELL EPM ground state (in-SALMON Fortran EPM, theory='epm').        !
 !----------------------------------------------------------------------------------------!
 ! Writes graphene_sit_k/_eigen/_tm.data read by the rt_*.inp files (generated together by      !
-! make_inputs.py -- keep nk consistent). nk = 24: dense (cluster) and an ODD multiple of 3 !
+! make_inputs.py -- keep nk consistent). nk = 147: dense (cluster) and an ODD multiple of 3 !
 ! so the Dirac point K = (2/3,1/3) is on the half-shifted Monkhorst-Pack mesh.             !
 !                                                                                          !
 ! BASIS (x14 finding, tests/test_graphene_dirac_levels.py): the 7-plane-wave basis of the  !
@@ -32,7 +32,7 @@
 /
 
 &kgrid
-    num_kgrid(1:3) = 24, 24, 1
+    num_kgrid(1:3) = 147, 147, 1
 /
 
 &epm

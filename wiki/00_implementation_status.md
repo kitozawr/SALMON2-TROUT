@@ -2,7 +2,7 @@
 
 **Read this first on every resume.** It records what is done, what is next, key decisions, and the test inventory. Update it in the same commit as any code change.
 
-Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #44 into `develop-2.0.0`); (2) new materials — **GaAs, Si/Si_cb, wurtzite CdS, monolayer graphene** — each a validated Python EPM reference + cited CPTP dissipation channels. The maintainer drives one bounded increment per session ("continue"). Test grid: **4×4×4 (or 5×5×5), scalar (no spinor)**. Current test count: **28/28** (`python3 tests/run_all.py`).
+Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #44 into `develop-2.0.0`); (2) new materials — **GaAs, Si/Si_cb, wurtzite CdS, monolayer graphene** — each a validated Python EPM reference + cited CPTP dissipation channels. The maintainer drives one bounded increment per session ("continue"). Test grid: **4×4×4 (or 5×5×5), scalar (no spinor)**. Current test count: **30/30** (`python3 tests/run_all.py`).
 
 > **Running on the supercomputer (Lomonosov-2, SLURM + OpenMPI + gfortran): see [`wiki/11_supercomputer_lomonosov2.md`](11_supercomputer_lomonosov2.md)** — the shared reference for cluster runs (environment, `sbatch` recipe, how to read a healthy run banner, the MPI failure catalog, and the per-run log). This is the page we talk through for every HPC run.
 
@@ -55,6 +55,52 @@ ready»*. Delivered (branch `claude/si-direct-gap-isosurfaces-mp0mbd`, restarted
   bound); the single-cell driver has no self-consistent sheet field — `S_rr` flags
   when it matters; exact routes: a radiation-reaction term or `maxwell_sbe` with
   `hx_m = L_z`. Tests: 28/28.
+- **Same-day update (maintainer: «сетку на плотную под кластер, добавь самосогласованное
+  поле листа, поле DAST укороченное, двухтемпературная модель с остыванием через фононы,
+  ТГц-пучок по нормали к листу; wiki в стиле статьи»)** — all delivered, methods paper in
+  **[`wiki/12_graphene_sheet_solver.md`](12_graphene_sheet_solver.md)**:
+  - **`yn_sbe_sheet_field`** — 2D-sheet self-consistent (radiation-reaction) field in the
+    single-cell driver: `dA_ind/dt = −(2π/c) L_z Jm`, propagation in `A_ext + A_ind`, so
+    `E_tot/Ac_tot` in `*_sbe_rt.data` ARE the transmitted field (normal incidence, in-plane
+    E, free-standing sheet), the energy ledger uses the local field, `A_ind` is checkpointed.
+    `transmission.py` auto-detects it (mode `SC`, consistency `|E_tot − E_BC|/E₀`).
+  - **`yn_sbe_rana_te`** — two-temperature Coulomb sector: `dirac_fit_te` reads a common
+    carrier `T_e` and the quasi-Fermi levels from the moments (n, p, ε) of the gathered cone
+    populations; R−G, `Q_TF`, the plasmon line and its thermal split run at `T_e`, the phonon
+    Bose factors at the lattice T (cooling via the e-ph channel — no separate T_e ODE);
+    `*_sbe_te.data` (t, T_e, μ_c, μ_h, n, p, n_i(T_e), T_bath). `test_dirac_te_fit`.
+  - **x14 v2** — default drive = the DAST single-cycle 3.36 THz proxy of x12 rescaled to the
+    exact peak field 1–100 kV/cm (offset removed, cos²-windowed ends: the file reader returns
+    0 outside the file), `A_eV_fs` units, **nk = 147** (dense and odd×3 ⇒ K on the mesh),
+    dt = 0.1 fs, variants coh/diss/mem (mem = 2D colmem + dressed ref + T_e), sheet field on;
+    `prod_nk147/` shipped for the cluster (≈1.4 h per dissipative run on 48 threads).
+  - **Regime verdict (wiki/12 §7):** at 1–100 kV/cm the THz drive is the Zener/Landau–Zener
+    regime of the Dirac point (`A₀ = 0.062 a.u.` at 100 kV/cm ≫ mesh spacing 0.0106):
+    pair creation ∝ E^{3/2}/ω (Eq. 8 of wiki/12) ⇒ for the **intrinsic** sheet the model
+    predicts THz-induced **absorption** growing with the field (Tani 2012), not transparency;
+    the bleaching of doped CVD graphene (Hwang 2013, Mics 2015) needs the doped/finite-T
+    initial state (recorded limit). Near-IR at these fields: ΔT ~ 10⁻⁴ (θ²/12).
+  - Local physics validation (147², coherent; 24² ring): x14 README §7 (this session).
+  - **Physics check found a decisive artifact → fixed without a fitted quantity (`yn_sbe_vg_sumrule`,
+    wiki/12 §6a).** The first self-consistent THz run made the empty sheet a *plasma mirror*
+    (T = 0.15, R = 0.85): the current was −1.000-correlated with A — the **diamagnetic term
+    A·N_e/V of the filled π band that a 2-band velocity-gauge basis cancels only to 70 %**
+    (f-sum rule: η = 0.30; n_b = 4/8/16: 0.097/0.036/0.030 — too slow for THz). Checked to be
+    a property of the truncated basis, not of the mesh/Δt/adiabaticity: the SBE current equals
+    the exact adiabatic response of the same truncated H(A) to 1e-4, with the predicted ω
+    dispersion. A first linear static correction (−η N_e A/V) **over-corrected at 100 kV/cm**
+    (the truncated ground-state current is non-linear in A near K) and made the self-consistent
+    sheet anti-inductive → runaway (T = 1.21, gain); withdrawn. Adopted: **pure-gauge
+    restoration** — subtract the adiabatic ground-state current of the same truncated H_k(A(t))
+    (Eq. 10 of wiki/12; zero in a complete basis, exact for any population, one ZHEEV/k/step).
+    Result: sheet stationary after the pulse, residual A-projection < 1e-4 at n_b = 2/4/8.
+    x14 production = **nstate = 8 + restoration**, dissipators on the π/π* window (frozen
+    thresholds −15/+14 eV). `test_vg_sumrule` (Hellmann–Feynman), `sumrule_check.py`.
+    The maintainer's <90 % THz transmission of real samples is the Drude absorption of
+    doping-induced carriers (+ substrate Fresnel), i.e. the FD(E_F,T) initial-state increment.
+  - New this round: `sbe_sheet_nlayers` (decoupled layers in one local field — incoherent
+    bilayer), `make_inputs.py --pol x|y --n-layers --snap-fs`, `plot_levels.py` (k-resolved
+    level-population snapshots → BZ-averaged band populations vs t + k-maps around K).
 
 ## ✅ CLOSED (2026-07-20) — universal virtual/real carrier separation
 **All three sectors implemented + validated the same day (wiki/10 §8.6–8.10),

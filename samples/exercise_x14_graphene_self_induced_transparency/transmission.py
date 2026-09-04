@@ -205,18 +205,47 @@ def count_kpoints(rt_path):
 
 
 # ---------------------------------------------------------------- analysis
-def analyze(path, lz=LZ_BOHR, area=AREA_BOHR2, n_sub=1.0):
+def run_variable(rt_path, key, default=None):
+    """Value of an input variable from the variables.log next to the rt file (None if absent)."""
+    vlog = os.path.join(os.path.dirname(rt_path) or '.', 'variables.log')
+    if not os.path.exists(vlog):
+        return default
+    pat = re.compile(r'^#\s*' + re.escape(key) + r'\s*=\s*(\S+)')
+    with open(vlog) as fh:
+        for line in fh:
+            m = pat.match(line)
+            if m:
+                return m.group(1).strip("'\"")
+    return default
+
+
+def analyze(path, lz=LZ_BOHR, area=AREA_BOHR2, n_sub=1.0, n_layers=None):
     d = read_rt(path)
     t = d['Time']
     ax = max('xyz', key=lambda a: np.max(np.abs(d[f'E_ext_{a}'])))
     E_inc = d[f'E_ext_{ax}']
     Jm = d[f'Jm_{ax}']
-    J_s = -Jm * lz
-    E_t, E_r = sheet_fields(E_inc, J_s, n_sub)
+    # sbe_sheet_nlayers identical decoupled sheets in the same local field: J_s = -nlayers L_z Jm,
+    # and the per-cell energy ledger counts one layer. Auto-read from variables.log unless given.
+    if n_layers is None:
+        n_layers = int(run_variable(path, 'sbe_sheet_nlayers', 1) or 1)
+    J_s = -Jm * lz * n_layers
+    E_bc, E_rbc = sheet_fields(E_inc, J_s, n_sub)           # perturbative sheet BC
+    E_totc = d.get(f'E_tot_{ax}', E_inc)
+    selfc = np.max(np.abs(E_totc - E_inc)) > 1e-9 * max(np.max(np.abs(E_inc)), 1e-300)
+    if selfc:
+        # yn_sbe_sheet_field run: the driver already propagated in the local field,
+        # E_tot IS the transmitted field (free-standing sheet, normal incidence). The
+        # BC reconstruction is kept as a consistency check (differs by the explicit lag).
+        E_t = E_totc
+        E_r = E_t - E_inc
+        dEt = np.max(np.abs(E_t - E_bc)) / max(np.max(np.abs(E_inc)), 1e-300)
+    else:
+        E_t, E_r, dEt = E_bc, E_rbc, 0.0
     T, R, A = fluence_tra(t, E_inc, E_t, E_r, n_sub)
     Tb, Rb, Ab, resig, w0 = band_tra(t, E_inc, E_t, E_r, J_s, n_sub)
     E0 = float(np.max(np.abs(E_inc)))
-    res = dict(file=path, axis=ax, E0_au=E0, E0_kvcm=E0 * AU_E_VM / 1e5,
+    res = dict(file=path, axis=ax, mode='SC' if selfc else 'pert', dEt=dEt, E0_au=E0, E0_kvcm=E0 * AU_E_VM / 1e5, n_layers=n_layers,
                I_wcm2=(E0 * AU_E_VM)**2 / (2.0 * Z0_SI) / 1e4, hw_ev=w0 * AU_EV,
                T=T, R=R, A=A, T_band=Tb, R_band=Rb, A_band=Ab, resig=resig,
                S_rr=radiation_reaction_term(t, E_inc, J_s), A_energy=np.nan, nk=count_kpoints(path))
@@ -224,7 +253,7 @@ def analyze(path, lz=LZ_BOHR, area=AREA_BOHR2, n_sub=1.0):
     if os.path.exists(epath):
         dE = read_energy_delta(epath)                                    # Ha per cell
         F_inc = (C_AU / (4.0 * np.pi)) * np.trapezoid(E_inc**2, t)      # Ha per bohr^2
-        res['A_energy'] = dE / (area * F_inc) if F_inc > 0 else np.nan
+        res['A_energy'] = n_layers * dE / (area * F_inc) if F_inc > 0 else np.nan
     if res['nk']:
         res['shell_pts'] = shell_resolution(w0, int(round(np.sqrt(res['nk']))))
     return res, (t, E_inc, E_t, E_r)
@@ -236,6 +265,9 @@ def main(argv=None):
     ap.add_argument('--lz-bohr', type=float, default=LZ_BOHR, help='cell height along the vacuum axis [bohr]')
     ap.add_argument('--area-bohr2', type=float, default=AREA_BOHR2, help='2D cell area [bohr^2] (energy cross-check)')
     ap.add_argument('--n-sub', type=float, default=1.0, help='substrate refractive index (1 = free-standing)')
+    ap.add_argument('--n-layers', type=int, default=None,
+                    help='identical decoupled sheets in the same field (default: sbe_sheet_nlayers of the run, else 1); '
+                         'pert mode only -- a self-consistent run already carries it in E_tot')
     ap.add_argument('--plot', action='store_true', help='write transmission_scan.png (needs matplotlib)')
     args = ap.parse_args(argv)
 
@@ -246,18 +278,21 @@ def main(argv=None):
     print(f'# sheet transmission  (L_z = {args.lz_bohr:.4f} bohr, A_2D = {args.area_bohr2:.4f} bohr^2, n_sub = {args.n_sub})')
     print(f'# linear universal-sheet reference (sigma = e^2/4hbar): T = {Tl:.5f}  R = {Rl:.2e}  A = {Al:.5f}'
           f'   [pi*alpha = {np.pi / C_AU:.5f}]')
-    print('# T,R,A = fluence-integrated sheet BC (primary); A_E = SBE energy ledger (driven by E_inc);'
-          ' S_rr = A_E - A = radiation-reaction term (reliability flag: must be << A);')
+    print('# mode: SC = yn_sbe_sheet_field run (E_tot IS the transmitted field; dEt = |E_tot - E_BC|/E0 consistency),'
+          ' pert = sheet BC applied to Jm of an E_ext-driven run')
+    print('# T,R,A = fluence-integrated (primary); A_E = SBE energy ledger; S_rr = (Z0/2) int J_s^2/F'
+          ' (pert: A_E - A = S_rr, must be << A for the perturbative estimate to hold)')
     print('# T_band, Re(sigma)/sigma_univ = over the incident FWHM band (secondary); shell = mesh points per resonance-shell radius')
-    print(f'{"E0[kV/cm]":>10} {"I[W/cm2]":>10} {"hw[eV]":>7} {"T":>9} {"R":>9} {"A":>9} {"A_E":>9} {"S_rr":>9} '
-          f'{"T_band":>8} {"Res/s0":>7} {"shell":>6}  file')
+    print(f'{"E0[kV/cm]":>10} {"I[W/cm2]":>10} {"hw[eV]":>7} {"mode":>4} {"dEt":>8} {"T":>9} {"R":>9} {"A":>9} {"A_E":>9} '
+          f'{"S_rr":>9} {"T_band":>8} {"Res/s0":>7} {"shell":>6}  file')
     rows = []
     for f in files:
-        r, _ = analyze(f, args.lz_bohr, args.area_bohr2, args.n_sub)
+        r, _ = analyze(f, args.lz_bohr, args.area_bohr2, args.n_sub, args.n_layers)
         rows.append(r)
         sp = r.get('shell_pts', np.nan)
-        print(f'{r["E0_kvcm"]:10.3f} {r["I_wcm2"]:10.3e} {r["hw_ev"]:7.3f} {r["T"]:9.6f} {r["R"]:9.2e} '
-              f'{r["A"]:9.6f} {r["A_energy"]:9.6f} {r["S_rr"]:9.2e} {r["T_band"]:8.5f} {r["resig"]:7.3f} {sp:6.2f}  {f}')
+        print(f'{r["E0_kvcm"]:10.3f} {r["I_wcm2"]:10.3e} {r["hw_ev"]:7.3f} {r["mode"]:>4} {r["dEt"]:8.1e} {r["T"]:9.6f} '
+              f'{r["R"]:9.2e} {r["A"]:9.6f} {r["A_energy"]:9.6f} {r["S_rr"]:9.2e} {r["T_band"]:8.5f} {r["resig"]:7.3f} '
+              f'{sp:6.2f}  {f}')
     if rows and rows[0].get('nk'):
         sp = rows[0].get('shell_pts', np.nan)
         flag = 'RESOLVED' if sp >= 3 else ('marginal' if sp >= 1 else 'UNRESOLVED -- the mesh sees a few discrete'

@@ -261,3 +261,24 @@ fields, exactly as you widen `nstate`.
 - Kane momentum matrix element / E_P for GaAs: E. O. Kane, J. Phys. Chem. Solids 1, 249 (1957); E_P ~ 25.7 eV, I. Vurgaftman, J. R. Meyer, L. R. Ram-Mohan, J. Appl. Phys. 89, 5815 (2001).
 - Keldysh parameter / tunneling-vs-multiphoton crossover: L. V. Keldysh, Sov. Phys. JETP 20, 1307 (1965).
 - THz carrier energies reaching several eV in n-Si (populated-band reach): O. V. Chefonov et al., Phys. Rev. B 98, 165206 (2018).
+
+
+---
+
+## Addendum (2026-09-04): 2D sheets at THz — the uncancelled diamagnetic current
+
+The most violent form of the basis-sufficiency problem: in the velocity gauge the
+filled band's diamagnetic current $A N_e/V$ is cancelled by the interband
+response only for a complete basis; with $n_b$ bands the fraction
+$\eta = 1 - \langle\sum_{m} 2|p_{nm}|^2/(\varepsilon_m-\varepsilon_n)\rangle$ survives as a
+reactive current $\propto A = E/\omega$. Graphene, $n_b = 2$: $\eta = 0.29$ — at 3 THz and
+100 kV/cm the sheet reflects 85 % (a plasma mirror); $n_b = 8$: 0.036; 16: 0.030. The
+solver prints $S,\eta$ at start-up. A linear static subtraction $-\eta N_e A/V$ was
+tried first and **withdrawn**: the truncated ground-state current is non-linear in $A$
+once $A$ reaches the k-distance to the band-touching points, the static form then
+over-corrects, and an over-corrected (anti-inductive) sheet is dynamically unstable
+under the self-consistent field. `yn_sbe_vg_sumrule='y'` now performs a **pure-gauge
+restoration**: it subtracts the adiabatic ground-state current of the same truncated
+$H_{\mathbf k}(\mathbf A(t))$ — identically zero in a complete basis, exact at every
+$A$ and for any population, no adjustable quantity. Full account, tables and recipe:
+[`wiki/12`](12_graphene_sheet_solver.md) §6a.

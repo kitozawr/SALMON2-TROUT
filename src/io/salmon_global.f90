@@ -517,6 +517,10 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: sbe_colmem_tau_fs      ! kernel line width 1/tau_c; <=0: hbar/sigma_E (grid-matched default)
   character(1)   :: yn_sbe_colmem_pop      ! 'y': ring collision kernels read MEMORY-FILTERED populations (wiki/10 sec. 8.8, population sector)
   character(1)   :: yn_sbe_dressed_ref     ! 'y': Option A -- ring channels measure carriers against the field-rotated ground state (wiki/10 sec. 3A)
+  character(1)   :: yn_sbe_rana_te         ! 'y': two-temperature Coulomb sector -- the Rana R-G / plasmon line use the carrier temperature T_e fitted from the gathered Dirac populations (wiki/12 sec. 3)
+  character(1)   :: yn_sbe_sheet_field     ! 'y': 2D-sheet self-consistent (radiation-reaction) field in the single-cell driver: E_tot = transmitted field (wiki/12 sec. 4)
+  integer        :: sbe_sheet_nlayers      ! number of identical, electronically decoupled sheets driven by the SAME self-consistent field (twisted/incoherent bilayer = 2): J_s = -nlayers L_z Jm (wiki/12 sec. 4)
+  character(1)   :: yn_sbe_vg_sumrule      ! 'y': velocity-gauge pure-gauge restoration -- subtract the adiabatic ground-state current of the same truncated H_k(A(t)) (= eta N_e A/V at linear order; parameter-free; wiki/12 sec. 6a)
   character(1)   :: yn_sbe_full_dressed    ! 'y' (default): ring dressed projection uses the FULL band basis (correct); 'n': truncate to the frozen active window (fast, OVER-GENERATES at sub-gap -- wiki/06 sec.6)
   ! Carrier-carrier (e-e/e-h) scattering (Part F): CPTP relaxation of the
   ! adiabatic populations toward a Fermi-Dirac with the same number AND energy
