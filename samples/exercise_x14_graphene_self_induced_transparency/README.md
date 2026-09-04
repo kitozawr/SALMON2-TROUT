@@ -508,12 +508,21 @@ further in the same direction. So the measured rise does not need all three —
 but none of them makes the sheet *darker*, and the model has no mechanism that
 would.
 
-*Drude-weight accuracy.* The fitted D is below the analytic D = E_F because the
-mesh under-resolves ∂²ε/∂k² ∝ 1/k near the Dirac point: D_fit/D_eq = 0.66 at
-E_F = 0.2 eV on 147² (9 mesh points per valley in the Fermi disc), 0.89 at
-E_F = 0.4 eV on 147² (36 points) and 0.89 at E_F = 0.6 eV on 48² (8 points). The
-ratio is a scale error, common to all fields, so the *shape* of the T(E₀) curve
-above is unaffected; absolute conductivities want k_F ≳ 3 mesh spacings.
+*Drude-weight accuracy — measured convergence.* The fitted D is below the analytic
+D = E_F because the mesh under-resolves ∂²ε/∂k² ∝ 1/k near the Dirac point. At
+1 kV/cm (linear regime):
+
+| mesh | E_F [eV] | partially occupied k-points | n_2D vs analytic | D_fit/E_F |
+|---|---|---|---|---|
+| 147² | 0.2 | 36 | 3.27 vs 3.36×10¹² (−2.6 %) | 0.659 |
+| 300² | 0.2 | 116 | 3.345 vs 3.36×10¹² (−0.5 %) | **0.930** |
+| 147² | 0.4 | 72 | 1.284×10¹³ | 0.894 |
+| 48² | 0.6 | 8 | 3.04 vs 2.89×10¹³ (+5 %) | 0.888 |
+
+The density needs one mesh shell inside the Fermi circle, the Drude weight three
+or four. The deficit is a scale error common to all fields, so the *shape* of the
+T(E₀) curve above is unaffected; absolute conductivities want k_F ≳ 3 mesh
+spacings (N ≳ 280 at E_F = 0.2 eV).
 
 *Still to run (cluster).* The τ half of the story: `--ef-ev 0.2 --temp-init-k 300
 --variants diss,mem` on a Fermi-surface-resolving mesh (147² or denser), where

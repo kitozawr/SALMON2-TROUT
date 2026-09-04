@@ -223,10 +223,20 @@ Drude weight, weighted by $\partial^2\varepsilon/\partial k^2\propto1/k$, is sti
 $\approx30\,\%$ low. Run this picture before any doped production run.
 The Drude *weight* converges more slowly than the density, because
 $\partial^2\varepsilon/\partial k_a^2=v_F\sin^2\theta/k$ weights the innermost
-shells: on the one-shell meshes above, $D$ extracted from the dynamics scatters by
-tens of per cent around the analytic value ($0.54$–$0.66$ eV against 0.60 eV at
-$N=48$, $E_F=0.6$ eV; 0.13 eV against 0.20 eV at $N=147$, $E_F=0.2$ eV). Quantitative
-Drude work therefore wants $k_F\gtrsim3\,\Delta k$.
+shells. Measured with the trajectory fit of §4a.3 at 1 kV/cm (linear regime):
+
+| mesh | $E_F$ [eV] | partially occupied points | $n_{2D}$ vs analytic | $D_{\rm fit}/E_F$ |
+|---|---|---|---|---|
+| $147^2$ | 0.2 | 36 | $3.27$ vs $3.36\times10^{12}$ (−2.6 %) | 0.659 |
+| $300^2$ | 0.2 | 116 | $3.345$ vs $3.36\times10^{12}$ (−0.5 %) | **0.930** |
+| $147^2$ | 0.4 | 72 | $1.284\times10^{13}$ | 0.894 |
+| $48^2$ | 0.6 | 8 | $3.04$ vs $2.89\times10^{13}$ (+5 %) | 0.888 |
+
+The density is good to a few per cent as soon as the Fermi circle contains a shell;
+the Drude weight needs three or four, and reaches 93 % of $E_F$ at
+$k_F\simeq3\,\Delta k$. Quantitative Drude work therefore wants $k_F\gtrsim3\,\Delta k$
+(Eq. 4a.3); below that the deficit is a field-independent scale error, so the
+*shape* of $\sigma(E_0)$ survives while its absolute value does not.
 
 ### 4a.3 What can bleach a doped sheet
 The sheet conductance of a Drude metal is $\sigma_{dc}=D\tau/\pi$ with the
