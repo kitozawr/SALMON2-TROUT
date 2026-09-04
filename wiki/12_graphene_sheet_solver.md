@@ -142,7 +142,25 @@ it across dopings, each with the $\tau$ that reproduces the same $\sigma$:
 
 $E_F=0.2$–$0.4$ eV is where an ordinary sample sits, and Eq. (4a.2) discriminates
 inside that window through the onset field (27 / 54 / 81 kV/cm for 0.2 / 0.4 /
-0.6 eV). The $E_F=0.6$ eV used in the $48^2$ runs of §4a.3 is therefore a
+0.6 eV).
+
+This is corroborated independently of the optics. Hassanpour Amiri *et al.* [18]
+identify the unintentional doping of transferred CVD graphene as ionic residue from
+the copper etch, with a **typical density of $4\times10^{12}$ cm⁻²**, and show that an
+aqueous-ammonia wash removes most of it (the Dirac voltage returns near zero and the
+geometrically normalised mobility exceeds $2.4\times10^{4}$ cm²/V s). On the Dirac
+cone that density is
+$$
+k_F=\sqrt{\pi n}=0.0188\ \text{a.u.},\qquad E_F=\hbar v_Fk_F=0.224\ \text{eV},
+\qquad E_{\rm sat}=30\ \text{kV/cm}, \tag{4a.2b}
+$$
+i.e. within 12 % of the $E_F=0.2$ eV the transmission measurement gives on its own,
+and it places the current-saturation onset squarely inside the 1–100 kV/cm DAST
+range. A sample that has *not* had such a wash is therefore expected to sit at
+$E_F\simeq0.22$ eV and to start brightening near 30 kV/cm; an ammonia-washed
+(doping-free) sample should behave like the intrinsic curve of §4a.3 instead --
+darkening with field, not brightening. That is a sharp, cheap experimental test of
+the mechanism. The $E_F=0.6$ eV used in the $48^2$ runs of §4a.3 is therefore a
 *mesh-affordable proxy*, higher than a typical sample, and its curve maps onto the
 sample by the rescaling of step 3.
 
@@ -492,3 +510,8 @@ which for the single-cycle transient gives $n\approx(1/\pi^2)A_0\sqrt{E_{\rm pea
 15. Z. Mics *et al.*, Nat. Commun. **6**, 7655 (2015).
 16. N. Boroumand *et al.*, Rep. Prog. Phys. **88**, 070501 (2025) — the non-Markovian framing (`wiki/10` §6).
 17. R. Ramanujam, M.S. thesis, Arizona State University (2015) — the π-EPM form factors.
+18. M. Hassanpour Amiri, J. Heidler, A. Hasnain, S. Anwar, H. Lu, K. Müllen, K. Asadi,
+    *Doping free transfer of graphene using aqueous ammonia flow*, RSC Adv. **10**,
+    1127–1131 (2020), doi:10.1039/C9RA06738H (open access) — residual ionic dopants of
+    typical density $4\times10^{12}$ cm⁻² on transferred CVD graphene, removed by an
+    ammonia wash; the reference point for the doping of §4a.0.

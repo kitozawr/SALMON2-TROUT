@@ -445,7 +445,13 @@ Splitting it across dopings, each with the τ that reproduces the same σ:
 
 E_F = 0.2–0.4 eV is where an ordinary sample sits; 0.1 eV would need a mobility
 CVD-on-polymer does not have, and 0.6 eV a mobility that is low even for
-chemically doped film. The field at which the transmission starts to rise picks
+chemically doped film. Independent corroboration: Hassanpour Amiri *et al.*,
+*Doping free transfer of graphene using aqueous ammonia flow*, RSC Adv. **10**,
+1127 (2020), attribute the unintentional doping of transferred CVD graphene to
+ionic etch residue of **typical density 4×10¹² cm⁻²** — on the Dirac cone that is
+E_F = 0.224 eV and a saturation onset of 30 kV/cm, within 12 % of what the
+transmission alone gives. Their ammonia-washed (doping-free) films should follow
+the *intrinsic* curve instead and darken with field: a cheap test of the mechanism. The field at which the transmission starts to rise picks
 between them (last column). The E_F = 0.6 eV used in the 48² runs below is a
 mesh-affordable proxy, not the sample.
 
