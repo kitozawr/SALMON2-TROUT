@@ -643,4 +643,9 @@ Analysis scripts: `transmission.py` (T/R/A, sheet BC, energy ledger, Re σ),
 (basis f-sum rule, residual reactive current), `plot_levels.py` (level
 populations vs t and k-maps), `drude_check.py` (doped sheet: D, τ, mean free
 path, experiment conversion), `field_scan_plot.py` (the T(E₀)/σ(E₀) figure),
-`run_field_scan.sh` (the whole scan-and-plot pipeline).
+`run_field_scan.sh` (the whole scan-and-plot pipeline), `plot_occupation.py`
+(the initial level occupation of a doped vs an undoped sheet on the actual mesh:
+sheet density, k_F, partially occupied k-points — the pre-flight check for a doped
+run), `drift_saturation.py` (the universal drift-saturation curve σ_eff/σ_lin
+against A₀/k_F, continuum against any mesh — the diagnostic that separates the
+physical brightening from the discretization bump, wiki/12 §4a.5).
