@@ -35,12 +35,17 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from transmission import analyze, AU_EV, VF_EPM_AU  # noqa: E402
+from transmission import analyze, TruncatedRun, AU_EV, VF_EPM_AU  # noqa: E402
 from drude_check import sheet_from_transmission, Z0, run_variable  # noqa: E402
 from drift_saturation import g_continuum  # noqa: E402
 
 SIGMA_UNIV = 0.25
 A0_PER_KVCM = 6.213e-4      # peak |A| [a.u.] per kV/cm of the scaled DAST transient
+# Beyond this displacement the "displaced Fermi disc on a cone" picture behind G(u)
+# stops being about a cone at all: at u = 12 the excursion is 40 % of |b|, the EPM
+# band is strongly warped, and the sheet keeps a conductivity the drift model says
+# should have gone. The continuum overlay is therefore drawn only up to here.
+CONE_U_MAX = 2.0
 
 
 def collect(patterns):
@@ -51,7 +56,11 @@ def collect(patterns):
     files = sorted(sum((glob.glob(p) for p in patterns), []))
     rows = []
     for f in files:
-        r, _ = analyze(f)
+        try:
+            r, _ = analyze(f)
+        except TruncatedRun as exc:
+            print(f'# SKIPPED, this field is missing from the figure: {exc}')
+            continue
         ef = float(run_variable(f, 'sbe_ef_ev', 0.0) or 0.0)
         tk = float(run_variable(f, 'sbe_temp_init_k', 300.0) or 300.0)
         rows.append((r['E0_kvcm'], r['T'], r['R'], r['A'], r['resig'], ef, r['sig_c'], tk,
@@ -146,13 +155,15 @@ def main(argv=None):
         if args.continuum:
             tc = continuum_curve(arr[:, 0], asig[0], aef, atk, t0=arr[0, 1])
             if tc is not None:
-                ax[0].semilogx(arr[:, 0], tc, ':', lw=1.4, color=col, alpha=0.75)
+                mv = (arr[:, 0] * A0_PER_KVCM / kF <= CONE_U_MAX) if kF else slice(None)
+                ax[0].semilogx(arr[mv, 0], tc[mv], ':', lw=1.4, color=col, alpha=0.75)
+    uu = dop[:, 0] * A0_PER_KVCM / kF if kF else np.zeros(len(dop))
     if args.continuum:
         tc = continuum_curve(dop[:, 0], dsig[0], ef, tinit, t0=dop[0, 1])
         if tc is not None:
-            ax[0].semilogx(dop[:, 0], tc, ':', lw=1.6, color='#c0392b',
-                           label='continuum drift saturation $G(u)/u$ (dotted, per series)')
-            uu = dop[:, 0] * A0_PER_KVCM / kF if kF else np.zeros(len(dop))
+            mv = (uu <= CONE_U_MAX) if kF else slice(None)
+            ax[0].semilogx(dop[mv, 0], tc[mv], ':', lw=1.6, color='#c0392b',
+                           label=f'continuum drift saturation $G(u)/u$, $u\\leq{CONE_U_MAX:g}$')
             lo = uu <= 1.0
             if lo.any():
                 dev = 100.0 * np.min((dop[lo, 1] - tc[lo]) / np.maximum(tc[lo], 1e-12))
@@ -167,20 +178,23 @@ def main(argv=None):
     if e_sat:
         ax[0].axvline(e_sat, ls='--', c='#7f8c8d', lw=1)
         ax[0].axvspan(e_sat, max(dop[:, 0].max(), 1.0), color='#f1c40f', alpha=0.13)
-        ax[0].annotate('$A_0 = k_F$\n(current saturation)', xy=(e_sat, dop[:, 1].min()),
-                       xytext=(e_sat * 1.8, dop[:, 1].min() - 0.06), fontsize=8,
-                       arrowprops=dict(arrowstyle='->', lw=0.8, color='#7f8c8d'))
+        ax[0].annotate('$A_0 = k_F$ (current saturation)',
+                       xy=(e_sat * 1.15, 0.03), xycoords=('data', 'axes fraction'),
+                       fontsize=8, va='bottom', color='#7f8c8d')
     zs_meas = []
     for tm in args.t_meas:
         zs, t_bare = sheet_from_transmission(tm, args.n_sub)
         zs_meas.append(zs / Z0 / SIGMA_UNIV)
         ax[0].axhline(tm / t_bare, ls=':', c='#27ae60', lw=1.2)
     if args.t_meas:
-        ax[0].text(dop[0, 0] * 1.2, max(t / sheet_from_transmission(t, args.n_sub)[1] for t in args.t_meas) + 0.012,
-                   'measured sheet transmission (substrate divided out)', fontsize=7.5, color='#27ae60')
+        ax[0].text(dop[0, 0] * 1.15, min(t / sheet_from_transmission(t, args.n_sub)[1] for t in args.t_meas),
+                   'measured sheet transmission (substrate divided out)', fontsize=7.5,
+                   color='#27ae60', va='bottom')
     ax[0].set_xlabel('peak field $E_0$ [kV/cm]'); ax[0].set_ylabel('transmission $T$')
-    ax[0].set_title(args.title or 'Same mesh, same pulse: only the initial occupation differs', fontsize=9)
-    ax[0].legend(fontsize=8, loc='lower left'); ax[0].grid(alpha=0.25)
+    ax[0].set_title(args.title or ('Same mesh, same pulse: only the initial occupation differs'
+                                   if ins.size else 'Transmission of a doped Dirac sheet against the peak field'),
+                    fontsize=9)
+    ax[0].legend(fontsize=8, loc='upper left', framealpha=0.9); ax[0].grid(alpha=0.25)
 
     # middle panel: the extinction the DOPING carriers add, 1 - T_doped/T_intrinsic.
     # This is the observable that isolates them: the intrinsic Landau-Zener darkening
