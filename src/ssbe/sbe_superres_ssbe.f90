@@ -37,7 +37,7 @@ module sbe_superres_ssbe
               eps_thomas_fermi, tf_kappa2_degenerate, debye_kappa2, &
               lindhard_F, eps_lindhard_static, plasmon_freq2, lopc_branches, &
               eps_cdrb, interk_vq, build_vq_table, build_acscreen_table, t_ring_opts, &
-              dirac_mu_2d, rana_qtf, rana_rcccv, rana_auger_dpop, &
+              dirac_n_2d, dirac_mu_2d, rana_qtf, dirac_plasmon_2d, rana_rcccv, rana_auger_dpop, &
               energy_partner_weights, fermi_dirac, fit_fermi_dirac, &
               carrier_carrier_relax, eph_interk_dpop, ii_interk_dpop, &
               auger_interk_dpop, mp_grid_triple, mp_partner_triple, &
@@ -1013,6 +1013,42 @@ contains
         qtf = 4d0 * kT / (eps_inf * v * v) * (l1 + l2)
     end function rana_qtf
 
+    ! =====================================================================
+    ! 2D colmem analog (graphene, wiki/10 sec. 8.11): the memory LINE of the
+    ! Coulomb (Rana) collision sector = the 2D Dirac plasmon of the
+    ! instantaneous e-h plasma. Long-wavelength plasmon of the Dirac gas
+    ! [Hwang & Das Sarma, PRB 75, 205418 (2007)]:  w_pl^2(q) = 2 e^2 E_F q /
+    ! (kappa hbar^2)  (Gaussian). For the two-component (electron + hole)
+    ! plasma the Drude weights add, and at finite T each branch's E_F is the
+    ! intraband Drude weight  W(mu) = 2 k_B T ln[2 cosh(mu/2 k_B T)]
+    ! [Falkovsky & Varlamov, Eur. Phys. J. B 56, 281 (2007)]  (-> |mu| when
+    ! degenerate, -> 2 k_B T ln 2 for the intrinsic thermal plasma). It is
+    ! evaluated at the collision's own screening momentum q = Q_TF [R07 Eq.
+    ! (13)] -- the momentum-transfer scale of the screened matrix element --
+    ! so 1/w_pl is the build-up time of screening (Haug & Jauho, Quantum
+    ! Kinetics, the "build-up of screening" chapter): the memory time of the
+    ! Coulomb collision, exactly as the phonon energy is for e-ph.
+    ! Hartree a.u. (e = hbar = 1, eps_inf = eps_r/4pi absorbed as in rana_qtf):
+    !     w_pl^2 = 2 (W_c + W_v) Q_TF / eps_r.
+    ! No new free parameters: T, eps_r and the mu's are the Rana channel's own.
+    ! =====================================================================
+    pure function dirac_plasmon_2d(mu_c, mu_v, kT, v, eps_r) result(wpl)
+        implicit none
+        real(8), intent(in) :: mu_c, mu_v, kT, v, eps_r
+        real(8) :: wpl, wc, wv, qtf
+        wc  = drude_weight(mu_c)
+        wv  = drude_weight(mu_v)
+        qtf = rana_qtf(mu_c, mu_v, kT, v, eps_r)
+        wpl = sqrt(max(2d0 * (wc + wv) * qtf / eps_r, 0d0))
+    contains
+        ! 2 kT ln[2 cosh(mu/2kT)] = |mu| + 2kT ln(1 + e^{-|mu|/kT}), overflow-safe
+        pure function drude_weight(mu) result(w)
+            real(8), intent(in) :: mu
+            real(8) :: w
+            w = abs(mu) + 2d0 * kT * log(1d0 + exp(-abs(mu) / kT))
+        end function drude_weight
+    end function dirac_plasmon_2d
+
     ! CCCV Auger recombination rate per area, [R07 Eq. (14)] (the paper's main
     ! result; verified against the journal text supplied by the maintainer):
     !   R = (1/(hbar^2 v)) int_0^inf dk1/2pi int_0^inf dk2/2pi int_{k2}^inf dQ/2pi
@@ -1116,7 +1152,7 @@ contains
     ! a.u.t^-1] is returned for the tau_r diagnostic print.
     ! =====================================================================
     subroutine rana_auger_dpop(nk, nba, eval, f, occ_max, iv, ic, area, kT, vf, &
-                               eps_r, tau, dpop, rnet_out, e_src_lo, e_src_hi)
+                               eps_r, tau, dpop, rnet_out, e_src_lo, e_src_hi, n2d_in, p2d_in)
         implicit none
         integer, intent(in)  :: nk, nba, iv, ic
         real(8), intent(in)  :: eval(nba, nk), f(nba, nk), occ_max, area, kT, vf, eps_r, tau
@@ -1130,6 +1166,13 @@ contains
         ! full-basis density. No-op when absent (default all-active; graphene
         ! always runs all-active, so this path is dormant there).
         real(8), intent(in), optional :: e_src_lo, e_src_hi
+        ! 2D colmem analog (wiki/10 sec. 8.11): memory-filtered SOURCE densities.
+        ! When present, the R07 rates (quasi-Fermi levels, R and G) are evaluated
+        ! on these instead of the instantaneous sums, so the fast virtual share
+        ! of the Houston populations does not feed the Coulomb collision; the
+        ! transfer stencils (avail/room) still use the instantaneous f, so the
+        ! CPTP bounds are unchanged.
+        real(8), intent(in), optional :: n2d_in, p2d_in
         real(8) :: n2d, p2d, mu_c, mu_v, rrec, rgen, rnet
         real(8) :: avail, room, dn_lin, cap, dn
         real(8) :: ec_bar, ev_bar, e_rel, we, sw, dn2, wgt
@@ -1153,6 +1196,8 @@ contains
         n2d = sum(f(ic:nba, :)) / (dble(nk) * area)
         p2d = (dble(iv) * occ_max - sum(f(1:iv, :)) / dble(nk)) / area
         p2d = max(p2d, 0d0)
+        if (present(n2d_in)) n2d = max(n2d_in, 0d0)
+        if (present(p2d_in)) p2d = max(p2d_in, 0d0)
         if (n2d < n_eps .and. p2d < n_eps) return
 
         ! Instantaneous quasi-Fermi levels and the [R07] rates (CCCV + CVVV

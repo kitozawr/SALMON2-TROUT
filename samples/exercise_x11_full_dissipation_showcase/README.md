@@ -121,3 +121,14 @@ step needed; tune with `--fps` / `--anim-format`, disable with `--no-animate`.
   prints `ring CPTP limiter engaged: s = ...`, multiply dt by that s).
 - Physics spec of every channel, with the full master equation: `wiki/08_master_equation.md`
   (and per-channel details in `wiki/01`, `wiki/07`).
+
+### Basis note (2026-09-04, from exercise x14's level check)
+`graphene_epm_gs.inp` now uses `epm_pw_cutoff_ry = 29.4` (43 plane waves). The
+earlier 7-PW basis (2.94) is not closed under the little group of the K point and
+opened a **spurious 0.21 eV gap at the Dirac point** (the Python reference and the
+Fortran bandpath agree: 0.2125 eV); 43 PW restores the symmetry-protected
+degeneracy (gap 0) and the thesis v_F = 0.96×10⁶ m/s. The SBE still uses
+`nstate = 2`, so nothing else in this exercise changes. Note also that the
+half-shifted Monkhorst–Pack mesh puts K = (2/3, 1/3) on the grid only for ODD
+multiples of 3 (the 12×12 mesh straddles K by half a spacing); see
+`tests/test_graphene_dirac_levels.py` and exercise x14.

@@ -9,8 +9,10 @@
 ! IMPORTANT for graphene:                                                                  !
 !  * the in-plane lattice constant is FIXED at the cited 2.46 Ang (the EPM ignores         !
 !    epm_lattice_constant_au for graphene -- it would otherwise inherit the GaAs default). !
-!  * epm_pw_cutoff_ry is a KINETIC cutoff here (|G|^2 [a.u.] <= cutoff); 2.94 Ry = 40 eV    !
-!    reproduces the validated 7-plane-wave Ramanujam basis. Do NOT use the cubic 11.1.      !
+!  * epm_pw_cutoff_ry is a KINETIC cutoff here (|G|^2 [a.u.] <= cutoff). 29.4 (43 plane      !
+!    waves, shell-complete) -- NOT the earlier 2.94 (7 PW): that basis is not closed under   !
+!    the little group of K and opens a SPURIOUS 0.21 eV gap at the Dirac point (x14 finding, !
+!    tests/test_graphene_dirac_levels.py). 43 PW: gap 7e-6 eV, v_F = 0.96e6 m/s (thesis).     !
 !  * num_kgrid z = 1 (no dispersion along the vacuum axis); use a multiple of 3 in-plane   !
 !    so the K=(2/3,1/3) Dirac point is near the mesh. nelec=2, nstate=2 (the pi/pi* pair). !
 !----------------------------------------------------------------------------------------!
@@ -42,6 +44,6 @@
 
 &epm
     epm_material     = 'graphene'                  ! honeycomb, V^A = 0, Ramanujam 3-form-factor pi-model
-    epm_pw_cutoff_ry = 2.94d0                      ! KINETIC cutoff [a.u.^2] = 40 eV (7-PW Ramanujam basis)
+    epm_pw_cutoff_ry = 29.4d0                      ! |G|^2 <= 29.4 a.u.: 43 PW, gapless K (2.94 = 7 PW is GAPPED, see header)
     epm_cell         = 'primitive'                 ! the only graphene mode (gapless Dirac, no folding)
 /

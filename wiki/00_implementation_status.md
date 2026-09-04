@@ -2,11 +2,59 @@
 
 **Read this first on every resume.** It records what is done, what is next, key decisions, and the test inventory. Update it in the same commit as any code change.
 
-Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #44 into `develop-2.0.0`); (2) new materials — **GaAs, Si/Si_cb, wurtzite CdS, monolayer graphene** — each a validated Python EPM reference + cited CPTP dissipation channels. The maintainer drives one bounded increment per session ("continue"). Test grid: **4×4×4 (or 5×5×5), scalar (no spinor)**. Current test count: **22/22** (`python3 tests/run_all.py`).
+Roadmap: (1) Si + nonlocal-super-compute (Parts A–G, all done, merged via PR #44 into `develop-2.0.0`); (2) new materials — **GaAs, Si/Si_cb, wurtzite CdS, monolayer graphene** — each a validated Python EPM reference + cited CPTP dissipation channels. The maintainer drives one bounded increment per session ("continue"). Test grid: **4×4×4 (or 5×5×5), scalar (no spinor)**. Current test count: **28/28** (`python3 tests/run_all.py`).
 
 > **Running on the supercomputer (Lomonosov-2, SLURM + OpenMPI + gfortran): see [`wiki/11_supercomputer_lomonosov2.md`](11_supercomputer_lomonosov2.md)** — the shared reference for cluster runs (environment, `sbatch` recipe, how to read a healthy run banner, the MPI failure catalog, and the per-run log). This is the page we talk through for every HPC run.
 
 ---
+
+## ✅ DONE (2026-09-04) — graphene self-induced transparency readiness: exercise x14 + the **2D colmem analog** + a Dirac-point level fix
+Maintainer task: *«самоиндуцированное просветление в графене при полях 1–100 кВ/см:
+проверить что все эффекты готовы, оценить пропускание по полю до и после, тесты,
+проверка уровней, проверка насыщения населённости; нужен 2d colmem аналог; нужно
+ready»*. Delivered (branch `claude/si-direct-gap-isosurfaces-mp0mbd`, restarted from trunk):
+- **`samples/exercise_x14_graphene_self_induced_transparency/`** — `make_inputs.py`
+  (one source of truth: 43-PW EPM GS + field scan 1/3/10/30/100 kV/cm × {coh, diss,
+  mem} + dark controls), `run_scan.sh`, **`transmission.py`** (field *before* =
+  `E_ext`; field *after* = sheet boundary condition `E_t = (2E_inc − Z₀J_s)/(1+n_sub)`,
+  `J_s = −Jm·L_z`; fluence-exact T/R/A, the SBE energy-ledger cross-check `A_E`,
+  the radiation-reaction term `S_rr = A_E − A` as the reliability flag of the
+  perturbative estimate, band-averaged Re σ/σ_univ, resonance-shell resolution
+  advisory), `saturation_check.py` (Houston vs ring-visible density, virtual
+  fraction, Rana ledger CM/recombination phases against `n_i(T)`). Smoke-validated
+  at 24² (17 runs, electrons = 2.000 at every step; the bookkeeping closes:
+  9.5×10¹⁰ pairs/cm² at 100 kV/cm ⇔ the ledger's 5.7 % absorbed energy).
+- **2D colmem analog (wiki/10 §8.11).** The graphene guard on `yn_sbe_colmem/_pop`
+  is lifted (it was a guard, not physics; Kuhn–Zurek stays forbidden): the e-ph
+  sectors use the graphene phonon table; the **Rana (Coulomb) source densities
+  are memory-filtered with the 2D Dirac-plasmon line** `ω_pl(n,p; Q_TF)`
+  [Hwang–Das Sarma PRB 75, 205418 (2007); Falkovsky–Varlamov EPJ B 56, 281 (2007)
+  Drude weight] — `dirac_plasmon_2d`, `rana_auger_dpop(n2d_in, p2d_in)`,
+  `flag_colmem_2d`; **no new inputs, no new free parameters**. Lines: 31 meV
+  intrinsic → 133 meV at 10¹² cm⁻² (300 K). `test_colmem_2d`: limits, fixed point,
+  2ω breathing → |R(2ω)| = 0.16, overrides.
+- **Level check → a real bug fixed.** The 7-plane-wave graphene EPM basis
+  (`epm_pw_cutoff_ry = 2.94`, the x11 input) is not closed under the little group
+  of K → a **spurious 0.21 eV gap at the Dirac point** (Python and the Fortran
+  bandpath agree: 0.2125 eV). 43 PW (29.4 a.u.) → gap 0, v_F = 0.96×10⁶ m/s, thesis
+  windows met; x11 + x14 inputs updated, `test_graphene_dirac_levels` guards it.
+  Also recorded: the SALMON MP mesh is half-shifted, so K = (2/3,1/3) is on the
+  mesh only for ODD multiples of 3 (147/153, not 12/24/150).
+- **Saturation.** `test_rana_saturation`: the pair population saturates at the Rana
+  balance `n₀ = n_i(T) = (π/6)(k_BT/ħv_F)² = 8.08×10¹⁰ cm⁻² (300 K)` — R=G root to
+  10⁻⁴, two-sided monotone CPTP relaxation, T² law. Live at 24²: 100 kV/cm gives
+  9.5×10¹⁰ > n_i → the ledger shows net Auger recombination; 10 kV/cm gives 10⁹ →
+  net carrier multiplication. The sign flips exactly at n_i.
+- **Readiness verdict (x14 README):** READY for the interband (near-IR, ħω ≳ 0.8 eV)
+  regime on a shell-resolving mesh (≥ 3 mesh points per shell radius ⇒ nk ≥ 150 at
+  0.8 eV; the graphene ring is e-ph + Rana = **O(nk²)**, exp-bound: ≈ 40 ms/step at
+  24² on 4 threads ⇒ ≈ 1.3 s/step at 150² on 48 threads ⇒ ≈ 25 min per 100-fs run).
+  Documented limits (not blockers): no doping / finite-T initial occupation (the
+  THz Drude regime of doped CVD graphene needs it + a K-refined mesh); the Rana
+  balance uses the lattice T, not a carrier T_e (plateau `n_i(T_bath)` is a lower
+  bound); the single-cell driver has no self-consistent sheet field — `S_rr` flags
+  when it matters; exact routes: a radiation-reaction term or `maxwell_sbe` with
+  `hx_m = L_z`. Tests: 28/28.
 
 ## ✅ CLOSED (2026-07-20) — universal virtual/real carrier separation
 **All three sectors implemented + validated the same day (wiki/10 §8.6–8.10),

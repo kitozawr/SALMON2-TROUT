@@ -1,0 +1,69 @@
+!########################################################################################!
+! x14 graphene self-induced transparency -- mem  variant, peak E = 0 kV/cm                 !
+!----------------------------------------------------------------------------------------!
+! In-plane (x) Acos2 pulse, hbar*omega = 0.800 eV, 8.0 cycles (tw) + 60.0 fs tail.        !
+! I = 0.000e+00 W/cm^2, A0 = E0/omega = 0.00e+00 a.u. (k excursion), Rabi area ~ 0.00 rad.   !
+! Field before = E_ext column, field after = sheet BC on the Jm column: transmission.py.  !
+! zero-field CONTROL: the Rana channel relaxes the T=0 initial state toward the n_i(T_bath) thermal density -- subtract this drift from the driven runs.  
+!########################################################################################!
+
+&calculation
+  theory = 'sbe'
+/
+
+&control
+  sysname = 'graphene_sit'
+/
+
+&units
+  unit_system = 'au'
+/
+
+&system
+  yn_periodic  = 'y'
+  al_vec1(1:3) = 4.648726d0, 0.0d0, 0.0d0
+  al_vec2(1:3) = 2.324363d0, 4.025915d0, 0.0d0
+  al_vec3(1:3) = 0.0d0, 0.0d0, 37.794523d0          ! 20 Ang vacuum: L_z of the sheet cell
+  nelec  = 2
+  nstate = 2
+/
+
+&kgrid
+  num_kgrid(1:3) = 24, 24, 1
+/
+
+&tgrid
+  dt = 4.0000d0
+  nt = 1048
+/
+
+&emfield
+  ae_shape1      = 'Acos2'
+  epdir_re1(1:3) = 1.0d0, 0.0d0, 0.0d0
+  E_amplitude1   = 0.000000e+00
+  tw1            = 1709.742d0
+  omega1         = 0.02939946d0
+/
+
+&analysis
+  out_projection_k_step = 1048
+/
+
+&epm
+  epm_material = 'graphene'
+/
+
+&sbe
+  yn_sbe_superres       = 'y'
+  yn_sbe_eph            = 'y'
+  yn_sbe_eph_acoustic   = 'y'
+  yn_sbe_auger          = 'y'
+  sbe_eph_temperature_k = 300.0d0
+  sbe_coulomb_epsilon   = 10.0d0
+  sbe_search_sigma_e_ev = 0.100d0
+  ! ---- graphene 2D collisional-memory analog (wiki/10 sec. 8.11) ----
+  yn_sbe_colmem         = 'y'    ! e-ph gout memory: graphene phonon lines
+  yn_sbe_colmem_pop     = 'y'    ! e-ph source filtered with the phonon lines;
+                                 ! Rana (Coulomb) source with the 2D Dirac-plasmon line
+  yn_sbe_dressed_ref    = 'y'    ! Option A: removes the Dirac-point rotation background
+/

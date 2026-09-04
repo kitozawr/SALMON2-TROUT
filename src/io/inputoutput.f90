@@ -1127,9 +1127,10 @@ contains
     sbe_sfsb_nv             = 1          ! top valence bands in the pair sum
     sbe_sfsb_nc             = 1          ! bottom conduction bands in the pair sum
     sbe_sfsb_stride         = 0          ! 0: auto stride from the Stark-shifted gap
-    yn_sbe_colmem           = 'n'        ! 'y': collisional-memory (non-Markovian) dephasing
+    yn_sbe_colmem           = 'n'        ! 'y': collisional-memory (non-Markovian) dephasing (graphene: 2D analog, wiki/10 8.11)
     sbe_colmem_tau_fs       = -1.0d0     ! memory time tau_c [fs]; <=0: hbar/sigma_E
     yn_sbe_colmem_pop       = 'n'        ! 'y': memory-filtered source populations for the ring kernels
+                                         !      (graphene: Rana source filtered with the 2D Dirac-plasmon line)
     yn_sbe_dressed_ref      = 'n'        ! 'y': Option A dressed-reference carrier measure (ring)
     yn_sbe_full_dressed     = 'y'        ! 'y' (default): ring dressed projection on the FULL basis (correct); 'n': frozen-window truncation (fast, over-generates)
     yn_sbe_eeh              = 'n'        ! 'y': carrier-carrier (e-e/e-h) thermalization channel

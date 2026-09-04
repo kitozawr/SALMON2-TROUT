@@ -196,6 +196,14 @@ module bloch_solver_ssbe
         ! of the static {occ,0} -- the rotation background delta0 is
         ! subtracted from the Houston populations before the gather.
         logical :: flag_dressed_ref = .false.
+        ! graphene 2D collisional-memory analog (wiki/10 sec. 8.11): the Rana
+        ! (Coulomb) SOURCE densities n2d/p2d are memory-filtered with the 2D
+        ! Dirac-plasmon line w_pl(n,p; Q_TF) of the instantaneous e-h plasma
+        ! (two lines +/- w_pl x {n, p}); the e-ph sectors keep the phonon lines.
+        logical :: flag_colmem_2d = .false.
+        real(8) :: colmem_tauc_au = 0d0
+        complex(8) :: zpl(2, 2) = (0d0, 0d0)        ! (line, {n, p}) auxiliary fields
+        logical :: zpl_init = .false., zpl_printed = .false.
 
         real(8) :: coul_pref     = 0d0  ! strength * 4 pi / (eps * Omega_cell * Nk)
         real(8) :: coul_screen2  = 0d0  ! kappa^2 [1/Bohr^2] (Yukawa regulariser)
@@ -932,15 +940,21 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
             error stop 'collisional-memory dephasing requires eph + ring'
         end if
         if (trim(epm_material) == 'graphene') then
-            ! maintainer decision (2026-07-20): BOTH dephasing channels stay OFF
-            ! for graphene (KZ forbidden; the memory upgrade excluded too).
-            error stop 'collisional-memory dephasing disabled for graphene (wiki/10 sec. 8.6)'
+            ! 2D colmem analog (maintainer 2026-09-04, wiki/10 sec. 8.11): the
+            ! 2026-07-20 exclusion is lifted for the COLLISIONAL memory (it was a
+            ! guard, not physics -- Kuhn-Zurek single-particle dephasing stays
+            ! forbidden). The e-ph sectors use the graphene phonon table (E2g/
+            ! A1' + acoustic) exactly like every material; the Coulomb (Rana)
+            ! SOURCE gets the 2D Dirac-plasmon memory line (flag_colmem_2d,
+            ! set in the Rana block below once that channel is configured).
+            if (lprint) write(*, '(a)') '# graphene: 2D collisional-memory analog (wiki/10 sec. 8.11)'
         end if
         if (sbe_colmem_tau_fs > 0d0) then
             colmem_tauc = sbe_colmem_tau_fs / au_fs
         else
             colmem_tauc = 1d0 / sbe%eph_sigma_au      ! hbar/sigma_E default
         end if
+        sbe%colmem_tauc_au = colmem_tauc
         allocate(sbe%colmem_c(2 * sbe%eph_nph), sbe%colmem_mu(2 * sbe%eph_nph))
         call colmem_lines(sbe%eph_nph, sbe%eph_hw, sbe%eph_wrel, sbe%eph_nb, &
                           colmem_tauc, sbe%colmem_nl, sbe%colmem_c, sbe%colmem_mu)
@@ -1039,6 +1053,10 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
         sbe%rana_eps_r = mp%rana_eps_r
         if (sbe_coulomb_epsilon > 0d0) sbe%rana_eps_r = sbe_coulomb_epsilon
         sbe%rana_kt_au = kB_au * sbe_eph_temperature_k
+        ! 2D colmem analog (wiki/10 sec. 8.11): with the population memory
+        ! filter on, the Rana SOURCE densities are filtered with the 2D
+        ! Dirac-plasmon line instead of the phonon lines (apply_ring_channels).
+        sbe%flag_colmem_2d = sbe%flag_colmem_pop
         ! 2D cell area A = V*|b3|/(2 pi): exact when b3 is the out-of-plane
         ! (vacuum) axis, i.e. b3 || z -- true for the graphene datasets.
         block
@@ -1065,6 +1083,8 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
                 sbe%rana_kt_au / kB_au, ' K (e-ph bath)'
             write(*, '(a,f10.3,a)') '#   2D cell area = ', sbe%rana_area_au, ' a.u.^2'
             write(*, '(a)') '#   k-local C n^3 and gap-threshold ring Auger: OFF (2D branch).'
+            if (sbe%flag_colmem_2d) write(*, '(a)') '#   2D colmem analog: R - G evaluated on n, p'// &
+                ' memory-filtered with the 2D Dirac-plasmon line w_pl(n,p; Q_TF) (wiki/10 sec. 8.11)'
         end if
     else if (sbe%flag_auger .and. sbe%flag_ring) then
         ! ---- NONLOCAL (ring) Auger: the exact time-reverse of the nonlocal
@@ -2491,7 +2511,8 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
                                  rana_auger_dpop, mp_grid_triple, get_material_params, &
                                  s_material_params, build_vq_table, build_acscreen_table, &
                                  t_ring_opts, debye_kappa2, tf_kappa2_degenerate, fit_fermi_dirac, &
-                                 colmem_pop_filter, colmem_pop_init, dressed_ref_delta
+                                 colmem_pop_filter, colmem_pop_init, dressed_ref_delta, &
+                                 colmem_lines, bose_factor, dirac_mu_2d, dirac_plasmon_2d
     use eigen_lapack, only: eigen_zheev
     use communication, only: comm_summation
     use salmon_global, only: num_kgrid, epm_material, sbe_eph_temperature_k
@@ -2511,6 +2532,10 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
     real(8),    allocatable :: dpop(:,:), dpop2(:,:), dpop_loc(:,:), gout(:,:), actab(:)
     integer :: ipol_use, ipac_use
     real(8) :: kappa2_c, pnorm
+    ! 2D colmem analog (graphene): raw / memory-filtered Rana source densities
+    real(8)    :: n_raw, p_raw, n_fil, p_fil, wpl_au, mu_c2, mu_v2
+    complex(8) :: cl2(2), mul2(2)
+    integer    :: nl2
     complex(8), allocatable :: U_loc(:,:,:)
     real(8)    :: eigen_active(sbe%n_active_bands), evals(sbe%n_active_bands)
     complex(8) :: p_active(sbe%n_active_bands, sbe%n_active_bands, 3)
@@ -2638,6 +2663,17 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
     ! filtered f; application to rho keeps the REAL populations + limiter.
     ! Not checkpointed: after a restart z re-seeds from the instantaneous f
     ! (one-memory-time transient), same policy as the ring gate.
+    !
+    ! 2D colmem analog (graphene, wiki/10 sec. 8.11): capture the Rana SOURCE
+    ! densities BEFORE the phonon-line population filter -- after the dressed
+    ! reference / ring gate, so the basis-level subtraction composes with the
+    ! time filter -- they get their own Coulomb-sector memory line (channel 4).
+    n_raw = 0d0;  p_raw = 0d0
+    if (sbe%flag_colmem_2d .and. iv >= 1 .and. ic <= nba) then
+        n_raw = sum(f_all(ic:nba, :)) / (dble(nk) * sbe%rana_area_au)
+        p_raw = max((dble(iv) * sbe%occ_max - sum(f_all(1:iv, :)) / dble(nk)) &
+                    / sbe%rana_area_au, 0d0)
+    end if
     if (sbe%flag_colmem_pop) then
         if (.not. allocated(sbe%zpop)) then
             allocate(sbe%zpop(nba, sbe%colmem_nl, nk))
@@ -2847,10 +2883,50 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
 
     ! ---- channel 4: graphene 2D Rana Auger/CM -------------------------------
     if (sbe%flag_rana2d .and. iv >= 1 .and. ic <= nba) then
-        call rana_auger_dpop(nk, nba, eval_all, f_all, sbe%occ_max, iv, ic, &
-                             sbe%rana_area_au, sbe%rana_kt_au, sbe%rana_vf_au, &
-                             sbe%rana_eps_r, tau, dpop, rnet, &
-                             e_src_lo=sbe%ring_e_lo, e_src_hi=sbe%ring_e_hi)
+        if (sbe%flag_colmem_2d) then
+            ! 2D colmem analog: memory-filter the SOURCE densities with the 2D
+            ! Dirac-plasmon line of the instantaneous e-h plasma, w_pl(n,p) at
+            ! the collision's own screening momentum Q_TF [R07 Eq. 13] -- the
+            ! build-up time of screening is the memory time of the Coulomb
+            ! collision. Lines +/- w_pl with the (N+1)/N thermal split and the
+            ! common width 1/tau_c; DISCRETE anchor -> a constant density is a
+            ! machine-exact fixed point (the calibrated R07 rates are untouched
+            ! for slow populations) while the 2*w_laser breathing of the
+            ! virtual share filters out of the collision source. Rank-identical
+            ! (built from the gathered f_all); z re-seeds after a restart.
+            mu_c2 =  dirac_mu_2d(max(n_raw, 1d-30), sbe%rana_kt_au, sbe%rana_vf_au)
+            mu_v2 = -dirac_mu_2d(max(p_raw, 1d-30), sbe%rana_kt_au, sbe%rana_vf_au)
+            wpl_au = max(dirac_plasmon_2d(mu_c2, mu_v2, sbe%rana_kt_au, sbe%rana_vf_au, &
+                                          sbe%rana_eps_r), 1d-6)
+            call colmem_lines(1, (/ wpl_au /), (/ 1d0 /), &
+                              (/ min(bose_factor(wpl_au, sbe%rana_kt_au), 1d12) /), &
+                              sbe%colmem_tauc_au, nl2, cl2, mul2)
+            if (.not. sbe%zpl_init) then
+                call colmem_pop_init(nl2, mul2(1:nl2), tau, n_raw, sbe%zpl(1:nl2, 1))
+                call colmem_pop_init(nl2, mul2(1:nl2), tau, p_raw, sbe%zpl(1:nl2, 2))
+                sbe%zpl_init = .true.
+            end if
+            call colmem_pop_filter(nl2, cl2(1:nl2), mul2(1:nl2), tau, n_raw, sbe%zpl(1:nl2, 1), n_fil)
+            call colmem_pop_filter(nl2, cl2(1:nl2), mul2(1:nl2), tau, p_raw, sbe%zpl(1:nl2, 2), p_fil)
+            ! one-time diagnostic once a meaningful density exists (1e9 cm^-2)
+            if (sbe%irank == 0 .and. .not. sbe%zpl_printed .and. n_raw > 2.8d-8) then
+                write(*, '(a,f8.2,a,es10.3,a,es10.3,a)') '# 2D colmem analog: w_pl = ', &
+                    wpl_au * au_ev * 1d3, ' meV at n_2d = ', n_raw / (0.52917721067d-8)**2, &
+                    ' cm^-2 (raw) -> ', max(n_fil, 0d0) / (0.52917721067d-8)**2, &
+                    ' cm^-2 (memory-filtered source)'
+                sbe%zpl_printed = .true.
+            end if
+            call rana_auger_dpop(nk, nba, eval_all, f_all, sbe%occ_max, iv, ic, &
+                                 sbe%rana_area_au, sbe%rana_kt_au, sbe%rana_vf_au, &
+                                 sbe%rana_eps_r, tau, dpop, rnet, &
+                                 e_src_lo=sbe%ring_e_lo, e_src_hi=sbe%ring_e_hi, &
+                                 n2d_in=n_fil, p2d_in=p_fil)
+        else
+            call rana_auger_dpop(nk, nba, eval_all, f_all, sbe%occ_max, iv, ic, &
+                                 sbe%rana_area_au, sbe%rana_kt_au, sbe%rana_vf_au, &
+                                 sbe%rana_eps_r, tau, dpop, rnet, &
+                                 e_src_lo=sbe%ring_e_lo, e_src_hi=sbe%ring_e_hi)
+        end if
         call ring_ledger(sbe, 4, nba, nk, ic, eval_all, dpop)
         call ring_apply_dpop(sbe, gs, U_loc, dpop, tau)
     end if

@@ -39,6 +39,8 @@ FORTRAN_DEPS = {
     "test_sfsb_kernel.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
     "test_colmem_lines.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
     "test_dressed_ref.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
+    "test_rana_saturation.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
+    "test_colmem_2d.f90": ["src/ssbe/sbe_superres_ssbe.f90"],
 }
 
 

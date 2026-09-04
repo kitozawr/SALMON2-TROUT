@@ -750,3 +750,60 @@ Markov) plausibly contains GENUINE phonon-assisted indirect generation —
 Si is an indirect semiconductor, a nonzero G is physical. The quantitative
 Keldysh-bracket verdict (x12 `rate_benchmark.py`, 9³, calibrated ν_sat) is
 the maintainer's cluster run.
+
+### 8.11 IMPLEMENTED (2026-09-04): the graphene **2D colmem analog** (maintainer: "нужен 2d colmem аналог; нужно ready")
+
+**Why graphene needed its own version.** The 2026-07-20 exclusion (§8.6:
+"graphene keeps BOTH dephasing channels off") was a *guard*, not physics — it
+excluded the collisional memory together with Kuhn–Zurek. The gapless cone has
+two features the 3D machinery does not cover: (i) its **population channel is
+the Rana Coulomb rate model** (wiki/07 §6), a *global* R−G on the gathered
+sheet densities n, p — so the virtual share of the Houston populations inflates
+the very densities the R07 rates are evaluated on; (ii) the Coulomb collision's
+memory line is not a phonon energy but the **plasma response**: screening builds
+up on the inverse plasma frequency (Haug & Jauho, *Quantum Kinetics*, "build-up
+of screening"). Design (same contract as §8.6 — kernel per channel from its own
+cited microphysics, **no new free parameters**, Markov anchor R(0)=1):
+
+| sector | line set | machinery |
+|---|---|---|
+| e-ph coherence (`yn_sbe_colmem`) | graphene phonon table: E2g 196 meV, A1′ 160 meV (+ acoustic) | unchanged `colmem_lines` — the guard is simply lifted |
+| e-ph population source (`yn_sbe_colmem_pop`) | same phonon lines | unchanged pop filter on the gathered `f_all` |
+| **Coulomb (Rana) population source** — NEW | **2D Dirac plasmon** `ω_pl(n,p)` at `q = Q_TF` | `dirac_plasmon_2d` + 2-line filter on the *scalar* source densities `n2d, p2d` → `rana_auger_dpop(n2d_in, p2d_in)` |
+| Dirac-point rotation (`yn_sbe_dressed_ref`) | — | Option A, already material-agnostic; on the exactly gapless K point the frozen (diabatic) state maps to equilibrium exactly (§3A) |
+
+**The plasmon line.** Hwang & Das Sarma, PRB 75, 205418 (2007): long-wavelength
+2D Dirac plasmon `ω_pl²(q) = 2e²E_F q/(κħ²)` (Gaussian). Two-component e–h plasma
+⇒ Drude weights add; at finite T each branch's `E_F` → the intraband Drude weight
+`W(μ) = 2k_BT ln[2cosh(μ/2k_BT)]` (Falkovsky & Varlamov, EPJ B 56, 281 (2007)):
+→ |μ| degenerate, → 2k_BT ln2 intrinsic. Evaluated at the collision's own
+screening momentum `Q_TF` [R07 Eq. 13, `rana_qtf`]. Hartree a.u.:
+`ω_pl² = 2(W_c+W_v)Q_TF/ε_r`. Values at 300 K, ε_r = 10 (`test_colmem_2d`):
+**31 meV** intrinsic, 35 meV at n=p=10¹¹, **133 meV** at 10¹² cm⁻² — the same
+scale as the phonon lines, all ≪ 2ħω_laser (1.6 eV at 0.8 eV drive). Width
+1/τ_c = σ_E as in §8.6; (N+1)/N thermal split; discrete anchor ⇒ a constant
+density is a machine-exact fixed point (calibrated R07 rates untouched).
+
+**Composition order (`apply_ring_channels`):** dressed reference (basis-level
+subtraction) → ring gate → the raw Rana source densities are *captured* → the
+phonon-line pop filter replaces `f_all` for the e-ph kernel → channel 4 filters
+the captured densities with the plasmon line and passes them as `n2d_in/p2d_in`;
+the transfer stencils (avail/room) still use the instantaneous populations and
+`ring_apply_dpop` keeps the CPTP limiter — trace exact, bounds unchanged.
+
+**Unit tests:** `test_colmem_2d` — degenerate limit `ω_pl² = 2E_F Q_TF/ε_r` to
+10⁻⁶, intrinsic Drude weight `2kT ln2` per branch, monotone in n; plasmon-line
+filter: constant density fixed point 10⁻¹², a 2ω_laser breathing (0.8 eV)
+transmitted at **0.17 = |R(2ω)| (0.16)**, mean passes; `rana_auger_dpop`
+overrides: identical dpop when equal to the internal densities, weaker net rate
+for a filtered source, trace 0, bounds kept. `test_rana_saturation` — the
+population **saturates at the balance density n₀ = n_i(T) = (π/6)(k_BT/ħv_F)²
+= 8.08×10¹⁰ cm⁻² at 300 K** (R=G root to 10⁻⁴, two-sided monotone CPTP
+relaxation from 0.1 n_i and 10 n_i, T² law). NOTE: T is the temperature the
+Rana rates use = the e-ph bath (no carrier T_e yet — x14 README).
+
+**Level check en route (x14, `test_graphene_dirac_levels`):** the 7-plane-wave
+graphene basis (`epm_pw_cutoff_ry = 2.94`) is not closed under the little group
+of K → a **spurious 0.21 eV gap at the Dirac point**; 43 PW (29.4 a.u.) restores
+the degeneracy (7 µeV) and the thesis v_F = 0.96×10⁶ m/s. The x11 and x14 inputs
+now use 29.4. Calc-validation of the 2D analog: exercise x14 README.
