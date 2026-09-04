@@ -340,9 +340,10 @@ break the linear relation between current and field. All three are separable:
    | $D_{\rm fit}$ [eV] | 0.533 | 0.537 | 0.580 | 0.664 | 0.546 | 0.424 | 0.325 | 0.290 |
    | $\mathrm{Re}\,\sigma/\sigma_{\rm univ}$ | 23.6 | 23.8 | 25.8 | 30.3 | 25.4 | 20.5 | 15.8 | 13.4 |
 
-   $T$ is flat through the linear regime, dips near 100 kV/cm (below saturation the
-   field first *adds* conductivity), then rises monotonically once $A_0>k_F$
-   (81 kV/cm at this doping): $\sigma$ falls from $30.3$ to
+   $T$ is flat through the linear regime, dips near 60 kV/cm, then rises monotonically
+   once $A_0>k_F$ (81 kV/cm at this doping). **The dip is not physics**: §4a.5.5 shows
+   it is the discretization bump of a Fermi disc holding only 12 mesh points, and the
+   converged curve has no darkening before the rise. The rise itself is robust: $\sigma$ falls from $30.3$ to
    $13.4\,\sigma_{\rm univ}$, $-56\,\%$.
 
    ![strong-doping proxy on the 48x48 mesh](figures/graphene_doped_proxy_ef06.png)

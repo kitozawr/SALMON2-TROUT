@@ -540,10 +540,11 @@ monotonically to 0.83.** The turn is where predicted: A₀ = k_F at 81 kV/cm for
 E_F = 0.6 eV. Above it the fitted Drude weight collapses, 0.66 → 0.29 eV, and
 with it the sheet conductivity, **30.3 → 13.4 σ_univ (−56 %)** — against the
 −42 % (24.7 → 14.3 σ_univ) the PET measurement implies. Same sign, same
-mechanism, same order. The dip before the turn is real too: below saturation the
-field first *adds* conductivity (interband pairs and the broadening of the
-distribution), which is why a doped sample can darken slightly before it
-brightens.
+mechanism, same order. **The dip before the turn is not physics.** §7.12 shows it is the
+discretization bump of a Fermi disc holding only 12 mesh points: the continuum
+drift-saturation curve is monotone, and the T minimum at 60 kV/cm falls exactly on
+u = A₀/k_F = 0.386, where the 48² mesh curve peaks at 1.171. Converged, the doped
+sheet is flat and then brightens, with no darkening in between.
 
 Note what is **not** in this table: no phonons, no Auger, no heating — the
 dissipators are off. Mechanism 3 (current saturation on the Dirac cone) accounts
@@ -598,6 +599,36 @@ Fermi sea is stationary under the dissipators; the ledger column is not a net lo
 *Still to run (cluster).* The same with `--ef-ev 0.2 --temp-init-k 300 --variants
 diss,mem` on a Fermi-surface-resolving mesh (147² or denser, §3b), which replaces
 the E_F = 0.6 eV proxy by the sample's own doping. Cost as in §6.
+
+**7.12 Drift saturation, and separating it from the mesh.** The rise of T is the
+kinematics of the Dirac cone: the band velocity has fixed modulus v_F, so a Fermi
+disc displaced by A saturates at J = n e v_F, and the differential conductivity is
+
+    sigma_eff/sigma_lin = G'(u),   u = A_0/k_F,   G'(u) -> k_F/A_0  for u >> 1
+
+with G(u) the exact displaced-disc integral (wiki/12 Eq. 4a.7). At 300 K the
+continuum values are
+
+| u = A₀/k_F | 0.05 | 0.2 | 0.4 | 0.6 | 0.8 | 1.0 | 1.5 | 2 | 3 | 5 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| σ_eff/σ_lin (continuum) | 1.000 | 0.995 | 0.979 | 0.952 | 0.912 | 0.851 | 0.630 | 0.487 | 0.332 | 0.200 |
+| 300², E_F = 0.2 eV (140 partial pts) | 0.930 | 1.062 | 1.015 | 0.978 | — | 0.878 | — | 0.543 | — | 0.249 |
+| 147², E_F = 0.2 eV (36) | 6.2 | 1.225 | 1.000 | 0.984 | — | 0.829 | — | 0.532 | — | 0.243 |
+| 48², E_F = 0.6 eV (12) | 0.901 | 1.015 | 1.171 | 1.062 | — | 1.003 | — | 0.635 | — | 0.333 |
+
+The continuum curve is **monotone** — no darkening at any field. A Fermi disc holding
+one shell of mesh points reproduces the linear limit to ~10 % but develops a spurious
+15–20 % bump near u ≈ 0.2–0.5, and at very small u on the coarsest discs the ratio
+breaks down entirely (the 147² entry at u = 0.05 is nine points, two of them the
+degenerate K pair). That bump is the dip of §7.9: the 48² transmission minimum sits
+at 60 kV/cm = u 0.386, exactly the peak of the 48² mesh curve. It shrinks as the disc
+fills (300²: 1.06 at worst).
+
+**So the converged model predicts a monotone brightening**, flat while
+A₀ ≲ 0.5 k_F and rising as 1/E₀ thereafter, with darkening only when Landau–Zener
+pair creation takes over at several hundred kV/cm. Any darkening computed before the
+rise on an under-resolved Fermi surface is numerical. `drift_saturation.py` produces
+the table and `graphene_drift_saturation.png`.
 
 ## 8. What to look for at production (147², DAST)
 
