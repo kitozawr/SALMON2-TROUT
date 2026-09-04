@@ -366,6 +366,29 @@ break the linear relation between current and field. All three are separable:
    compared as sheet conductances in the same units, nothing fitted in between, the
    calculated fall across saturation ($-56\,\%$) against the measured $-42\,\%$.
 
+**How the substrate and the layer count enter these figures — read before comparing
+with a measurement.**
+
+* *The calculation has no substrate.* The sheet is **free-standing**: vacuum on both
+  sides, $n_s=1$ in Eq. (4), and $T$, $R$, $A$ are the fluence ratios of the bare
+  sheet. Nothing about PET, glass or silicon enters the propagation.
+* *The measured numbers plotted beside them have the substrate divided OUT, not added.*
+  An unreferenced measurement still contains the substrate's own Fresnel loss, and
+  Eq. (4a.1) removes it: $T_{\rm sheet}=T_{\rm meas}/T_{\rm bare}$ with
+  $T_{\rm bare}=[4n_s/(1+n_s)^2]^2=0.883$ for PET ($n_s=1.65$, two incoherent air/PET
+  faces, no etalon). The dotted green lines are therefore $0.60/0.883=0.68$ and
+  $0.70/0.883=0.79$, **not** 0.60 and 0.70. The opposite convention — putting the
+  substrate into the calculation instead — is available through Eq. (4) with
+  $n_s\neq1$ (`transmission.py --n-sub 1.65`, `drude_check.py --n-sub`), and then the
+  raw 0.60/0.70 are the right comparison. The two must not be mixed; every number in
+  this page uses the first.
+* *One layer.* Unless stated otherwise the calculation is a **single monolayer**,
+  `sbe_sheet_nlayers = 1`. For $N$ electronically decoupled layers within
+  $d\ll\lambda$ the driver adds their currents in the same local field,
+  $J_s\to NL_zJ_m$ (§5) — the incoherent or large-angle-twisted stack. Bernal and
+  small-angle moiré bilayers change the electronic structure itself and are outside
+  the model. LAYERTABLE
+
 **At the sample's own doping.** The same scan at $E_F=0.2$ eV on the production
 $147^2$ mesh is quieter in the raw transmission, because a $3\times10^{12}$ cm⁻²
 sheet without dissipators is only a weak inductor ($T=0.968$ at 1 kV/cm, not 0.68 --
@@ -705,6 +728,33 @@ $$
 \frac{dA_{\rm ind}}{dt}=-\frac{2\pi}{c}L_z\,J_m(t),\qquad A_{\rm tot}=A_{\rm ext}+A_{\rm ind},\qquad E_{\rm tot}=E_{\rm ext}+\frac{2\pi}{c}L_zJ_m, \tag{7}
 $$
 integrated explicitly with the current of the previous step (lag error $O(\Delta t\,\omega\,Z_0\sigma/2)$). `Ac_tot/E_tot` in `*_sbe_rt.data` are then the transmitted field, `E_ext` the incident one, the energy ledger uses $E_{\rm tot}$, and $A_{\rm ind}$ is part of the checkpoint state. The post-processor `transmission.py` detects this mode, uses $E_{\rm tot}$ directly and reports the deviation from the boundary-condition reconstruction (Eq. 4) as a consistency number.
+
+## 5a. The driving transient
+
+Every field number in this page refers to the same waveform: the maintainer's DAST
+single-cycle terahertz transient, read by the solver as `ae_shape1 = 'input'` (a table
+of $t$, $A_x$, $A_y$, $A_z$) and rescaled by `make_inputs.py` to an exact peak $|E|$,
+with the offset removed and 10 fs cos² windows at both ends so that $A(\pm\infty)=0$.
+
+![the DAST single-cycle transient: field, vector potential and spectrum](figures/graphene_thz_drive.png)
+
+*Left* — the waveform $E(t)=-\dot A(t)$, one clean cycle of 284 fs. *Middle* — the
+vector potential, which in the velocity gauge **is** the displacement of the Fermi sea
+in reciprocal space (§4a.5.1): its peak is
+$$
+A_0 = 6.213\times10^{-4}\ a_0^{-1}\ \text{per kV/cm},\qquad
+A_0 = 0.0621\ a_0^{-1}\ \text{at 100 kV/cm} = 3.71\,k_F\ (E_F=0.2\ \text{eV}),
+$$
+drawn against $k_F$ so the saturation criterion $A_0=k_F$ can be read off the picture.
+*Right* — the intensity spectrum, peaking at **14.5 meV (3.52 THz)** with a centroid at
+15.8 meV and a FWHM band of 7.3–22.7 meV, which is the band `transmission.py`
+integrates $\mathrm{Re}\,\sigma$ over.
+
+A single-cycle transient has no carrier frequency worth the name: the band is as wide
+as its centre. That is why the drive is measured by $A_0$ rather than by $E_0/\omega$ of
+a nominal carrier — the two differ by a factor 1.6 here — and why the transmission is
+reported as a fluence ratio rather than at a single frequency. The figure is produced
+by `plot_drive.py`, which prints all of these numbers for any drive file.
 
 ## 6. Numerical realization
 
