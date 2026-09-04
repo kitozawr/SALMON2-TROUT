@@ -2616,7 +2616,7 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
                                  t_ring_opts, debye_kappa2, tf_kappa2_degenerate, fit_fermi_dirac, &
                                  colmem_pop_filter, colmem_pop_init, dressed_ref_delta, &
                                  colmem_lines, bose_factor, dirac_mu_2d, dirac_plasmon_2d, &
-                                 dirac_fit_te
+                                 dirac_fit_te, dirac_n_2d
     use eigen_lapack, only: eigen_zheev
     use communication, only: comm_summation
     use salmon_global, only: num_kgrid, epm_material, sbe_eph_temperature_k
@@ -3002,8 +3002,15 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
             ! populations; the lattice stays at the phonon-bath T and cools the
             ! carriers through the e-ph channel. T_e is READ from the distribution
             ! each ring step (no separate T_e rate equation).
-            call dirac_fit_te(n_raw, p_raw, e_raw, sbe%rana_vf_au, sbe%rana_kt_au, 2d0, &
-                              kt_use, mu_c2, mu_h2)
+            ! No carriers -> no temperature: below 1e-3 of the lattice balance density
+            ! the three-moment fit is ill-conditioned (a handful of virtual remnants
+            ! read as 1e4 K) and the rates do not depend on T_e anyway; hold the bath.
+            if (n_raw + p_raw < 1d-3 * dirac_n_2d(0d0, sbe%rana_kt_au, sbe%rana_vf_au)) then
+                kt_use = sbe%rana_kt_au;  mu_c2 = 0d0;  mu_h2 = 0d0
+            else
+                call dirac_fit_te(n_raw, p_raw, e_raw, sbe%rana_vf_au, sbe%rana_kt_au, 2d0, &
+                                  kt_use, mu_c2, mu_h2)
+            end if
             sbe%te_au = kt_use;  sbe%te_mu_c = mu_c2;  sbe%te_mu_h = mu_h2
             sbe%te_n2d = n_raw;  sbe%te_p2d = p_raw
         end if

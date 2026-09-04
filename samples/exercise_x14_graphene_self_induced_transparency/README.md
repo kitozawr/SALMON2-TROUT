@@ -244,11 +244,11 @@ A-projection is the *physical* Drude response of the pairs the field creates.
 | 100 | 0.9824 | 0.0043 | 0.0134 | 0.0134 | 6.7×10¹¹ (3.5×10⁻⁴ per cell) | 2.0×10⁻² (99 % virtual, returns) | 0.941 | 0.0048 |
 | 1 (K averaged, rerun) | 0.999995 | 1.2×10⁻⁶ | 4×10⁻⁶ | 4×10⁻⁶ | 0 net | 9.3×10⁻⁵ (= baseline) | 1.000 | 0.0000 |
 | 10 (K averaged, rerun) | 0.999993 | 2.4×10⁻⁶ | 4×10⁻⁶ | 4×10⁻⁶ | 0 net (returns to the 0.9×10⁻⁴ baseline) | 3.8×10⁻⁴ | 1.000 | −0.0001 |
-| 30 (K averaged, rerun) | X2ROW30 |
+| 30 (K averaged, rerun) | 0.9995 | 2.4×10⁻⁴ | 2.6×10⁻⁴ | 2.6×10⁻⁴ | 2×10⁹ net (1×10⁻⁶ per cell) | 2.6×10⁻³ | 0.995 | 0.0005 |
 | 100 (K averaged, rerun) | 0.9867 | 0.0030 | 0.0103 | 0.0103 | 4.0×10¹¹ net (3.0−0.9×10⁻⁴ per cell; 0.9×10⁻⁴ = the two half-filled K points) | 2.0×10⁻² | 0.958 | 0.0041 |
 | 10, 150² (K off mesh) | 0.9925 | 0.0004 | 0.0071 | 0.0059 | 1×10¹⁰ (5×10⁻⁶ per cell) | 3.8×10⁻⁴ | 1.001 | −0.0003 |
 | 100, 150² (K off mesh) | 0.9563 | 0.0067 | 0.0370 | 0.0365 | 1.1×10¹² (5.6×10⁻⁴ per cell) | 2.0×10⁻² | 0.956 | 0.0035 |
-| 100, 300² (K off mesh) | T300ROW100 |
+| 100, 300² (K off mesh) | 0.9688 | 0.0046 | 0.0266 | 0.0264 | 7.7×10¹¹ (4.0×10⁻⁴ per cell) | 2.0×10⁻² | 0.950 | 0.0041 |
 
 **The Dirac point on the mesh (found in this scan).** With K exactly on the
 mesh the two π/π* levels at K are degenerate and the integer ground-state
@@ -278,10 +278,15 @@ passage; two passages with Stückelberg interference give the 6.7×10¹¹ left),
 their creation energy is the 1.3 % absorbed (ledger = fluence to 3 digits), and
 the induced field relaxes after the pulse (A_ind −6.1 → −4.0×10⁻³ a.u. over the
 tail, J decaying) — a stable, passive sheet. **Expected range of the
-transmission change for the intrinsic sheet, coherent limit: T from 1.000 at
-1 kV/cm to 0.982 at 100 kV/cm (induced absorption 1.3 %, reflection 0.4 %)**;
-with phonon dissipation the carriers are also heated while accelerated, and
-the `diss`/`mem` production runs will raise A (README §8).
+transmission change for the intrinsic sheet, coherent limit: T ≈ 1.000 up to
+30 kV/cm (induced absorption < 0.1 %), T = 0.97 ± 0.01 at 100 kV/cm (induced
+absorption 1–4 % across the 147²/150²/300² meshes and the two polarisations,
+2.7 % on 300²; reflection ≤ 0.7 %)** — i.e. the intrinsic sheet *darkens* by a
+few per cent at the top of the DAST range and does not bleach. With phonon
+dissipation the carriers are also heated while accelerated, and the
+`diss`/`mem` production runs will raise A (README §8). The mesh spread is the
+transverse sampling of the Landau–Zener strip (0.7 cells at 147², 1.4 at 300²);
+convergence to ≲ 0.5 % needs N ≳ 600 or a K-refined mesh.
 
 **7.4 Polarisation and two decoupled layers (147², 100 kV/cm).** The `input`
 field file carries its own three Cartesian components — `epdir_re1` is *not*
@@ -319,9 +324,32 @@ non-linear part — below 10⁻⁴ in T at 100 kV/cm. On a mesh the x/y differen
 a resolution artifact: the 24² mesh breaks C₆ (S_x = 0.700 vs S_y = 0.728), the
 147² mesh does not (0.7223 both).
 
-**7.5 Near-IR πα check (147², acos2 0.8 eV, 8 cycles).** NIR147
+**7.5 Near-IR πα check (147², acos2 0.8 eV, 8 cycles, nstate = 2, pure gauge, sheet).**
+1 kV/cm: T = 0.98128, R = 6.8×10⁻⁴, A = 0.01804 (ledger 0.01804); 100 kV/cm:
+T = 0.98136, A = 0.01796. The sheet absorbs 0.80 of the universal πα value
+(A = 0.0224; Re σ/σ_univ = 0.90 over the pulse band) — the 3.2 mesh points per
+resonance-shell radius and the finite-basis matrix elements at k_res, not a
+solver error (the reactive residual is −0.013, i.e. the interband *capacitive*
+response above resonance, the correct sign). The field dependence is the
+predicted coherent bleaching: ΔA/A = −0.4 % (θ²/12 ≈ −0.5 %), ΔT = +8×10⁻⁵ —
+near-IR self-induced transparency at 1–100 kV/cm is a 10⁻⁴ effect.
 
-**7.6 Ring with T_e (24², nstate = 2, `diss` / `mem` / dark).** RING24
+**7.6 Ring with T_e (24², nstate = 2, 100 kV/cm, `diss` / `mem`).** The 24² mesh
+has no real pair channel at this field (coherent: A = 2×10⁻⁶), so whatever the
+dissipative runs absorb is what the ring does to the *virtual* dressing (peak
+diabatic n_c = 2.3×10⁻² per cell, all of it returning in the coherent run).
+`diss` (Markovian ring, lattice T): T = 0.9988, A = 0.0012; ring-visible density
+7.6×10⁹ cm⁻² generated out of the dressing, Rana ledger +1.9×10⁹ (net
+multiplication, n < n_i) — the "dephasing ionization" of `wiki/10` §8.7 in its
+graphene form. `mem` (2D colmem analog + dressed reference + T_e): T = 0.999996,
+A = 3×10⁻⁶ — identical to the coherent run; ring-visible density 5×10⁴ cm⁻²
+(10⁵ times less), Rana ledger +3.5×10⁶: the memory filters remove the
+fabricated generation completely, as they do for Si/GaAs/CdS (`wiki/10` §8.11).
+The two-temperature fit is meaningless when there are no carriers (it returned
+T_e ≈ 4×10⁴ K for 10⁸ cm⁻²); the solver now holds T_e at the lattice value while
+n + p < 10⁻³ n_i(T_lattice), so `*_sbe_te.data` reads 300 K there. Real carrier
+heating (T_e in the 10³ K range, cooling on the phonon timescale) needs the
+147² production runs, where pairs are actually created.
 
 ## 8. What to look for at production (147², DAST)
 
