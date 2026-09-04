@@ -686,14 +686,29 @@ $u=0.05$ is the K-point shell dominating a nine-point disc). That bump is exactl
 *dip* in the transmission scan of §4a.3, and the two scale together — the decisive
 test, because a physical darkening would not care about the mesh:
 
-| mesh ($E_F=0.6$ eV) | pts in the disc / valley | mesh bump at $u=0.4$ | $T$ at low field | $T$ at the minimum | depth of the dip |
-|---|---|---|---|---|---|
-| $48^2$ | 8 | +19 % | 0.7286 | 0.6414 ($u=0.386$) | **12.0 %** |
-| $72^2$ | 22 | +9 % | 0.6846 | 0.6439 ($u=0.371$) | **5.9 %** |
+Measured on the runs themselves rather than on the adiabatic sum, the same effect is
+the spurious peak the run's own $\mathrm{Re}\,\sigma$ develops before saturation,
+against its low-field plateau. The two numbers are not the same quantity — the table
+above is the chord current of a *fixed* occupation, the one below the band-averaged
+dynamical response of the driven sheet, which also carries the reactive part — but
+they scale together, and the second is what a field scan actually shows. How much of
+it reaches $T$ then depends on the sheet impedance, which is why the same artifact
+makes a bigger dent at heavier doping. The control parameter is $k_F/\Delta k$ alone,
+**not** the doping:
 
-Halving the mesh bump halves the dip, and its position tracks the bump rather than any
-field scale of the physics. As the disc is filled further the bump shrinks ($300^2$:
-1.06 at its worst) and the curve converges onto Eq. (4a.13).
+| run | $k_F/\Delta k$ | $\sigma$ plateau | $\sigma$ peak | **spurious bump** | $T$ plateau | $T$ minimum | dip in $T$ |
+|---|---|---|---|---|---|---|---|
+| $48^2$, $E_F=0.6$ eV | 1.54 | 23.6 | 31.1 | **+32 %** | 0.7275 | 0.6414 | −11.8 % |
+| $72^2$, $E_F=0.4$ eV | 1.54 | 12.9 | 17.4 | **+35 %** | 0.8487 | 0.7939 | −6.5 % |
+| $72^2$, $E_F=0.6$ eV | 2.32 | 25.9 | 30.8 | **+19 %** | 0.7081 | 0.6571 | −7.2 % |
+
+The two runs at $k_F/\Delta k=1.54$ are different meshes at different dopings and give
+the same bump to within the sampling of the field grid; refining the disc from 1.54 to
+2.32 spacings takes it from $+33\,\%$ to $+19\,\%$. The dip in $T$ follows the bump and
+its position tracks the bump rather than any field scale of the physics.
+
+As the disc is filled further the bump shrinks — the adiabatic sum is down to 1.06 at
+its worst on $300^2$ — and the curve converges onto Eq. (4a.13).
 
 Two deviations must not be confused with it. At **large $u$** the mesh curves lie
 systematically above the continuum ($0.31$ against $0.199$ at $u=5$): there the
