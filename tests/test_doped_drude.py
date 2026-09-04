@@ -20,6 +20,12 @@ Pins, against closed-form results:
   5. The two saturation scales of a doped Dirac sheet at frequency omega:
      the ballistic excursion A_0 = E/omega and the collisional one E*tau, each
      against k_F -- the onset of current (velocity) saturation.
+  6. The drift-saturation function G(u) itself (wiki/12 Eqs. 4a.11-4a.15), which is
+     what makes a doped sheet brighten. The one-dimensional reduction Eq. (4a.13) is
+     checked against the exact values G(1) = 8/3pi and G'(1) = 4/3pi, the duality
+     G(u) = u G(1/u), the small-u law G(u)/u = 1 - u^2/8 and the large-u law
+     G(u) = 1 - 1/8u^2; the 2D quadrature of drift_saturation.g_continuum, which the
+     figures and the --continuum overlay use, is then checked against it.
 """
 import os
 import sys
@@ -174,9 +180,41 @@ print(f"  A_0 = k_F at E_0 = {onset:.1f} kV/cm -> above it the Fermi sea is disp
 print("  radius each half-cycle: the drift velocity saturates at v_F and the DIFFERENTIAL conductivity falls")
 check("current-saturation onset (E_F = 0.2 eV, DAST)", onset, 26.9, 0.05)
 
+print("== 6. drift saturation: the function G(u) behind the brightening ==")
+from drift_saturation import g_continuum  # noqa: E402
+
+
+def g_1d(u, n=200001):
+    """G(u) by the 1D reduction, wiki/12 Eq. (4a.13). Endpoint-singular, so the
+    midpoint rule on a uniform grid (the integrand vanishes like a square root)."""
+    a, b = abs(1.0 - u), 1.0 + u
+    rho = a + (np.arange(n) + 0.5) * (b - a) / n
+    f = ((rho + u)**2 - 1.0) * (1.0 - (rho - u)**2)
+    return np.sum(np.sqrt(np.maximum(f, 0.0))) * (b - a) / n / (np.pi * u)
+
+
+check("G(1) = 8/3pi (exact)", g_1d(1.0), 8.0 / (3.0 * np.pi), 1e-4)
+for u in (0.3, 0.7, 1.5, 4.0):
+    check(f"duality G({u}) = u G(1/u)", g_1d(u), u * g_1d(1.0 / u), 1e-4)
+for u in (0.05, 0.1, 0.2):
+    check(f"small-u law G({u})/u = 1 - u^2/8", g_1d(u) / u, 1.0 - u * u / 8.0, 2e-4)
+for u in (5.0, 10.0):
+    check(f"large-u law G({u}) = 1 - 1/8u^2", g_1d(u), 1.0 - 1.0 / (8.0 * u * u), 2e-4)
+# G'(1) = 4/3pi: the DIFFERENTIAL response at the saturation point, half the chord one
+gp1 = (g_1d(1.0 + 1e-3) - g_1d(1.0 - 1e-3)) / 2e-3
+check("G'(1) = 4/3pi (differential response at A_0 = k_F)", gp1, 4.0 / (3.0 * np.pi), 2e-3)
+# the 2D quadrature the figures use, at a degenerate temperature
+ef_au = 0.6 / AU_EV
+print(f"  {'u':>6} {'G(u)/u 1D':>10} {'g_continuum':>12}")
+for u in (0.1, 0.4, 1.0, 2.0, 5.0):
+    a, b = g_1d(u) / u, g_continuum(u, 30.0, ef_au)
+    print(f"  {u:6.2f} {a:10.4f} {b:12.4f}")
+    check(f"2D quadrature == 1D reduction at u = {u}", b, a, 0.02)
+
 print()
 if fails:
     print(f"FAIL ({len(fails)}): " + "; ".join(fails))
     sys.exit(1)
 print("PASS  (doped Dirac sheet: FD occupation and its mesh requirement, Drude weight limits and its weak"
-      " temperature dependence at fixed density, transmission -> sheet conductance, current-saturation scales)")
+      " temperature dependence at fixed density, transmission -> sheet conductance, current-saturation scales,"
+      " drift-saturation G(u): 1D reduction vs G(1) = 8/3pi, G'(1) = 4/3pi, duality, both asymptotes, 2D quadrature)")

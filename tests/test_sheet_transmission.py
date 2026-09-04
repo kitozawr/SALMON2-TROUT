@@ -16,6 +16,10 @@ Checks:
      current: (c/4pi)(E_inc^2 - E_t^2 - E_r^2) = E_t J_s.
   4) spectral (carrier) T/R/A agree with the fluence-integrated ones for the
      quasi-monochromatic linear sheet (1e-6).
+  5) stack_from_one_layer: N sheets predicted from a one-layer run. For a LINEAR
+     sheet the prediction is exact against the closed form |2/(2+N Z0 sigma)|^2 at
+     any N, and it must be ORDERED (T_1 > T_2 > T_3) and equal to T_1 at N = 1.
+  6) check_complete refuses a record shorter than the run's own nt.
 Run:  python3 tests/test_sheet_transmission.py   (pure numpy)
 """
 import os
@@ -26,7 +30,8 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'samples', 'exercise_x14_graphene_self_induced_transparency'))
 from transmission import (sheet_fields, fluence_tra, spectral_tra, linear_reference,  # noqa: E402
-                          shell_resolution, C_AU, SIGMA_UNIV)
+                          shell_resolution, stack_from_one_layer, check_complete,
+                          TruncatedRun, C_AU, SIGMA_UNIV)
 
 nfail = 0
 
@@ -98,8 +103,45 @@ print(f"  resonance shell at 0.8 eV: {sp12:.2f} points/radius on 12x12, {sp150:.
 check("12x12 mesh cannot resolve the 0.8 eV shell (< 1 point/radius)", sp12 < 1.0)
 check("150x150 mesh resolves the 0.8 eV shell (>= 3 points/radius)", sp150 >= 3.0)
 
+# --- (5) N-layer stack predicted from the one-layer run -------------------------
+# For a linear sheet the frequency-resolved prediction must reproduce the closed
+# form at every N: sigma(omega) is constant, so the two are the same algebra.
+E_t1, _ = sheet_fields(E_inc, J_s, 1.0)          # J_s = sigma E_t of section (2)
+tprev = 1.1
+for N in (1, 2, 3, 5):
+    tn = stack_from_one_layer(t, E_inc, E_t1, J_s, N, 1.0)
+    ref = abs(2.0 / (2.0 + N * Z0 * SIGMA_UNIV))**2
+    check(f"{N}-layer stack from a one-layer linear run == |2/(2+{N}z)|^2", abs(tn - ref) < 1e-9)
+    check(f"{N}-layer stack is darker than the {N - 1}-layer one", tn < tprev)
+    tprev = tn
+check("1-layer stack prediction reproduces the run itself",
+      abs(stack_from_one_layer(t, E_inc, E_t1, J_s, 1, 1.0) - T) < 1e-9)
+
+# --- (6) the truncated-record guard ---------------------------------------------
+import tempfile  # noqa: E402
+
+with tempfile.TemporaryDirectory() as td:
+    rt = os.path.join(td, 'x_sbe_rt.data')
+    open(rt, 'w').close()
+    with open(os.path.join(td, 'variables.log'), 'w') as fh:
+        fh.write('#    nt=  3844\n#    dt= 4.13414E+00\n')
+    check("check_complete accepts a full record", check_complete(rt, 3844) == 3844)
+    check("check_complete accepts a longer record", check_complete(rt, 3845) == 3844)
+    raised = False
+    try:
+        check_complete(rt, 1764)
+    except TruncatedRun:
+        raised = True
+    check("check_complete rejects a 46 % record", raised)
+    check("allow_partial overrides it", check_complete(rt, 1764, allow_partial=True) == 3844)
+    sub = os.path.join(td, 'elsewhere')
+    os.makedirs(sub)
+    check("no variables.log -> nothing to check",
+          check_complete(os.path.join(sub, 'x_sbe_rt.data'), 1) is None)
+
 if nfail == 0:
-    print("PASS  (sheet boundary condition: Fresnel limit, universal pi*alpha sheet, energy identity, spectral/fluence)")
+    print("PASS  (sheet BC: Fresnel limit, universal pi*alpha sheet, energy identity, "
+          "spectral/fluence, N-layer stack from one run, truncated-record guard)")
     sys.exit(0)
 print(f"FAIL ({nfail} checks)")
 sys.exit(1)
