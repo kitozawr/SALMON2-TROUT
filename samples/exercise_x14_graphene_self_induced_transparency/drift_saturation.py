@@ -13,9 +13,14 @@ sheet current of a displaced Fermi disc is
     J(A) = n e v_F * G(A/k_F),      G(u) = (1/pi u_disc) \\int_{|x|<=1} (x_par+u)/|x+u| d^2x,
 
 which is linear at small u and saturates at n e v_F as u -> infinity: the carriers
-cannot drift faster than v_F.  The differential (measured) conductivity is therefore
+cannot drift faster than v_F.  What a field scan measures is the CHORD response -- the
+current the same peak field produces, relative to a linear sheet --
 
-    sigma_eff(E_0)/sigma_lin = G'(A_0/k_F)      ->   k_F/A_0   for A_0 >> k_F,
+    sigma_eff(E_0)/sigma_lin = G(u)/u          ->   k_F/A_0   for A_0 >> k_F,
+
+(the differential response a weak probe on a strong pump would see is G'(u), which
+falls faster, as 1/(4u^3); exact values G(1) = 8/3pi, G'(1) = 4/3pi, and the duality
+G(u) = u G(1/u) -- wiki/12 Eqs. 4a.13-4a.16),
 
 i.e. the sheet becomes transparent as 1/E_0 once the excursion A_0 = |A|_max exceeds
 the Fermi radius k_F = E_F/hbar v_F.  This script evaluates that ratio three ways:
@@ -126,14 +131,14 @@ def main(argv=None):
     except ImportError:
         print('# matplotlib not available -- numbers only'); return 0
     fig, ax = plt.subplots(figsize=(6.6, 4.4))
-    ax.plot(us, cont, 'k-', lw=2.2, label='continuum displaced Dirac sea (exact)')
+    ax.plot(us, cont, 'k-', lw=2.2, label='continuum displaced Dirac sea (exact, Eq. 4a.13)')
     ax.plot(us, 1.0 / np.maximum(us, 1e-9), 'k:', lw=1.0, label=r'$k_F/A_0$ asymptote')
     for (lab, c), col in zip(curves, ('#c0392b', '#2980b9', '#27ae60', '#8e44ad')):
         ax.plot(us, c, 'o-', ms=3, lw=1.2, color=col, label=lab)
     ax.axvline(1.0, ls='--', c='#7f8c8d', lw=1)
     ax.text(1.06, 0.06, '$A_0 = k_F$', color='#7f8c8d', fontsize=9)
     ax.set_xscale('log'); ax.set_xlabel(r'$A_0/k_F$  (vector-potential excursion / Fermi radius)')
-    ax.set_ylabel(r'$\sigma_{\rm eff}/\sigma_{\rm linear}$')
+    ax.set_ylabel(r'$\sigma_{\rm eff}/\sigma_{\rm linear}=G(u)/u$  (chord response)')
     ax.set_title('Drift saturation on the Dirac cone, and how a k-mesh represents it', fontsize=10)
     ax.set_ylim(0, 1.35); ax.grid(alpha=0.25); ax.legend(fontsize=8)
     fig.tight_layout(); fig.savefig(args.out, dpi=150)
