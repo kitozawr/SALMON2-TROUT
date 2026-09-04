@@ -144,7 +144,9 @@ things go with it:
   (k_F = 0.0167 a.u.) that means N ≳ 147 (9 points per valley inside the Fermi
   disc, 3 % density error); N = 24 gives *zero* and 1.8×10¹⁰ cm⁻² instead of
   3.4×10¹². The solver counts the partially occupied k-points at start-up and
-  warns below 20. Cheap alternative for a smoke test: raise E_F (E_F = 0.6 eV is
+  warns below 20; `plot_occupation.py` draws the initial occupation of the doped
+  and the undoped sheet on the actual mesh and prints the sheet density, k_F and
+  that count — run it before committing to a mesh. Cheap alternative for a smoke test: raise E_F (E_F = 0.6 eV is
   resolved at N = 48).
 - **The dressed reference and the basis-edge monitor follow the doped baseline.**
   `dressed_ref_delta` now takes the initial occupation vector (adiabatic rotation
@@ -203,6 +205,20 @@ always in the sheet plane), `--n-layers 2` (two electronically decoupled sheets 
 the same local field — incoherent/large-angle-twisted bilayer; `sbe_sheet_nlayers`),
 `--snap-fs 50` (k-resolved level-population snapshots for `plot_levels.py`),
 `--ef-ev 0.2 --temp-init-k 300` (a doped sheet with Drude carriers, §3b).
+
+**The headline figure in one command** (doped + intrinsic scans on the same mesh,
+then the T(E₀) / σ(E₀) plot of §7.9):
+
+```bash
+NK=147 EF=0.2 OMP_NUM_THREADS=48 SALMON=../../build/salmon bash run_field_scan.sh
+# -> scan_nk147_ef0.2/doped_vs_intrinsic.png
+```
+`NK` must resolve the doping: k_F = E_F/ħv_F needs ≈ 3 mesh spacings, so NK ≳ 280
+at E_F = 0.2 eV, 140 at 0.4, 93 at 0.6 (wiki/12 §4a.0). NK = 147 at 0.2 eV is the
+cheapest setting that resolves the Fermi surface at all and is what the shipped
+figure uses; the Drude weight is then ≈ 30 % low, a field-independent scale error
+that leaves the shape of T(E₀) intact. Coherent runs only, so the whole pair of
+scans is minutes per field.
 
 ```bash
 python3 ../plot_levels.py runs/E100kVcm_mem/graphene_sit --times 100,150,200,300   # band populations vs t + k-maps around K
@@ -547,4 +563,5 @@ Analysis scripts: `transmission.py` (T/R/A, sheet BC, energy ledger, Re σ),
 `saturation_check.py` (populations, Rana ledger, T_e), `sumrule_check.py`
 (basis f-sum rule, residual reactive current), `plot_levels.py` (level
 populations vs t and k-maps), `drude_check.py` (doped sheet: D, τ, mean free
-path, experiment conversion).
+path, experiment conversion), `field_scan_plot.py` (the T(E₀)/σ(E₀) figure),
+`run_field_scan.sh` (the whole scan-and-plot pipeline).

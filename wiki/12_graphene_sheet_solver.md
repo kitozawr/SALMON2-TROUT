@@ -89,6 +89,71 @@ Unit test `tests/test_dirac_te_fit.f90`: the closed form of $\varepsilon_D(0,T)$
 
 ## 4a. The doped sheet: initial occupation, the Drude sector, and the field scales of transparency
 
+### 4a.0 Choosing the doping: it is read off the measurement, not fitted
+$E_F$ is a property of the sample, and a THz transmission measurement determines
+it together with the momentum-relaxation time $\tau$. The chain is closed and has
+no free parameter left over.
+
+**Step 1 -- from the measured transmission to a sheet conductance.** A measurement
+that has not had the substrate divided out contains the substrate's own Fresnel
+loss. For a slab of index $n_s$ with two incoherent faces,
+$$
+T_{\rm bare}=\Big[\frac{4n_s}{(1+n_s)^2}\Big]^{2},\qquad
+\frac{T_{\rm meas}}{T_{\rm bare}}=\Big[\frac{1+n_s}{1+n_s+Z_0\sigma}\Big]^{2}
+\ \Longrightarrow\
+Z_0\sigma=(1+n_s)\Big[\sqrt{T_{\rm bare}/T_{\rm meas}}-1\Big]. \tag{4a.1}
+$$
+PET, $n_s=1.65$: $T_{\rm bare}=0.883$, so $T_{\rm meas}=0.60\to\sigma=24.7\,\sigma_{\rm univ}$
+and $0.70\to14.3\,\sigma_{\rm univ}$ (`drude_check.py --t-meas`, pinned in
+`tests/test_doped_drude.py`). Use the *low-field* value: that is the linear
+conductance the doping alone produces.
+
+**Step 2 -- split $\sigma_{dc}=D\tau/\pi$ into $E_F$ and $\tau$.** One equation, two
+unknowns; any one of three independent handles closes it.
+
+* *An independent measurement of the doping* (gate voltage, Hall, the Raman
+  2D/G ratio) gives $E_F$, and then $\tau=\pi\sigma_{dc}/E_F$.
+* *A resolved THz spectrum*: the Drude roll-off frequency is $1/\tau$, and $D$
+  follows from the low-frequency plateau.
+* *The field at which the transmission starts to rise* -- available from the very
+  scan being modelled. Saturation begins where the vector-potential excursion
+  reaches the Fermi radius, $A_0(E_{\rm sat})=k_F$; with the scaled DAST transient
+  $A_0=6.213\times10^{-4}\,\text{a.u.}\times E_0[\mathrm{kV/cm}]$, so
+  $$
+  k_F = 6.213\times10^{-4}\,E_{\rm sat}[\mathrm{kV/cm}],\qquad E_F=\hbar v_Fk_F. \tag{4a.2}
+  $$
+  An onset near 30 kV/cm therefore means $E_F\simeq0.22$ eV, and $\tau$ follows from
+  step 1. This is the self-contained route when nothing but the transmission scan
+  is available.
+
+For the sample of §4a.4, $E_F=0.2$ eV ($n=3.4\times10^{12}$ cm⁻²) with $\tau=63$ fs
+reproduces $24.7\,\sigma_{\rm univ}$ exactly, and both numbers are unremarkable for
+CVD graphene transferred onto PET.
+
+**Step 3 -- check the doping against the mesh you can afford, and rescale if not.**
+§4a.2 requires $k_F\gtrsim3\,|\mathbf b|/N$, i.e.
+$$
+N \gtrsim 3\,|\mathbf b|/k_F = 4.68/k_F \quad\Longrightarrow\quad
+N\gtrsim280\ (E_F=0.2\ \text{eV}),\quad 140\ (0.4),\quad 93\ (0.6). \tag{4a.3}
+$$
+If the sample's doping is out of reach, run a *larger* $E_F$ on the mesh you have
+and map back. In the collisionless limit the displaced Fermi disc gives
+$J = (k_F^2v_F/\pi)\,g(A/k_F)$ with a single universal $g$: the **shape** of
+$\sigma(E_0)/\sigma(0)$ is a function of $A_0/k_F$ alone, so a run at $E_F'$
+reproduces the sample's curve with the field axis scaled by $k_F/k_F'=E_F/E_F'$,
+while the conductivity scale itself goes as $E_F$. The absolute transmission does
+*not* transfer (it depends on $Z_0\sigma$ through Eq. 4), so compare
+$\sigma(E_0)/\sigma_{\max}$, not $T$, when rescaling. The 48², $E_F=0.6$ eV scan of
+§4a.3 is exactly such a proxy: its onset at 81 kV/cm maps to 27 kV/cm at the
+sample's 0.2 eV.
+
+| $E_F$ [eV] | $n_{2D}$ [cm⁻²] | $E_{\rm sat}$ [kV/cm] | $N$ for $k_F\ge3\Delta k$ |
+|---|---|---|---|
+| 0.1 | 8.0×10¹¹ | 13 | 560 |
+| 0.2 | 3.2×10¹² | 27 | 280 |
+| 0.4 | 1.3×10¹³ | 54 | 140 |
+| 0.6 | 2.9×10¹³ | 81 | 93 |
+
 ### 4a.1 Initial occupation
 Everything above describes an *intrinsic* sheet: integer filling, $f_v=2$, $f_c=0$.
 A real CVD sample is a metal. `sbe_ef_ev` (the Fermi level measured from the
@@ -141,6 +206,21 @@ Measured: at $N=147$, $E_F=0.2$ eV, $T=300$ K the solver reports
 $n=3.27\times10^{12}$ cm⁻² against the analytic $3.36\times10^{12}$ (2.6 %); at
 $N=24$ it reports $1.8\times10^{10}$ -- the Fermi circle contains no mesh point at
 all. The start-up banner counts the partially occupied points and warns below 20.
+
+![initial level occupation, undoped and doped, on the 147x147 mesh](figures/graphene_doped_levels.png)
+
+*The initial density matrix the solver starts from, on the same $147^2$ mesh
+(`plot_occupation.py`, which applies Eq. (5) to the ground-state files).* **Left** --
+the undoped filling: the valence cone full, the conduction cone empty, nothing
+partially occupied, $n_{2D}=0$. **Middle** -- $E_F=0.2$ eV, $T_{\rm init}=300$ K:
+the conduction cone is filled up to $E_F$, which adds $1.71\times10^{-3}$
+electrons per cell, i.e. $n_{2D}=3.27\times10^{12}$ cm⁻² (analytic
+$3.36\times10^{12}$), and leaves 36 partially occupied k-points -- these carry the
+whole intraband response. **Right** -- the radial profile of the conduction
+occupation: at this doping the Fermi disc holds one full mesh shell plus a
+partially filled second one, which is why the density is good to 3 % while the
+Drude weight, weighted by $\partial^2\varepsilon/\partial k^2\propto1/k$, is still
+$\approx30\,\%$ low. Run this picture before any doped production run.
 The Drude *weight* converges more slowly than the density, because
 $\partial^2\varepsilon/\partial k_a^2=v_F\sin^2\theta/k$ weights the innermost
 shells: on the one-shell meshes above, $D$ extracted from the dynamics scatters by
@@ -190,7 +270,26 @@ break the linear relation between current and field. All three are separable:
    $T$ is flat through the linear regime, dips near 100 kV/cm (below saturation the
    field first *adds* conductivity), then rises monotonically once $A_0>k_F$
    (81 kV/cm at this doping): $\sigma$ falls from $30.3$ to
-   $13.4\,\sigma_{\rm univ}$, $-56\,\%$. The fitted $D$ sits below the analytic
+   $13.4\,\sigma_{\rm univ}$, $-56\,\%$.
+
+   ![doped vs intrinsic sheet, transmission and conductivity against the peak field](figures/graphene_doped_vs_intrinsic.png)
+
+   *The same mesh, the same pulse, the same solver settings: the two curves differ
+   only in the initial occupation.* **Left** -- transmission against peak field. The
+   intrinsic sheet (dark squares) darkens monotonically as Landau-Zener pairs are
+   created (§7). The doped sheet (red circles) is flat while the response is linear,
+   darkens slightly as the field first adds conductivity, and then **brightens**
+   past the shaded region, which begins where the vector-potential excursion reaches
+   the Fermi radius, $A_0=k_F$. Dotted green: the transmission of the maintainer's
+   sample with the PET Fresnel loss divided out, $0.68\to0.79$. **Right** -- the
+   sheet conductivity of the doped run over the incident band, against the two
+   conductances Eq. (4a.1) extracts from those measured transmissions,
+   $24.7$ and $14.3\,\sigma_{\rm univ}$. Calculation and measurement are compared as
+   sheet conductances in the same units, with nothing fitted in between; the
+   calculated fall across saturation ($-56\,\%$) and the measured one ($-42\,\%$)
+   are the same effect. Reproduce with
+   `bash samples/exercise_x14_graphene_self_induced_transparency/run_field_scan.sh`
+   (`NK`, `EF` as in §4a.0). The fitted $D$ sits below the analytic
    $E_F$ by the mesh factor of §4a.2 ($D_{\rm fit}/D_{\rm eq}=0.66$ / $0.89$ /
    $0.89$ for $E_F=0.2$ eV at $N=147$, $0.4$ eV at $N=147$, $0.6$ eV at $N=48$) --
    a scale error common to all fields, so the shape of $T(E_0)$ is intact.
