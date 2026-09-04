@@ -56,6 +56,9 @@ def main(argv=None):
     ap.add_argument('--doped', nargs='+', required=True, help='*_sbe_rt.data of the doped scan (globs ok)')
     ap.add_argument('--intrinsic', nargs='*', default=[], help='*_sbe_rt.data of the undoped control scan')
     ap.add_argument('--t-meas', nargs='*', type=float, default=[], help='measured transmissions, substrate included')
+    ap.add_argument('--series', nargs='*', default=[],
+                    help='extra doped series to overlay, each "label:glob" (e.g. "with e-ph ring:diss/runs/*/..._rt.data"); '
+                         'plotted on the T and sigma panels beside --doped')
     ap.add_argument('--n-sub', type=float, default=1.65, help='substrate index for --t-meas (PET ~ 1.65)')
     ap.add_argument('--out', default='doped_vs_intrinsic.png')
     ap.add_argument('--title', default=None)
@@ -76,9 +79,17 @@ def main(argv=None):
     e_sat = kF / A0_PER_KVCM if kF else None
 
     npan = 3 if ins.size else 2
+    extra = []
+    for spec in args.series:
+        lab, _, pat = spec.partition(':')
+        arr, _ = collect([pat])
+        if arr.size:
+            extra.append((lab, arr))
     fig, ax = plt.subplots(1, npan, figsize=(5.5 * npan, 4.0))
     ax[0].semilogx(dop[:, 0], dop[:, 1], 'o-', color='#c0392b',
                    label=f'doped, $E_F$ = {ef:g} eV (metal)')
+    for (lab, arr), col, mk in zip(extra, ('#e67e22', '#16a085', '#8e44ad'), ('D-', 'v-', '^-')):
+        ax[0].semilogx(arr[:, 0], arr[:, 1], mk, ms=5, color=col, label=lab)
     if ins.size:
         ax[0].semilogx(ins[:, 0], ins[:, 1], 's-', color='#2c3e50', label='intrinsic (semimetal)')
     if e_sat:
@@ -119,7 +130,9 @@ def main(argv=None):
                             fontsize=9)
             ax[1].grid(alpha=0.25)
     ia = npan - 1
-    ax[ia].semilogx(dop[:, 0], dop[:, 4], 'o-', color='#c0392b', label=r'calculated Re $\sigma$ (doped)')
+    ax[ia].semilogx(dop[:, 0], dop[:, 4], 'o-', color='#c0392b', label=r'Re $\sigma$, doped')
+    for (lab, arr), col, mk in zip(extra, ('#e67e22', '#16a085', '#8e44ad'), ('D-', 'v-', '^-')):
+        ax[ia].semilogx(arr[:, 0], arr[:, 4], mk, ms=5, color=col, label=f'Re $\\sigma$, {lab}')
     for z, tm in zip(zs_meas, args.t_meas):
         ax[ia].axhline(z, ls=':', c='#27ae60')
         ax[ia].text(dop[0, 0] * 1.2, z * 1.02, f'measured {z:.1f} $\\sigma_{{univ}}$ (T = {100 * tm:.0f} %)',
