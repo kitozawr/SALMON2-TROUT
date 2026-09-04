@@ -638,9 +638,25 @@ A disc holding one shell of mesh points reproduces the linear limit to $\sim10\,
 but develops a spurious **bump of 15–20 % near $u\simeq0.2$–$0.5$**, and on the
 coarsest Fermi surfaces the small-$u$ limit itself breaks down (the $147^2$ entry at
 $u=0.05$ is the K-point shell dominating a nine-point disc). That bump is exactly the
-*dip* in the $48^2$ transmission scan of §4a.3: $T$ is lowest at 60 kV/cm, which is
-$u=0.386$, where the mesh curve peaks at 1.171. As the disc is filled the bump
-shrinks ($300^2$: 1.06 at its worst) and the curve converges onto Eq. (4a.7).
+*dip* in the transmission scan of §4a.3, and the two scale together — the decisive
+test, because a physical darkening would not care about the mesh:
+
+| mesh ($E_F=0.6$ eV) | pts in the disc / valley | mesh bump at $u=0.4$ | $T$ at low field | $T$ at the minimum | depth of the dip |
+|---|---|---|---|---|---|
+| $48^2$ | 8 | +19 % | 0.7286 | 0.6414 ($u=0.386$) | **12.0 %** |
+| $72^2$ | 22 | +9 % | 0.6846 | 0.6439 ($u=0.371$) | **5.9 %** |
+
+Halving the mesh bump halves the dip, and its position tracks the bump rather than any
+field scale of the physics. As the disc is filled further the bump shrinks ($300^2$:
+1.06 at its worst) and the curve converges onto Eq. (4a.7).
+
+Two deviations must not be confused with it. At **large $u$** the mesh curves lie
+systematically above the continuum ($0.31$ against $0.199$ at $u=5$): there the
+displacement is a sizeable fraction of the Brillouin zone, the EPM band is no longer a
+linear cone, and the difference is trigonal warping — physics of the real band
+structure, not discretization. At **small $u$** the doped carriers carry their own
+uncancelled diamagnetic remainder $\eta k_F/v_F$ (§4a.1), $\sim1\,\%$ at $E_F=0.2$ eV
+and $\sim3\,\%$ at 0.6 eV, which is a basis effect and shrinks with `nstate`.
 
 **The converged prediction is therefore monotone**: the transmission of a doped
 sheet is flat while $A_0\lesssim0.5\,k_F$ and rises thereafter, with no intrinsic
