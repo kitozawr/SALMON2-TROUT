@@ -746,10 +746,11 @@ makes a bigger dent at heavier doping. The control parameter is $k_F/\Delta k$ a
 | $48^2$, $E_F=0.6$ eV | 1.54 | 23.6 | 31.1 | **+32 %** | 0.7275 | 0.6414 | −11.8 % |
 | $72^2$, $E_F=0.4$ eV | 1.54 | 12.9 | 17.4 | **+35 %** | 0.8487 | 0.7939 | −6.5 % |
 | $72^2$, $E_F=0.6$ eV | 2.32 | 25.9 | 30.8 | **+19 %** | 0.7081 | 0.6571 | −7.2 % |
+| $111^2$, $E_F=0.6$ eV | 3.57 | 25.6 | 27.8 | **+8.6 %** | 0.7149 | 0.6900 | −3.5 % |
 
 The two runs at $k_F/\Delta k=1.54$ are different meshes at different dopings and give
-the same bump to within the sampling of the field grid; refining the disc from 1.54 to
-2.32 spacings takes it from $+33\,\%$ to $+19\,\%$. The dip in $T$ follows the bump and
+the same bump to within the sampling of the field grid; filling the disc from 1.5 to
+3.6 spacings takes the bump from a third to under a tenth, and the dip in $T$ with it. The dip in $T$ follows the bump and
 its position tracks the bump rather than any field scale of the physics.
 
 As the disc is filled further the bump shrinks — the adiabatic sum is down to 1.06 at

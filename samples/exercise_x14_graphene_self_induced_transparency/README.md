@@ -703,10 +703,13 @@ the E_F = 0.6 eV proxy by the sample's own doping. Cost as in §6.
 kinematics of the Dirac cone: the band velocity has fixed modulus v_F, so a Fermi
 disc displaced by A saturates at J = n e v_F, and the differential conductivity is
 
-    sigma_eff/sigma_lin = G'(u),   u = A_0/k_F,   G'(u) -> k_F/A_0  for u >> 1
+    sigma_eff/sigma_lin = G(u)/u,  u = A_0/k_F,   G(u)/u -> k_F/A_0  for u >> 1
 
-with G(u) the exact displaced-disc integral (wiki/12 Eq. 4a.7). At 300 K the
-continuum values are
+with G(u) the exact displaced-disc integral (wiki/12 Eqs. 4a.12-4a.13). This is the
+CHORD response -- the current the same peak field produces, which is what a field
+scan measures. The differential response a weak probe on a strong pump would see is
+G'(u), and it falls faster, as 1/(4u^3) (wiki/12 Eq. 4a.16); the two must not be
+swapped. At 300 K the continuum values are
 
 | u = A₀/k_F | 0.05 | 0.2 | 0.4 | 0.6 | 0.8 | 1.0 | 1.5 | 2 | 3 | 5 |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -722,6 +725,25 @@ breaks down entirely (the 147² entry at u = 0.05 is nine points, two of them th
 degenerate K pair). That bump is the dip of §7.9: the 48² transmission minimum sits
 at 60 kV/cm = u 0.386, exactly the peak of the 48² mesh curve. It shrinks as the disc
 fills (300²: 1.06 at worst).
+
+Measured on the runs instead of on the adiabatic sum, the artifact is the spurious
+peak Re σ develops before saturation, and it is governed by k_F/Δk alone — not by the
+doping (same transient, +100 fs tail, coherent, E_F = 0.6 eV unless noted):
+
+| run | k_F/Δk | σ plateau | σ peak | spurious bump | T plateau | T minimum | dip in T |
+|---|---|---|---|---|---|---|---|
+| 48², E_F = 0.6 eV | 1.54 | 23.6 | 31.1 | **+32 %** | 0.7275 | 0.6414 | −11.8 % |
+| 72², E_F = 0.4 eV | 1.54 | 12.9 | 17.4 | **+35 %** | 0.8487 | 0.7939 | −6.5 % |
+| 72², E_F = 0.6 eV | 2.32 | 25.9 | 30.8 | **+19 %** | 0.7081 | 0.6571 | −7.2 % |
+| 111², E_F = 0.6 eV | 3.57 | 25.6 | 27.8 | **+8.6 %** | 0.7149 | 0.6900 | −3.5 % |
+
+Two different meshes at two different dopings but the same k_F/Δk give the same bump;
+filling the disc from 1.5 to 3.6 spacings takes it from a third to under a tenth. How
+much of the bump reaches T depends on the sheet impedance, which is why the same
+artifact makes a 11.8 % dent at 0.6 eV and 6.5 % at 0.4 eV — the dip depth is not the
+artifact, the conductivity bump is. Reproduce the comparison with
+`field_scan_plot.py --continuum`, which draws the parameter-free continuum curve
+beside the data and prints the residual.
 
 **So the converged model predicts a monotone brightening**, flat while
 A₀ ≲ 0.5 k_F and rising as 1/E₀ thereafter, with darkening only when Landau–Zener
