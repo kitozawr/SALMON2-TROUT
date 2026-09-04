@@ -607,14 +607,24 @@ coherent runs:
 | 100 | 60 | 58 | 2050 K | 14.5 | 0.7213 | 0.048 | 0.231 |
 | 100, coherent | 7930 | 7613 | — | 30.3 | 0.6622 | 0.330 | 0.007 |
 
-Three things. **(i)** τ falls by a factor 2.3 and the mean free path from 136 to
-58 nm between 10 and 100 kV/cm, as the carriers are driven over the optical-phonon
-thresholds (v_F A₀ = 0.74 eV at 100 kV/cm against E₂g 196 meV, A₁′ 160 meV): the
-mobility drop, measured. **(ii)** Scattering turns the sheet from an inductive
-mirror (R = 0.33, A = 0.007) into a Drude absorber (R = 0.048, A = 0.231) — a real
-sample, not a mirror. **(iii)** T rises 0.644 → 0.721 against the measured
-0.68 → 0.79 of the sheet with the substrate divided out, and the high-field
-conductivity 14.5 σ_univ against the measured 14.3.
+Three things. **(i)** Within this mesh τ falls by a factor 2.3 and the mean free path
+from 136 to 58 nm between 10 and 100 kV/cm, as the carriers are driven over the
+optical-phonon thresholds (v_F A₀ = 0.74 eV at 100 kV/cm against E₂g 196 meV,
+A₁′ 160 meV): the mobility drop. **(ii)** Scattering turns the sheet from an
+inductive mirror (R = 0.33, A = 0.007) into a Drude absorber (R = 0.048, A = 0.231) —
+a real sample, not a mirror. **(iii)** T rises 0.644 → 0.721 and the high-field
+conductivity is 14.5 σ_univ, against a measured 0.68 → 0.79 and 14.3 σ_univ.
+
+**Caveat: the absolute τ is not mesh-converged.** Repeating 10 kV/cm on 72² (2.25×
+the k-points) gives τ = 32 fs instead of 141 fs, Re σ = 10.5 instead of 18.1 σ_univ
+and T = 0.778 instead of 0.644, while the e-ph ledger rate doubles. The inter-k
+golden-rule sum is not resolved at these densities — the σ_E = 0.1 eV energy window
+holds too few final states, so the rate samples the mesh. What is robust is the
+direction of every effect (scattering shortens τ, converts reflection into
+absorption, lowers σ, raises T) and the field dependence within one mesh. Quoting an
+absolute τ, or comparing the absolute transmission with the measurement
+quantitatively, needs the ring on a Fermi-surface-resolving mesh: the O(N_k²)
+production run of §6.
 
 The carrier temperature comes from the total electronic energy (361 K and 2050 K),
 *not* from the per-channel `dE_eph` column, which for a doped initial state is a

@@ -176,10 +176,12 @@ density fixes $T_e$ through $\varepsilon(\mu,T_e)$:
 | 10 | $2.5\times10^{-5}$ | 361 K | 361 K | 141 | 136 |
 | 100 | $2.28\times10^{-3}$ | **2050 K** | 2038 K | **60** | 58 |
 
-(48², $E_F=0.6$ eV, `diss`, lattice at 300 K throughout.) At 2050 K the Drude weight
-of §4a.3 has moved by about 10 %, while $\tau$ has fallen by a factor 2.3 and the
-mean free path from 136 to 58 nm -- the quantitative statement that the bleaching is
-carried by the scattering time and the drift, not by the Drude weight. With
+(48², $E_F=0.6$ eV, `diss`, lattice at 300 K throughout; the $\tau$ values carry the
+mesh caveat of §4a.5.5.) At 2050 K the Drude weight of §4a.3 has moved by about 10 %,
+while $\tau$ falls by a factor 2.3 within this mesh -- the statement that the
+bleaching is carried by the scattering time and the drift rather than by the Drude
+weight rests on that *ratio*, which is far larger than the ~10 % the Drude weight can
+supply, not on the absolute $\tau$. With
 `yn_sbe_rana_te = 'y'` (the `mem` variant) the same $T_e$ is fitted from the
 distribution each ring step and written to `*_sbe_te.data`.
 
@@ -602,24 +604,36 @@ hundred kV/cm.
 at fixed drive and brightens it as the field grows. Above the optical-phonon
 thresholds (E$_{2g}$ 196 meV, A$_1'$ 160 meV) every emission randomises momentum, and
 $v_FA_0=0.74$ eV at 100 kV/cm puts the whole distribution over them twice per cycle.
-Measured against the coherent run on the same mesh at 100 kV/cm, $\tau$ falls from
-$7.9\times10^3$ fs (collisionless) to **60 fs**, the mean free path to 58 nm,
-$\mathrm{Re}\,\sigma$ from 30.3 to $14.5\,\sigma_{\rm univ}$, and the sheet turns from
-an inductive mirror ($R=0.33$, $A=0.007$) into a Drude absorber ($R=0.048$,
-$A=0.231$) -- which is what a real sample is. Within the dissipative runs the field
-dependence of $\tau$ is direct:
+Switching the ring on changes the *character* of the sheet, and that part is robust.
+At 100 kV/cm on $48^2$ the sheet goes from an inductive mirror ($R=0.33$, $A=0.007$,
+$\tau=7.9\times10^3$ fs, i.e. collisionless) to a Drude absorber ($R=0.048$,
+$A=0.231$) -- which is what a real sample is -- and $\mathrm{Re}\,\sigma$ drops from
+30.3 to $14.5\,\sigma_{\rm univ}$ while $T$ rises from 0.662 to 0.721. The same
+happens at $72^2$ and 10 kV/cm: $R=0.260\to0.019$, $A=0.059\to0.204$,
+$\mathrm{Re}\,\sigma=25.1\to10.5\,\sigma_{\rm univ}$, $T=0.681\to0.778$.
 
-| $E_0$ [kV/cm] | $\tau$ [fs] | mean free path [nm] | $T_e$ | $\mathrm{Re}\,\sigma/\sigma_{\rm univ}$ | $T$ | $R$ | $A$ |
-|---|---|---|---|---|---|---|---|
-| 10 | 141 | 136 | 361 K | 18.1 | 0.6442 | 0.061 | 0.294 |
-| 100 | 60 | 58 | 2050 K | 14.5 | 0.7213 | 0.048 | 0.231 |
+**The absolute $\tau$, however, is not converged with the k-mesh** and must not be
+quoted as a first-principles number:
 
-$\tau$ falls by 2.3 and the mean free path by the same factor as the carriers are
-driven over the optical-phonon thresholds; $\sigma$ falls by 20 % and $T$ rises from
-0.644 to 0.721, against the measured $0.68\to0.79$ of the sheet with the substrate
-divided out. Scattering therefore reinforces the brightening of §4a.5.3 rather than
-opposing it, and it supplies the absolute absorption the coherent runs cannot; the
-coherent runs give the shape, the dissipative ones the magnitude.
+| mesh | $E_0$ [kV/cm] | $\tau$ [fs] | mean free path [nm] | $\mathrm{Re}\,\sigma/\sigma_{\rm univ}$ | $T$ |
+|---|---|---|---|---|---|
+| $48^2$ | 10 | 141 | 136 | 18.1 | 0.644 |
+| $48^2$ | 100 | 60 | 58 | 14.5 | 0.721 |
+| $72^2$ | 10 | **32** | 31 | 10.5 | 0.778 |
+
+The same field on a mesh with 2.25× the points gives a $\tau$ four times shorter, and
+the e-ph energy-exchange rate of the channel ledger doubles ($4.5\to9.2\times10^{-6}$
+eV/cell/fs). The inter-k golden-rule sum is not resolved at these densities: the
+energy-matching window $\sigma_E=0.1$ eV contains too few final states, so the rate
+samples the mesh rather than the phonon spectrum. What survives mesh refinement is the
+*direction* of every effect -- scattering shortens $\tau$, converts reflection into
+absorption, lowers $\sigma$ and raises $T$ -- and the field dependence within one mesh
+($\tau$ falls 2.3× between 10 and 100 kV/cm at $48^2$ as the carriers are driven over
+the optical-phonon thresholds). A converged $\tau$ needs the ring on a
+Fermi-surface-resolving mesh, which is the $O(N_k^2)$ production run of the x14 README
+§6, not a laptop calculation. Accordingly the comparison of the *absolute*
+transmission with the measured $0.68\to0.79$ is indicative, not quantitative; the
+coherent runs give the shape of $T(E_0)$, the dissipative ones its character.
 
 *Discretization.* The one caveat. Equation (4a.7) is a continuum statement; a mesh
 represents it only as well as it fills the Fermi disc. Evaluating the same adiabatic
