@@ -462,6 +462,17 @@ dJ_s/dt = (D/π)E_tot − J_s/τ.
 | 500 | 0.8122 | 0.1455 | 0.042 | 0.325 | 15.8 |
 | 1000 | 0.8263 | 0.1124 | 0.061 | 0.290 | 13.4 |
 
+The **intrinsic control on the same mesh**, same pulse, same everything except the
+initial occupation:
+
+| E₀ [kV/cm] | 1 | 10 | 30 | 60 | 100 | 200 | 300 | 500 | 1000 |
+|---|---|---|---|---|---|---|---|---|---|
+| T, doped (E_F = 0.6 eV) | 0.7286 | 0.7257 | 0.6990 | 0.6414 | 0.6622 | 0.7202 | 0.7716 | 0.8122 | 0.8263 |
+| T, intrinsic | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0.9970 | 0.9772 | 0.9519 | 0.9230 | 0.9026 |
+
+(figure: `doped_vs_intrinsic.png`). The two curves run in opposite directions and
+cross near 700 kV/cm.
+
 Read from the bottom up, this is the measurement. **T is flat at 0.726 through
 the linear regime (1–10 kV/cm), dips to 0.66 near 100 kV/cm, then rises
 monotonically to 0.83.** The turn is where predicted: A₀ = k_F at 81 kV/cm for
@@ -525,5 +536,15 @@ temperature. Cost as in §6.
 ## 10. Tests added by this exercise
 
 `test_graphene_dirac_levels.py`, `test_sheet_transmission.py`,
-`test_rana_saturation.f90`, `test_colmem_2d.f90`, `test_dirac_te_fit.f90` —
-`python3 tests/run_all.py`.
+`test_rana_saturation.f90`, `test_colmem_2d.f90`, `test_dirac_te_fit.f90`,
+`test_vg_sumrule.f90` (velocity-gauge f-sum rule and the pure-gauge restoration,
+§3a), `test_doped_drude.py` (Fermi-Dirac occupation on a k-mesh and its
+resolution requirement, Dirac-cone Drude weight and its weak temperature
+dependence at fixed density, measured transmission → sheet conductance,
+current-saturation field scale, §3b/§7.9) — `python3 tests/run_all.py`, 31/31.
+
+Analysis scripts: `transmission.py` (T/R/A, sheet BC, energy ledger, Re σ),
+`saturation_check.py` (populations, Rana ledger, T_e), `sumrule_check.py`
+(basis f-sum rule, residual reactive current), `plot_levels.py` (level
+populations vs t and k-maps), `drude_check.py` (doped sheet: D, τ, mean free
+path, experiment conversion).
