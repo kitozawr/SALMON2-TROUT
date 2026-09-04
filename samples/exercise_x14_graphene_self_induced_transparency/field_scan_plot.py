@@ -75,7 +75,8 @@ def main(argv=None):
     kF = (abs(ef) / AU_EV) / VF_EPM_AU if ef else 0.0
     e_sat = kF / A0_PER_KVCM if kF else None
 
-    fig, ax = plt.subplots(1, 2, figsize=(11, 4.0))
+    npan = 3 if ins.size else 2
+    fig, ax = plt.subplots(1, npan, figsize=(5.5 * npan, 4.0))
     ax[0].semilogx(dop[:, 0], dop[:, 1], 'o-', color='#c0392b',
                    label=f'doped, $E_F$ = {ef:g} eV (metal)')
     if ins.size:
@@ -98,19 +99,39 @@ def main(argv=None):
     ax[0].set_title(args.title or 'Same mesh, same pulse: only the initial occupation differs', fontsize=9)
     ax[0].legend(fontsize=8, loc='lower left'); ax[0].grid(alpha=0.25)
 
-    ax[1].semilogx(dop[:, 0], dop[:, 4], 'o-', color='#c0392b', label=r'calculated Re $\sigma$ (doped)')
+    # middle panel: the extinction the DOPING carriers add, 1 - T_doped/T_intrinsic.
+    # This is the observable that isolates them: the intrinsic Landau-Zener darkening
+    # divides out, and what is left is the Drude response of the doped carriers, which
+    # collapses once the drift saturates.
+    if ins.size:
+        tin = {round(r[0], 3): r[1] for r in ins}
+        common = np.array([[r[0], 1.0 - r[1] / tin[round(r[0], 3)]] for r in dop
+                           if round(r[0], 3) in tin])
+        if common.size:
+            ax[1].semilogx(common[:, 0], 100.0 * common[:, 1], 'o-', color='#8e44ad')
+            ax[1].axhline(0.0, c='k', lw=0.6)
+            if e_sat:
+                ax[1].axvline(e_sat, ls='--', c='#7f8c8d', lw=1)
+                ax[1].axvspan(e_sat, common[:, 0].max(), color='#f1c40f', alpha=0.13)
+            ax[1].set_xlabel('peak field $E_0$ [kV/cm]')
+            ax[1].set_ylabel(r'extinction added by the doping, $1-T_{\rm doped}/T_{\rm intrinsic}$  [%]')
+            ax[1].set_title('The doping carriers alone: their extinction\npeaks at the saturation field and collapses',
+                            fontsize=9)
+            ax[1].grid(alpha=0.25)
+    ia = npan - 1
+    ax[ia].semilogx(dop[:, 0], dop[:, 4], 'o-', color='#c0392b', label=r'calculated Re $\sigma$ (doped)')
     for z, tm in zip(zs_meas, args.t_meas):
-        ax[1].axhline(z, ls=':', c='#27ae60')
-        ax[1].text(dop[0, 0] * 1.2, z * 1.02, f'measured {z:.1f} $\\sigma_{{univ}}$ (T = {100 * tm:.0f} %)',
-                   fontsize=7.5, color='#27ae60')
+        ax[ia].axhline(z, ls=':', c='#27ae60')
+        ax[ia].text(dop[0, 0] * 1.2, z * 1.02, f'measured {z:.1f} $\\sigma_{{univ}}$ (T = {100 * tm:.0f} %)',
+                    fontsize=7.5, color='#27ae60')
     if e_sat:
-        ax[1].axvline(e_sat, ls='--', c='#7f8c8d', lw=1)
+        ax[ia].axvline(e_sat, ls='--', c='#7f8c8d', lw=1)
     if len(dop) > 1:
         imax = int(np.argmax(dop[:, 4]))
         drop = 100.0 * (dop[-1, 4] / dop[imax, 4] - 1.0)
-        ax[1].set_title(rf'Sheet conductivity: {drop:+.0f} % from its peak to {dop[-1, 0]:.0f} kV/cm', fontsize=9)
-    ax[1].set_xlabel('peak field $E_0$ [kV/cm]'); ax[1].set_ylabel(r'Re $\sigma$ / $\sigma_{univ}$')
-    ax[1].legend(fontsize=8); ax[1].grid(alpha=0.25)
+        ax[ia].set_title(rf'Sheet conductivity: {drop:+.0f} % from its peak to {dop[-1, 0]:.0f} kV/cm', fontsize=9)
+    ax[ia].set_xlabel('peak field $E_0$ [kV/cm]'); ax[ia].set_ylabel(r'Re $\sigma$ / $\sigma_{univ}$')
+    ax[ia].legend(fontsize=8); ax[ia].grid(alpha=0.25)
     fig.tight_layout(); fig.savefig(args.out, dpi=150)
     print(f'# wrote {args.out}')
 

@@ -480,6 +480,28 @@ puts at ~27 kV/cm for E_F = 0.2 eV is inside the measured range, and the
 predicted saturation is *sub-linear in the drift*, which is why the transmission
 creeps up by ten points rather than jumping.
 
+**7.10 At the sample's own doping (147², E_F = 0.2 eV) — the signature is the ratio
+to the intrinsic control.** A 3×10¹² cm⁻² sheet without dissipators is only a weak
+inductor, so the raw transmission is quiet (T = 0.968 at 1 kV/cm, not the measured
+0.68 — a coherent run has no momentum relaxation and cannot produce absorption,
+only reactive screening). Divide by the intrinsic control on the same mesh and the
+doping carriers stand alone:
+
+| E₀ [kV/cm] | 1 | 10 | 30 | 100 | 300 | 1000 |
+|---|---|---|---|---|---|---|
+| T doped (E_F = 0.2 eV) | 0.9682 | 0.9666 | 0.9595 | 0.9629 | 0.9442 | 0.9090 |
+| T intrinsic | 1.0000 | 1.0000 | 0.9995 | 0.9867 | 0.9336 | 0.9163 |
+| extinction added by the doping | 3.18 % | 3.34 % | **4.00 %** | 2.41 % | −1.14 % | 0.79 % |
+| Re σ/σ_univ (doped) | 2.73 | 2.86 | 3.45 | 2.81 | 3.73 | 6.11 |
+
+The doping-induced extinction **peaks at 30 kV/cm**, against the 27 kV/cm that
+A₀ = k_F predicts from k_F alone, then collapses by a factor of five. At 300 kV/cm
+it is *negative*: the doped sheet transmits better than the undoped one, because its
+Drude response has saturated while its occupied states Pauli-block part of the
+Landau–Zener pair creation. Figure: `doped_vs_intrinsic.png` (three panels: T(E₀),
+the extinction ratio, σ(E₀)); the 48²/E_F = 0.6 eV proxy of §7.9 is the same physics
+with a sheet conductance large enough to move the raw transmission.
+
 **7.9 The doped sheet, calculated: transmission rises above the saturation
 onset.** 48² mesh, E_F = 0.6 eV (n = 3.0×10¹³ cm⁻², 8 mesh points per valley
 inside the Fermi disc), T_init = 300 K, nstate = 2, pure gauge, self-consistent

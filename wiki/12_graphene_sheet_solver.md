@@ -333,24 +333,48 @@ break the linear relation between current and field. All three are separable:
    (81 kV/cm at this doping): $\sigma$ falls from $30.3$ to
    $13.4\,\sigma_{\rm univ}$, $-56\,\%$.
 
-   ![doped vs intrinsic sheet, transmission and conductivity against the peak field](figures/graphene_doped_vs_intrinsic.png)
+   ![strong-doping proxy on the 48x48 mesh](figures/graphene_doped_proxy_ef06.png)
 
-   *The same mesh, the same pulse, the same solver settings: the two curves differ
-   only in the initial occupation.* **Left** -- transmission against peak field. The
-   intrinsic sheet (dark squares) darkens monotonically as Landau-Zener pairs are
-   created (§7). The doped sheet (red circles) is flat while the response is linear,
-   darkens slightly as the field first adds conductivity, and then **brightens**
-   past the shaded region, which begins where the vector-potential excursion reaches
-   the Fermi radius, $A_0=k_F$. Dotted green: the transmission of the maintainer's
-   sample with the PET Fresnel loss divided out, $0.68\to0.79$. **Right** -- the
-   sheet conductivity of the doped run over the incident band, against the two
-   conductances Eq. (4a.1) extracts from those measured transmissions,
-   $24.7$ and $14.3\,\sigma_{\rm univ}$. Calculation and measurement are compared as
-   sheet conductances in the same units, with nothing fitted in between; the
-   calculated fall across saturation ($-56\,\%$) and the measured one ($-42\,\%$)
-   are the same effect. Reproduce with
-   `bash samples/exercise_x14_graphene_self_induced_transparency/run_field_scan.sh`
-   (`NK`, `EF` as in §4a.0). The fitted $D$ sits below the analytic
+   *Strong-doping proxy, $48^2$, $E_F=0.6$ eV. The same mesh, the same pulse, the
+   same solver settings; only the initial occupation differs.* **Left** --
+   transmission against peak field: the intrinsic sheet (dark squares) darkens
+   monotonically as Landau-Zener pairs are created (§7), while the doped sheet (red
+   circles) is flat in the linear regime, darkens slightly as the field first adds
+   conductivity, and then **brightens** past the shaded region, which begins at
+   $A_0=k_F$. Dotted green: the transmission of the measured sample with the PET
+   Fresnel loss divided out, $0.68\to0.79$. **Middle** -- the extinction the doping
+   carriers alone contribute, $1-T_{\rm doped}/T_{\rm intrinsic}$: dividing by the
+   intrinsic curve removes the Landau-Zener darkening and leaves the Drude response,
+   which peaks at the saturation field and collapses. **Right** -- the sheet
+   conductivity against the two conductances Eq. (4a.1) extracts from the measured
+   transmissions, $24.7$ and $14.3\,\sigma_{\rm univ}$: calculation and measurement
+   compared as sheet conductances in the same units, nothing fitted in between, the
+   calculated fall across saturation ($-56\,\%$) against the measured $-42\,\%$.
+
+**At the sample's own doping.** The same scan at $E_F=0.2$ eV on the production
+$147^2$ mesh is quieter in the raw transmission, because a $3\times10^{12}$ cm⁻²
+sheet without dissipators is only a weak inductor ($T=0.968$ at 1 kV/cm, not 0.68 --
+the coherent run has no momentum relaxation, so it cannot produce the measured
+*absorption*, only the reactive screening). The doping's own signature is then read
+against the intrinsic control:
+
+![doped vs intrinsic sheet at the sample doping, 147x147](figures/graphene_doped_vs_intrinsic.png)
+
+| $E_0$ [kV/cm] | 1 | 10 | 30 | 100 | 300 | 1000 |
+|---|---|---|---|---|---|---|
+| $T$ doped ($E_F=0.2$ eV) | 0.9682 | 0.9666 | 0.9595 | 0.9629 | 0.9442 | 0.9090 |
+| $T$ intrinsic | 1.0000 | 1.0000 | 0.9995 | 0.9867 | 0.9336 | 0.9163 |
+| extinction added by the doping | 3.18 % | 3.34 % | **4.00 %** | 2.41 % | −1.14 % | 0.79 % |
+
+The doping-induced extinction **peaks at 30 kV/cm** -- the predicted saturation field
+for this doping is 27 kV/cm (Eq. 4a.2) -- and then collapses by a factor of five,
+going briefly negative at 300 kV/cm, where the doped sheet transmits *better* than
+the undoped one because its Drude response has saturated while its occupied states
+Pauli-block part of the Landau-Zener pair creation. The onset therefore comes out at
+the field Eq. (4a.2) predicts from $k_F$ alone, at the doping the transfer literature
+[18] reports, without anything having been tuned. Reproduce both figures with
+`bash samples/exercise_x14_graphene_self_induced_transparency/run_field_scan.sh`
+(`NK`, `EF` as in §4a.0). The fitted $D$ sits below the analytic
    $E_F$ by the mesh factor of §4a.2 ($D_{\rm fit}/D_{\rm eq}=0.66$ / $0.89$ /
    $0.89$ for $E_F=0.2$ eV at $N=147$, $0.4$ eV at $N=147$, $0.6$ eV at $N=48$) --
    a scale error common to all fields, so the shape of $T(E_0)$ is intact.
