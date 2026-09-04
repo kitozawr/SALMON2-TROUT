@@ -431,8 +431,23 @@ n_PET = 1.65 and two incoherent faces the bare substrate passes 88.3 %, so the
 graphene itself accounts for 0.60/0.883 = 0.68 and 0.70/0.883 = 0.79, i.e. a
 sheet conductance Z₀σ of 0.565 → 0.327, **σ = 24.7 → 14.3 σ_univ (−42 %)**.
 That is a Drude conductance: σ_dc = Dτ/π with the Dirac-cone Drude weight
-D = 2k_BT ln[2cosh(μ/2k_BT)] → E_F. E_F = 0.2 eV (n = 3.4×10¹² cm⁻²) with
-τ = 63 fs reproduces 24.7 σ_univ exactly, so that is the sample.
+D = 2k_BT ln[2cosh(μ/2k_BT)] → E_F. In transport units it is R_s = 666 Ω/sq at low
+field and 1153 Ω/sq at high field — an ordinary as-transferred CVD monolayer.
+Splitting it across dopings, each with the τ that reproduces the same σ:
+
+| E_F [eV] | n_2D [cm⁻²] | τ [fs] | mobility [cm²/V s] | mean free path [nm] | onset A₀ = k_F [kV/cm] |
+|---|---|---|---|---|---|
+| 0.1 | 8.0×10¹¹ | 127 | 11700 | 122 | 13 |
+| **0.2** | **3.2×10¹²** | **64** | **2900** | **61** | **27** |
+| 0.3 | 7.2×10¹² | 43 | 1300 | 41 | 40 |
+| 0.4 | 1.3×10¹³ | 32 | 730 | 31 | 54 |
+| 0.6 | 2.9×10¹³ | 21 | 330 | 20 | 81 |
+
+E_F = 0.2–0.4 eV is where an ordinary sample sits; 0.1 eV would need a mobility
+CVD-on-polymer does not have, and 0.6 eV a mobility that is low even for
+chemically doped film. The field at which the transmission starts to rise picks
+between them (last column). The E_F = 0.6 eV used in the 48² runs below is a
+mesh-affordable proxy, not the sample.
 
 `sbe_ef_ev` / `sbe_temp_init_k` now put that state into the solver (§3b). Which
 of the two factors, D or τ, can give −42 %?

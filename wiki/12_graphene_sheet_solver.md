@@ -126,9 +126,42 @@ unknowns; any one of three independent handles closes it.
   step 1. This is the self-contained route when nothing but the transmission scan
   is available.
 
-For the sample of §4a.4, $E_F=0.2$ eV ($n=3.4\times10^{12}$ cm⁻²) with $\tau=63$ fs
-reproduces $24.7\,\sigma_{\rm univ}$ exactly, and both numbers are unremarkable for
-CVD graphene transferred onto PET.
+**Is the answer a plausible sample?** Convert the same conductance to the units a
+transport measurement quotes: $\sigma=24.7\,\sigma_{\rm univ}=1.50$ mS/sq, i.e.
+$R_s=666\ \Omega/\square$ (the high-field value $14.3\,\sigma_{\rm univ}$ is
+$1153\ \Omega/\square$). That is an ordinary as-transferred CVD monolayer. Splitting
+it across dopings, each with the $\tau$ that reproduces the same $\sigma$:
+
+| $E_F$ [eV] | $n_{2D}$ [cm⁻²] | $\tau$ [fs] | mobility [cm²/V s] | mean free path [nm] | verdict |
+|---|---|---|---|---|---|
+| 0.1 | 8.0×10¹¹ | 127 | 11700 | 122 | too clean for CVD on polymer |
+| **0.2** | **3.2×10¹²** | **64** | **2900** | **61** | **typical as-transferred CVD** |
+| 0.3 | 7.2×10¹² | 43 | 1300 | 41 | typical |
+| 0.4 | 1.3×10¹³ | 32 | 730 | 31 | typical chemically doped (HNO₃, AuCl₃) |
+| 0.6 | 2.9×10¹³ | 21 | 330 | 20 | heavily doped; low mobility, at the edge |
+
+$E_F=0.2$–$0.4$ eV is where an ordinary sample sits, and Eq. (4a.2) discriminates
+inside that window through the onset field (27 / 54 / 81 kV/cm for 0.2 / 0.4 /
+0.6 eV). The $E_F=0.6$ eV used in the $48^2$ runs of §4a.3 is therefore a
+*mesh-affordable proxy*, higher than a typical sample, and its curve maps onto the
+sample by the rescaling of step 3.
+
+**Temperatures.** Two distinct ones enter, and they are not the same number.
+`sbe_temp_init_k` sets the occupation the run starts from and
+`sbe_eph_temperature_k` the phonon bath the dissipators relax into -- both 300 K for
+a room-temperature measurement. The *carrier* temperature is an output: at
+100 kV/cm the dissipative doped run absorbs $2.26\times10^{-3}$ eV per cell and
+hands $1.10\times10^{-3}$ of it to the phonons within the pulse, i.e. 210 meV per
+carrier at the peak falling to 142 meV by 384 fs, which for a Dirac gas at that
+density is
+$$
+T_e\simeq2460\ \text{K (peak)}\ \longrightarrow\ 2040\ \text{K at 384 fs}, \tag{4a.4}
+$$
+the lattice staying at 300 K. That is the regime where the Drude weight of §4a.3 has
+moved by about 10 % -- consistent with the statement that heating alone cannot
+account for the measured bleaching. With `yn_sbe_rana_te = 'y'` (the `mem` variant)
+the same $T_e$ is fitted from the distribution each ring step and written to
+`*_sbe_te.data`, instead of being inferred from the ledger as here.
 
 **Step 3 -- check the doping against the mesh you can afford, and rescale if not.**
 §4a.2 requires $k_F\gtrsim3\,|\mathbf b|/N$, i.e.
