@@ -704,12 +704,30 @@ states, so the rate samples the mesh rather than the phonon spectrum.
 
 What *does* survive mesh refinement is the sign of every effect at fixed mesh when the
 ring is switched on: scattering shortens $\tau$ against the collisionless run, converts
-reflection into absorption, lowers $\mathrm{Re}\,\sigma$ and raises $T$. A converged
-$\tau$ needs the ring on a Fermi-surface-resolving mesh, i.e. the $O(N_k^2)$ production
-run of the x14 README §6, not a laptop calculation. Accordingly the comparison of the
-*absolute* transmission with the measured $0.68\to0.79$ is indicative, not
-quantitative; the coherent runs give the shape of $T(E_0)$, the dissipative ones its
-character.
+reflection into absorption, lowers $\mathrm{Re}\,\sigma$ and raises $T$.
+
+**Why the dissipative curve cannot simply be moved to the converged mesh.** The
+coherent scan can: it is $O(N_k)$, and $147^2$ costs minutes per field, which is how
+the mesh series above was made. The ring is $O(N_k^2)$. Measured at $72^2$ on four
+threads a dissipative field takes $\approx1.4$ h; at $111^2$, where the Fermi disc of
+$E_F=0.6$ eV finally holds $3.6$ spacings, the same field is $2.38^2\times1.35\approx7.6$
+times that, i.e. $\approx10$ h, and a six-point scan is close to three days. The two
+halves of the comparison are therefore *not* on the same mesh, and that has to be
+stated wherever they appear together: the coherent runs give the shape of $T(E_0)$ on
+a mesh where the spurious bump is down to $+8.6\,\%$ and the dip in $T$ to $3.5\,\%$,
+the dissipative runs give its character and absolute level on a mesh where the bump is
+still $+19\,\%$.
+
+One tempting shortcut does not work. The criterion Eq. (4a.3) can also be met by
+*raising the doping* on the same mesh — $E_F=0.8$ eV puts $k_F/\Delta k$ at $3.09$ on
+$72^2$ at no extra cost. But the doping is not free to choose: $E_F=0.6$ eV is what
+puts the sheet conductance near the measured $24.7\,\sigma_{\rm univ}$ (§4a.0), and
+$0.8$ eV would take it to $\approx35$, so the run would be better resolved and further
+from the sample. Resolving the Fermi surface and matching the measurement are two
+different constraints, and at fixed cost only one of them can be satisfied.
+
+Accordingly the comparison of the *absolute* transmission with the measured
+$0.68\to0.79$ is indicative, not quantitative.
 
 *Discretization.* The one caveat. Equation (4a.12) is a continuum statement; a mesh
 represents it only as well as it fills the Fermi disc. Evaluating the same adiabatic
