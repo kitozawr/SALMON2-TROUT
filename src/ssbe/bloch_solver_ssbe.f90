@@ -52,6 +52,7 @@ module bloch_solver_ssbe
         real(8) :: ii_eg_au     = 0d0   ! band gap E_g [Ha] (primary loses E_g)
         integer :: nv_act       = 0     ! valence branches inside the active subspace
         real(8) :: occ_max      = 2d0   ! 2 (scalar bands) / 1 (spinor bands)
+        real(8), allocatable :: f0_act(:, :)   ! (nba, nk) INITIAL occupation of the active bands (doped/thermal sheet): dressed-reference baseline
 
         ! Bandgap-renormalization-coupled impact-ionization threshold (Part C7).
         ! When the excited carrier density exceeds bgr_n_gate, the II threshold
@@ -663,6 +664,35 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
         if (sbe%active_idx(ib) <= homo_idx) sbe%nv_act = sbe%nv_act + 1
     end do
 
+    ! Initial active-band occupations. Only stored when they are NOT the plain
+    ! integer filling (a doped / finite-temperature sheet, wiki/12 sec. 4a): the
+    ! dressed reference then measures carriers against this baseline instead of
+    ! "nv full, the rest empty". Absent => byte-identical to the previous code.
+    if (sbe%n_active_bands > 0) then
+        block
+            integer :: ika, iba
+            real(8) :: dmax
+            dmax = 0d0
+            do ika = 1, gs%nk
+                do iba = 1, sbe%n_active_bands
+                    dmax = max(dmax, abs(gs%occup(sbe%active_idx(iba), ika) &
+                                       - gs%occup_ref(sbe%active_idx(iba), ika)))
+                end do
+            end do
+            if (dmax > 1d-12) then
+                allocate(sbe%f0_act(sbe%n_active_bands, gs%nk))
+                do ika = 1, gs%nk
+                    do iba = 1, sbe%n_active_bands
+                        sbe%f0_act(iba, ika) = gs%occup(sbe%active_idx(iba), ika)
+                    end do
+                end do
+                if (lprint) write(*, '(a,es10.3,a)') &
+                    '# dressed reference: doped/thermal baseline stored (max |f0 - integer filling| = ', &
+                    dmax, ')'
+            end if
+        end block
+    end if
+
     ! Super-mode ring flag -- set UNCONDITIONALLY and BEFORE every channel block:
     ! it gates the inter-k (ring) variants of e-ph, impact ionization and Auger,
     ! and the ring-vs-allgather choice inside Coulomb HF. (BUG FIXED 2026-07-02:
@@ -943,10 +973,10 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm, verbose)
     block
         real(8) :: eta3(3), scap3(3), wsum
         call vg_sumrule_eta(gs%nk, sbe%nb, gs%eigen(1:sbe%nb, :), gs%p_tm_matrix(1:sbe%nb, 1:sbe%nb, :, :), &
-                            gs%occup(1:sbe%nb, :), gs%kweight, 1d-3, eta3, scap3)   ! skip |de| < 27 meV (the exact Dirac point)
+                            gs%occup_ref(1:sbe%nb, :), gs%kweight, 1d-3, eta3, scap3)  ! undoped reference; skip |de| < 27 meV (the exact Dirac point)
         wsum = sum(gs%kweight)
         sbe%vg_eta = eta3;  sbe%vg_scap = scap3
-        sbe%vg_ne_cell = sum(gs%kweight * sum(gs%occup(1:sbe%nb, :), dim=1)) / max(wsum, 1d-300)
+        sbe%vg_ne_cell = sum(gs%kweight * sum(gs%occup_ref(1:sbe%nb, :), dim=1)) / max(wsum, 1d-300)
         if (lprint) then
             write(*, '(a,3f8.4,a,3f8.4,a)') '# VG f-sum rule (occupied bands, this nb): captured oscillator'// &
                 ' strength S = (', scap3, ' ), uncancelled diamagnetic fraction eta = (', eta3, ' )'
@@ -1383,7 +1413,10 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
     jmat(:) = real(tmp(:)) / (sum(gs%kweight) * gs%volume)
 
     ! Velocity-gauge pure-gauge (f-sum-rule) restoration, wiki/12 sec. 6a: subtract
-    ! the adiabatic ground-state current of the SAME truncated H_k(A(t)) = eps + A.p.
+    ! the adiabatic ground-state current of the SAME truncated H_k(A(t)) = eps + A.p,
+    ! evaluated on the UNDOPED T -> 0 filling gs%occup_ref -- NOT on the doped/thermal
+    ! occupation: the artifact belongs to the filled sea, while the partially filled
+    ! band's adiabatic current IS the physical Drude response (wiki/12 sec. 4a).
     ! A uniform A is a pure gauge, so a complete basis gives zero here for every A;
     ! the nb-band basis leaves eta N_e A/V at linear order (banner at start-up)
     ! and a nonlinear remainder once A ~ the k-distance to the Dirac points --
@@ -1400,7 +1433,7 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
                 call vg_coupling_k(sbe, gs, ik, nb, pk)
                 call build_HVG(nb, gs%eigen(1:nb, ik), pk, Ac, Hk)
                 call eigen_zheev(Hk, evk, Wk)
-                call vg_gs_current_k(nb, Wk, pk, Ac, gs%occup(1:nb, ik), jgs)
+                call vg_gs_current_k(nb, Wk, pk, Ac, gs%occup_ref(1:nb, ik), jgs)
                 tmp1(:) = tmp1(:) + gs%kweight(ik) * jgs(:)
             end do
             !$omp end parallel do
@@ -2720,7 +2753,11 @@ subroutine apply_ring_channels(sbe, gs, Ac, efield_au, tau)
         if (sbe%flag_dressed_ref) then
             block
                 real(8) :: dref(nba)
-                call dressed_ref_delta(nba, sbe%nv_act, sbe%occ_max, U_loc(:,:,ik), dref)
+                if (allocated(sbe%f0_act)) then
+                    call dressed_ref_delta(nba, sbe%nv_act, sbe%occ_max, U_loc(:,:,ik), dref, sbe%f0_act(:, ik))
+                else
+                    call dressed_ref_delta(nba, sbe%nv_act, sbe%occ_max, U_loc(:,:,ik), dref)
+                end if
                 f_loc(:, ik) = f_loc(:, ik) - dref(:)
             end block
         end if
@@ -3716,7 +3753,11 @@ subroutine calc_nex_nonad(sbe, gs, Ac, icomm, nex_proj, nex_dref)
         call ZGEMM('C', 'N', nba, nba, nba, cmplx(1d0, 0d0, 8), W,  nba, rho_a, nba, cmplx(0d0, 0d0, 8), t1, nba)
         call ZGEMM('N', 'N', nba, nba, nba, cmplx(1d0, 0d0, 8), t1, nba, W,     nba, cmplx(0d0, 0d0, 8), t2, nba)
         ! Option-A dressed-reference delta0 (same call the ring uses).
-        call dressed_ref_delta(nba, nv, sbe%occ_max, W, dref)
+        if (allocated(sbe%f0_act)) then
+            call dressed_ref_delta(nba, nv, sbe%occ_max, W, dref, sbe%f0_act(:, ik))
+        else
+            call dressed_ref_delta(nba, nv, sbe%occ_max, W, dref)
+        end if
         acc_p = 0d0
         acc_d = 0d0
         do c = nv + 1, nba

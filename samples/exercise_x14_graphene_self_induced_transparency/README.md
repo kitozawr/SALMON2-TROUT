@@ -123,6 +123,35 @@ S, η and the residual A-projection of any run (must be ≈ 0). With the
 restoration the transmission is independent of `nstate` (2/3/4/8 agree at 24²,
 §7.1–7.2), so production runs on the cheapest basis, `nstate = 2`.
 
+## 3b. Doped / finite-temperature initial state (a real sample)
+
+`sbe_ef_ev` (Fermi level from the Dirac point, eV) and `sbe_temp_init_k` set the
+initial occupation to occ_max·f_FD(ε; μ, T) instead of integer filling. That is
+what turns the sheet from an intrinsic semimetal into a *metal*: a partially
+filled band, a Drude weight D = 2k_BT ln[2cosh(μ/2k_BT)] → E_F, an intraband
+conductivity, and the 60–70 % THz transmission real CVD graphene has. Three
+things go with it:
+
+- **The pure-gauge reference stays undoped.** The f-sum-rule restoration of §3a
+  subtracts the adiabatic ground-state current of the truncated basis. Evaluated
+  on the *doped* occupation it would also subtract the physical intraband
+  current, which is the whole point of a doped run. The solver therefore keeps
+  `gs%occup_ref` (the undoped, T→0 filling) for that subtraction alone. The
+  doped carriers' own truncation error is smaller than their Drude weight by
+  η/⟨∂²ε/∂k²⟩ ≈ 0.28/13.5 ≈ 2 %.
+- **The mesh has to resolve the Fermi surface.** k_F = E_F/ħv_F must exceed a few
+  mesh spacings, else the density is set by a handful of points. At E_F = 0.2 eV
+  (k_F = 0.0167 a.u.) that means N ≳ 147 (9 points per valley inside the Fermi
+  disc, 3 % density error); N = 24 gives *zero* and 1.8×10¹⁰ cm⁻² instead of
+  3.4×10¹². The solver counts the partially occupied k-points at start-up and
+  warns below 20. Cheap alternative for a smoke test: raise E_F (E_F = 0.6 eV is
+  resolved at N = 48).
+- **The dressed reference and the basis-edge monitor follow the doped baseline.**
+  `dressed_ref_delta` now takes the initial occupation vector (adiabatic rotation
+  of ρ₀ minus ρ₀, still trace-neutral), and the VG basis-edge warning measures
+  the *excess* over the initial occupation — a doped metal has its top band full
+  at every k inside the Fermi surface, which is not a basis failure.
+
 ## 4. Level check — the Dirac cone the SBE runs on
 
 `python3 tests/test_graphene_dirac_levels.py`:
@@ -172,11 +201,13 @@ first x14 version. Other switches: `--nstate 2` (default; ≤ 4 at dt = 0.1 fs, 
 `--pol x|y` (in-plane polarisation; the beam is at normal incidence, k ∥ z, so E is
 always in the sheet plane), `--n-layers 2` (two electronically decoupled sheets in
 the same local field — incoherent/large-angle-twisted bilayer; `sbe_sheet_nlayers`),
-`--snap-fs 50` (k-resolved level-population snapshots for `plot_levels.py`).
+`--snap-fs 50` (k-resolved level-population snapshots for `plot_levels.py`),
+`--ef-ev 0.2 --temp-init-k 300` (a doped sheet with Drude carriers, §3b).
 
 ```bash
 python3 ../plot_levels.py runs/E100kVcm_mem/graphene_sit --times 100,150,200,300   # band populations vs t + k-maps around K
 python3 ../sumrule_check.py graphene_sit --runs 'runs/*/graphene_sit_sbe_rt.data'  # basis f-sum rule + residual reactive current
+python3 ../drude_check.py runs/*/graphene_sit_sbe_rt.data --t-meas 0.60 0.70 --n-sub 1.65  # doped sheet: D, tau, mean free path
 ```
 
 **Cost (measured 2026-09-04, 4 threads).** Coherent runs: seconds to minutes at
@@ -350,6 +381,78 @@ T_e ≈ 4×10⁴ K for 10⁸ cm⁻²); the solver now holds T_e at the lattice v
 n + p < 10⁻³ n_i(T_lattice), so `*_sbe_te.data` reads 300 K there. Real carrier
 heating (T_e in the 10³ K range, cooling on the phonon timescale) needs the
 147² production runs, where pairs are actually created.
+
+**7.7 Above 100 kV/cm — the intrinsic sheet keeps darkening (147² K-averaged and
+150², nstate = 2, pure gauge, self-consistent sheet, coherent).**
+
+| E₀ [kV/cm] | T (147²) | R | A | Re σ/σ_univ | T (150²) | A (150²) |
+|---|---|---|---|---|---|---|
+| 1 | 0.999995 | 1.2e-6 | 4e-6 | 0.000 | — | — |
+| 10 | 0.999993 | 2.4e-6 | 4e-6 | 0.000 | 0.9925 | 0.0070 |
+| 30 | 0.9995 | 2.4e-4 | 2.6e-4 | 0.03 | — | — |
+| 100 | 0.9867 | 0.0030 | 0.0103 | 0.78 | 0.9563 | 0.0370 |
+| 200 | 0.9505 | 0.0099 | 0.0396 | 2.83 | 0.9515 | 0.0389 |
+| 300 | 0.9336 | 0.0178 | 0.0486 | 4.02 | 0.9404 | 0.0459 |
+| 500 | 0.9369 | 0.0200 | 0.0430 | 3.94 | 0.9230 | 0.0535 |
+| 1000 | 0.9163 | 0.0335 | 0.0503 | 5.52 | 0.9103 | 0.0546 |
+
+Three things settle here. **(i)** The transmission of the *intrinsic* sheet falls
+monotonically over three decades of field and never rises: there is no
+self-induced transparency of undoped graphene in this model. **(ii)** The
+absorbed fraction saturates near 5 % above ~300 kV/cm, which is the analytic
+Landau-Zener value (wiki/12 §7: the pairs created per passage scale as E^{3/2}
+and their creation energy as √E, so the absorbed *energy* scales as the fluence
+and the *fraction* is field-independent). **(iii)** The two meshes, which
+differ by a factor 3.7 in A at 100 kV/cm, agree to 1–2 % above 200 kV/cm: once
+the Landau-Zener strip is several mesh cells wide the sampling ambiguity of
+§7.3 is gone. The growing reflection (3.4 % at 1000 kV/cm) and Re σ = 5.5 σ_univ
+are the Drude response of the created plasma, not an artifact — the residual
+A-projection stays below 0.005 throughout.
+
+**7.8 A doped sheet — what the measured 60 % → 70 % needs.** A sample on PET
+transmitting 60 % (substrate included) is not the intrinsic sheet of §7.7. With
+n_PET = 1.65 and two incoherent faces the bare substrate passes 88.3 %, so the
+graphene itself accounts for 0.60/0.883 = 0.68 and 0.70/0.883 = 0.79, i.e. a
+sheet conductance Z₀σ of 0.565 → 0.327, **σ = 24.7 → 14.3 σ_univ (−42 %)**.
+That is a Drude conductance: σ_dc = Dτ/π with the Dirac-cone Drude weight
+D = 2k_BT ln[2cosh(μ/2k_BT)] → E_F. E_F = 0.2 eV (n = 3.4×10¹² cm⁻²) with
+τ = 63 fs reproduces 24.7 σ_univ exactly, so that is the sample.
+
+`sbe_ef_ev` / `sbe_temp_init_k` now put that state into the solver (§3b). Which
+of the two factors, D or τ, can give −42 %?
+
+- **D cannot.** At *fixed* carrier density, heating lowers μ but adds thermal
+  carriers; D passes a shallow minimum and comes back up. Over 300–3000 K the
+  deepest excursion is 0.88 at n = 10¹³ cm⁻² and 0.90 at 3×10¹² (table in
+  `drude_check.py`, pinned by `tests/test_doped_drude.py`). Carrier heating on
+  its own is worth ~10 %, not 42 %.
+- **τ can, and so can the drift itself.** Two field scales control it. The
+  Fermi sea is displaced by the vector potential, A₀ = 6.2×10⁻⁴ a.u. per kV/cm
+  for this transient, against k_F = E_F/ħv_F = 0.0167 a.u.: they are equal at
+  **27 kV/cm**. Above that the displacement exceeds the Fermi radius every
+  half-cycle, the drift velocity saturates at v_F, and the differential
+  conductivity falls like k_F/A₀. The collisional excursion eEτ/ħ crosses k_F at
+  the same place for τ = 63 fs. Simultaneously the carriers are pushed past the
+  optical-phonon threshold (E₂g 196 meV, A₁′ 160 meV; v_F A₀ = 0.74 eV at
+  100 kV/cm), and every emission randomises momentum — τ drops.
+
+So the mechanism the measurement is showing is the one you suspected: the
+conductivity falls because the carriers stop responding linearly (mobility /
+mean free path), not because the Drude weight disappears. The onset the model
+puts at ~27 kV/cm for E_F = 0.2 eV is inside the measured range, and the
+predicted saturation is *sub-linear in the drift*, which is why the transmission
+creeps up by ten points rather than jumping.
+
+*Direct check in the solver.* A coherent doped run (147², E_F = 0.2 eV, 300 K,
+100 kV/cm) already shows it: the initial occupation gives n = 3.27×10¹² cm⁻²
+(analytic 3.36×10¹², 2.6 % mesh error, 36 partially occupied k-points), the
+Drude carriers screen the field to A_tot/A_ext = 0.87, and a least-squares fit
+of the current to dJ_s/dt = (D/π)E − J_s/τ over the pulse returns
+τ = 1.4×10³ fs (collisionless, as it must be with no dissipators) and
+**D_fit = 0.102 eV against the equilibrium D = 0.200 eV — the current
+saturation, factor 2 down, at A₀ = 3.7 k_F.** The τ half of the story needs the
+phonon ring on a mesh that resolves the Fermi surface; that is a production run
+(§6 cost note), and the settings are `--ef-ev 0.2 --temp-init-k 300 --variants diss,mem`.
 
 ## 8. What to look for at production (147², DAST)
 

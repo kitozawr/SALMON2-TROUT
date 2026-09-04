@@ -2,7 +2,7 @@
 
 module gs_info_ssbe
     use math_constants, only: pi, zI
-    use phys_constants, only: au_ev
+    use phys_constants, only: au_ev, kB_au
     implicit none
 
     type s_sbe_gs_info
@@ -16,6 +16,7 @@ module gs_info_ssbe
         real(8), allocatable :: kpoint(:, :), kweight(:)
         real(8), allocatable :: eigen(:, :)
         real(8), allocatable :: occup(:, :)
+        real(8), allocatable :: occup_ref(:, :)   ! UNDOPED, T -> 0 filling: the pure-gauge reference of the f-sum-rule restoration (wiki/12 sec. 6a); never the doped/thermal occupation
         real(8), allocatable :: delta_omega(:, :, :)
         complex(8), allocatable :: p_mod_matrix(:, :, :, :)
         ! p_tm_matrix = <u|p|u>
@@ -57,7 +58,7 @@ contains
 subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, read_bin, icomm)
     use communication
     use filesystem, only: open_filehandle, get_filehandle
-    use salmon_global, only: yn_sbe_spinor
+    use salmon_global, only: yn_sbe_spinor, sbe_ef_ev, sbe_temp_init_k
     implicit none
     type(s_sbe_gs_info), intent(inout) :: gs
     character(*), intent(in) :: sysname
@@ -84,6 +85,7 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     allocate(gs%kweight(1:nk))
     allocate(gs%eigen(1:nb, 1:nk))
     allocate(gs%occup(1:nb, 1:nk))
+    allocate(gs%occup_ref(1:nb, 1:nk))
     allocate(gs%delta_omega(1:nb, 1:nb, 1:nk))
     allocate(gs%p_mod_matrix(1:nb, 1:nb, 1:3, 1:nk))
     allocate(gs%d_matrix(1:nb, 1:nb, 1:3, 1:nk))
@@ -190,10 +192,113 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
             ' k-point(s) (T -> 0 density matrix; e.g. the Dirac point on the mesh)'
     end block
 
+    ! =====================================================================
+    ! The UNDOPED, T -> 0 filling is kept as gs%occup_ref: it is the reference
+    ! of the velocity-gauge pure-gauge restoration (wiki/12 sec. 6a). That
+    ! subtraction must remove only the truncation artifact of the FILLED sea;
+    ! evaluated on a doped/thermal occupation it would also remove the
+    ! physical intraband (Drude) current of the doping carriers, which is the
+    ! very quantity a doped sheet is run for.
+    ! =====================================================================
+    gs%occup_ref(:, :) = gs%occup(:, :)
+
+    ! =====================================================================
+    ! Doped / finite-temperature INITIAL occupation (wiki/12 sec. 4a):
+    !   f_n(k) = occ_max * f_FD(eps_n(k); mu, T_init),   mu = E_F^undoped + sbe_ef_ev
+    ! E_F^undoped = midpoint of the HOMO ceiling and the LUMO floor (the Dirac
+    ! point for graphene, mid-gap for a semiconductor). This is what gives a
+    ! partially filled band, hence a Drude weight and an intraband conductivity;
+    ! with sbe_ef_ev = 0 and T_init = 0 nothing changes (integer filling).
+    ! The added charge is NOT compensated (a gated/adsorbate-doped sheet); the
+    ! electron count per cell changes accordingly and is reported.
+    ! =====================================================================
+    if (abs(sbe_ef_ev) > 0d0 .or. sbe_temp_init_k > 0d0) then
+        block
+            integer :: ik, ib, nb_vb2, nfs
+            real(8) :: e_ref, mu_au, beta, dne, area, n2d_cm2, x
+            real(8), parameter :: BOHR_CM = 0.52917721067d-8
+            if (yn_sbe_spinor == 'y') then
+                nb_vb2 = gs%ne
+            else
+                nb_vb2 = gs%ne / 2
+            end if
+            if (nb_vb2 >= 1 .and. nb_vb2 < nb) then
+                e_ref = 0.5d0 * (maxval(gs%eigen(nb_vb2, :)) + minval(gs%eigen(nb_vb2 + 1, :)))
+            else
+                e_ref = 0d0
+            end if
+            mu_au = e_ref + sbe_ef_ev / au_ev
+            if (sbe_temp_init_k > 0d0) then
+                beta = 1d0 / (kB_au * sbe_temp_init_k)
+                do ik = 1, nk
+                    do ib = 1, nb
+                        x = beta * (gs%eigen(ib, ik) - mu_au)
+                        if (x > 60d0) then
+                            gs%occup(ib, ik) = 0d0
+                        else if (x < -60d0) then
+                            gs%occup(ib, ik) = occ_max_gs()
+                        else
+                            gs%occup(ib, ik) = occ_max_gs() / (1d0 + exp(x))
+                        end if
+                    end do
+                end do
+            else
+                do ik = 1, nk
+                    do ib = 1, nb
+                        if (gs%eigen(ib, ik) < mu_au - 1d-9) then
+                            gs%occup(ib, ik) = occ_max_gs()
+                        else if (gs%eigen(ib, ik) > mu_au + 1d-9) then
+                            gs%occup(ib, ik) = 0d0
+                        else
+                            gs%occup(ib, ik) = 0.5d0 * occ_max_gs()
+                        end if
+                    end do
+                end do
+            end if
+            ! Fermi-surface resolution: a doped metal is representable on a
+            ! uniform mesh only if enough k-points fall in the FD transition
+            ! ring. Count the partially occupied points (5..95 % filling); for
+            ! a Dirac cone at E_F this is ~ the perimeter 2 pi k_F / dk per
+            ! valley. Too few -> the density and the Drude weight are set by a
+            ! handful of points and the intraband response is meaningless.
+            nfs = count(gs%occup > 0.05d0 * occ_max_gs() .and. gs%occup < 0.95d0 * occ_max_gs())
+            dne = sum(gs%occup) / dble(nk) - sum(gs%occup_ref) / dble(nk)
+            area = sqrt(max(dot_product(cross3(gs%a_matrix(1:3,1), gs%a_matrix(1:3,2)), &
+                                        cross3(gs%a_matrix(1:3,1), gs%a_matrix(1:3,2))), 1d-300))
+            n2d_cm2 = dne / (area * BOHR_CM**2)
+            if (irank == 0) then
+                write(*, '(a,f8.4,a,f8.1,a)') '# doped/thermal initial occupation: E_F = ', sbe_ef_ev, &
+                    ' eV from the undoped level, T_init = ', sbe_temp_init_k, ' K'
+                write(*, '(a,es12.5,a,es12.5,a)') '#   added charge = ', dne, &
+                    ' e/cell  ->  sheet density = ', n2d_cm2, ' cm^-2 (2D cell area used)'
+                write(*, '(a)') '#   pure-gauge f-sum-rule reference stays the UNDOPED filling (wiki/12 sec. 6a)'
+                write(*, '(a,i0,a)') '#   partially occupied k-points (Fermi surface on the mesh): ', nfs, &
+                    ' -- the intraband/Drude response is carried by these'
+                if (nfs < 20 .and. abs(dne) > 0d0) write(*, '(a)') &
+                    '#   WARNING: the Fermi surface is UNDER-RESOLVED (< 20 partially occupied k-points):'// &
+                    ' the carrier density and the Drude weight are set by a few mesh points.'// &
+                    ' Raise num_kgrid (k_F = E_F/hbar v_F must exceed a few mesh spacings) or |sbe_ef_ev|.'
+            end if
+        end block
+    end if
+
     ! Calculate minimum band gap in atomic units (for gauge-covariant decoherence)
     call calc_eg_au()
 
 contains
+
+    pure function occ_max_gs() result(o)
+        real(8) :: o
+        o = merge(1d0, 2d0, yn_sbe_spinor == 'y')
+    end function occ_max_gs
+
+    pure function cross3(u, v) result(w)
+        real(8), intent(in) :: u(3), v(3)
+        real(8) :: w(3)
+        w(1) = u(2) * v(3) - u(3) * v(2)
+        w(2) = u(3) * v(1) - u(1) * v(3)
+        w(3) = u(1) * v(2) - u(2) * v(1)
+    end function cross3
 
     ! Calculate lattice and reciprocal vectors
     subroutine calc_lattice_info()

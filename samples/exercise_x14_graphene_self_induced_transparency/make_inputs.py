@@ -175,6 +175,9 @@ SBE_MEM = (
     "                                 ! (T_e from the cone moments; lattice cools via e-ph) -> *_sbe_te.data\n"
 )
 SBE_SHEET = "  yn_sbe_sheet_field    = 'y'    ! 2D-sheet self-consistent (radiation-reaction) field\n"
+SBE_DOPED = ("  ! ---- doped / finite-temperature initial occupation (wiki/12 sec. 4a) ----\n"
+             "  sbe_ef_ev             = {ef:.4f}d0  ! Fermi level from the Dirac point -> Drude carriers\n"
+             "  sbe_temp_init_k       = {ti:.1f}d0    ! temperature of the initial occupation\n")
 SBE_SUMRULE = ("  yn_sbe_vg_sumrule     = 'y'    ! velocity-gauge pure-gauge restoration: J(t) -= adiabatic ground-\n"
                "                                 ! state current of the same truncated H_k(A(t)) (parameter-free;\n"
                "                                 ! = eta N_e A/V at linear order, exact beyond; wiki/12 sec. 6a)\n")
@@ -225,6 +228,11 @@ def main():
     ap.add_argument('--hw-ev', type=float, default=0.8, help='acos2 photon energy')
     ap.add_argument('--cycles', type=float, default=8.0, help='acos2 tw in cycles')
     ap.add_argument('--pol', choices=('x', 'y'), default='x', help='in-plane polarisation: x = along a1 (zigzag), y = perpendicular (armchair)')
+    ap.add_argument('--ef-ev', type=float, default=0.0,
+                    help='initial Fermi level from the Dirac point [eV]: a DOPED sheet with Drude carriers '
+                         '(0.2 eV = 3e12 cm^-2, the CVD-on-PET range). Needs a dissipative variant for a finite Drude time.')
+    ap.add_argument('--temp-init-k', type=float, default=0.0,
+                    help='temperature of the initial occupation [K] (0 = sharp step); use 300 with --ef-ev for a real sample')
     ap.add_argument('--outdir', default='.')
     args = ap.parse_args()
     if args.nk % 3:
@@ -254,6 +262,9 @@ def main():
         nt = int(round((tw_fs + args.tail_fs) / args.dt_fs))
         man.append(f'# x14 scan: Acos2 hw={args.hw_ev} eV, {args.cycles:g} cycles (tw={tw_fs:.1f} fs) + {args.tail_fs:g} fs tail;'
                    f' nk={args.nk}, dt={args.dt_fs} fs, nt={nt}; sheet field {"off" if args.no_sheet else "ON"}')
+    if args.ef_ev != 0.0 or args.temp_init_k > 0.0:
+        man.append(f'# DOPED sheet: E_F = {args.ef_ev} eV from the Dirac point, T_init = {args.temp_init_k} K'
+                   f' (Drude carriers; the pure-gauge reference stays the undoped filling)')
     man.append(f'{"E[kV/cm]":>9} {"I[W/cm2]":>10} {"A0[a.u.]":>10}  file/drive')
 
     for ekv in fields + [0.0]:
@@ -290,6 +301,8 @@ def main():
                 sbe = SBE_COMMON_RING.format(temp=args.temp_k, eps=args.eps_r, sigma=args.sigma_ev) + SBE_MEM + sheet
             else:
                 sys.exit(f'unknown variant {tag}')
+            if args.ef_ev != 0.0 or args.temp_init_k > 0.0:
+                sbe = SBE_DOPED.format(ef=args.ef_ev, ti=args.temp_init_k) + sbe
             if ekv == 0:
                 emfield = EM_DARK
                 drive_line = 'zero-field CONTROL (Rana drift, T_e = bath).'

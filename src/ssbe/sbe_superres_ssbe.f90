@@ -2386,13 +2386,32 @@ contains
     ! Composes with the collisional-memory filters: subtract BEFORE the
     ! gather/gate/filter, so the linear pop filter smooths f - delta0.
     ! =====================================================================
-    pure subroutine dressed_ref_delta(nba, nv, occ, W, delta)
+    ! f0_in (optional): the actual INITIAL diagonal occupation of the active
+    ! bands at this k. Present for a doped / finite-temperature sheet, where the
+    ! reference is no longer "nv full bands, the rest empty":
+    !     delta_a = sum_b f0_b |W(b,a)|^2 - f0_a
+    ! i.e. the adiabatically rotated initial state minus the initial state --
+    ! still trace-neutral (sum_a delta_a = 0 by unitarity) and still zero at
+    ! A -> 0. Without it the integer-filling form is used (identical result when
+    ! f0 = {occ, ..., occ, 0, ..., 0}).
+    pure subroutine dressed_ref_delta(nba, nv, occ, W, delta, f0_in)
         integer, intent(in) :: nba, nv
         real(8), intent(in) :: occ
         complex(8), intent(in) :: W(nba, nba)
         real(8), intent(out) :: delta(nba)
-        integer :: a, v
+        real(8), intent(in), optional :: f0_in(nba)
+        integer :: a, v, b
         real(8) :: f0
+        if (present(f0_in)) then
+            do a = 1, nba
+                f0 = 0d0
+                do b = 1, nba
+                    f0 = f0 + f0_in(b) * abs(W(b, a))**2
+                end do
+                delta(a) = f0 - f0_in(a)
+            end do
+            return
+        end if
         do a = 1, nba
             f0 = 0d0
             do v = 1, min(nv, nba)

@@ -639,6 +639,8 @@ contains
       & yn_sbe_rana_te, &
       & yn_sbe_sheet_field, &
       & sbe_sheet_nlayers, &
+      & sbe_ef_ev, &
+      & sbe_temp_init_k, &
       & yn_sbe_vg_sumrule, &
       & yn_sbe_full_dressed, &
       & yn_sbe_eeh, &
@@ -1139,6 +1141,8 @@ contains
     yn_sbe_rana_te          = 'n'        ! 'y': two-temperature Coulomb sector (graphene Rana R-G at the carrier T_e)
     yn_sbe_sheet_field      = 'n'        ! 'y': 2D-sheet self-consistent field (E_tot = transmitted field; needs a slab cell)
     sbe_sheet_nlayers       = 1          ! identical decoupled sheets in the same self-consistent field (incoherent bilayer = 2)
+    sbe_ef_ev               = 0d0        ! initial Fermi level from the undoped one [eV] (doped sheet: Drude carriers)
+    sbe_temp_init_k         = 0d0        ! temperature of the initial occupation [K] (0 = T -> 0 step)
     yn_sbe_vg_sumrule       = 'n'        ! 'y': velocity-gauge pure-gauge restoration (subtract the adiabatic ground-state current of the truncated basis)
     yn_sbe_full_dressed     = 'y'        ! 'y' (default): ring dressed projection on the FULL basis (correct); 'n': frozen-window truncation (fast, over-generates)
     yn_sbe_eeh              = 'n'        ! 'y': carrier-carrier (e-e/e-h) thermalization channel
@@ -1839,6 +1843,8 @@ contains
     call comm_bcast(yn_sbe_rana_te,          nproc_group_global)
     call comm_bcast(yn_sbe_sheet_field,      nproc_group_global)
     call comm_bcast(sbe_sheet_nlayers,       nproc_group_global)
+    call comm_bcast(sbe_ef_ev,               nproc_group_global)
+    call comm_bcast(sbe_temp_init_k,         nproc_group_global)
     call comm_bcast(yn_sbe_vg_sumrule,       nproc_group_global)
     call comm_bcast(yn_sbe_full_dressed,     nproc_group_global)
     call comm_bcast(yn_sbe_eeh,              nproc_group_global)
@@ -2899,6 +2905,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_rana_te', yn_sbe_rana_te
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_sheet_field', yn_sbe_sheet_field
       write(fh_variables_log, '("#",4X,A,"=",I4)')      'sbe_sheet_nlayers', sbe_sheet_nlayers
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)')   'sbe_ef_ev', sbe_ef_ev
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)')   'sbe_temp_init_k', sbe_temp_init_k
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_vg_sumrule', yn_sbe_vg_sumrule
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_sbe_full_dressed', yn_sbe_full_dressed
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_eeh', yn_sbe_eeh

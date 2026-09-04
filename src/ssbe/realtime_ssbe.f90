@@ -513,12 +513,17 @@ subroutine main_realtime_ssbe(icomm)
             ! study (criterion (b)) to confirm.
             if (ib_top > 0) then
                 call calc_bloch_population_k(sbe, gs, Ac_tot_t(:, it), ib_top, pop_top_k, icomm)
-                ptop = maxval(pop_top_k)
+                ! EXCESS over the initial occupation of that band: a doped metal
+                ! legitimately has the top band filled at every k inside the Fermi
+                ! surface, which is not a basis-edge failure. Identical to the bare
+                ! population for an undoped run (top band initially empty).
+                ptop = maxval(pop_top_k(:) - gs%occup(ib_top, :))
                 if (irank == 0 .and. vg_ptop_exceeds(ptop, PTOP_TOL)) then
                     write(error_unit, '(a,es10.3,a,es10.3,a,f10.3,a,i0,a)') &
                         ' WARNING: VG basis edge reached -- P_top = ', ptop, &
                         ' > ', PTOP_TOL, ' at t = ', t * au_fs, &
-                        ' fs (top band ', ib_top, '). Increase N_b (nstate) and re-check convergence.'
+                        ' fs (top band ', ib_top, ', excess over the initial occupation).'// &
+                        ' Increase N_b (nstate) and re-check convergence.'
                 end if
             end if
         end if
