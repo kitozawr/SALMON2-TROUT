@@ -258,9 +258,28 @@ python3 ../drude_check.py runs/*/graphene_sit_sbe_rt.data --t-meas 0.60 0.70 --n
 exponential-bound — ≈ 60 ms/step at 24² with the THz drive (all cone states are
 sources) ⇒ ≈ 84 s/step at 147² on 4 threads ⇒ **≈ 7 s/step on 48 threads ⇒ ≈ 7.5 h
 per 3844-step run**. Levers: `--dt-fs 0.2` (halves it; the CF4 unitary is exact
-per step, check `nex` against 0.1 fs), `--tail-fs 0` (−25 %), MPI ranks over k
-(the ring gather is MPI-parallel, `wiki/11`). Essential set = 100 kV/cm ×
-{coh, diss, mem} + `dark_mem`.
+per step, check `nex` against 0.1 fs), MPI ranks over k (the ring gather is
+MPI-parallel, `wiki/11`). Essential set = 100 kV/cm × {coh, diss, mem} + `dark_mem`.
+
+**Do not economise on `--tail-fs`.** The 100 fs ring-down after the 284 fs transient
+looks like 25 % of the cost for nothing, but the sheet current is still ringing when
+the drive ends, and every reported number is a fluence integral. Measured at 72²,
+E_F = 0.6 eV, coherent, with and without it:
+
+| E₀ [kV/cm] | 3 | 10 | 30 | 100 | 300 |
+|---|---|---|---|---|---|
+| T, `--tail-fs 0` | 0.6846 | 0.6807 | 0.6439 | 0.6454 | 0.7495 |
+| T, `--tail-fs 100` | 0.7093 | 0.7053 | 0.6679 | 0.6713 | 0.7739 |
+| A, `--tail-fs 0` | 0.0589 | 0.0593 | 0.0592 | 0.0554 | 0.0775 |
+| A, `--tail-fs 100` | 0.0095 | 0.0100 | 0.0112 | 0.0035 | 0.0287 |
+
+T comes out 0.024 low at every field (the shape survives, the absolute value does
+not) and the absorption of a *coherent* run — which has no dissipation at all and
+must be near zero away from pair creation — is inflated six-fold, because the
+transmitted fluence that is still in flight at the last step is simply not counted.
+`transmission.py` now also refuses to analyse a record shorter than the run's own
+`nt` (`--allow-partial` overrides), so a job that is still going cannot quietly
+contribute a number.
 
 ## 7. Local validation (2026-09-04, 4 threads, container)
 

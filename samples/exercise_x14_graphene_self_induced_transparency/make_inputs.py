@@ -220,7 +220,11 @@ def main():
     ap.add_argument('--fields', default='1,3,10,30,100', help='peak fields [kV/cm]')
     ap.add_argument('--variants', default='coh,diss,mem')
     ap.add_argument('--dt-fs', type=float, default=0.1)
-    ap.add_argument('--tail-fs', type=float, default=100.0, help='field-free evolution after the pulse')
+    ap.add_argument('--tail-fs', type=float, default=100.0,
+                    help='field-free evolution after the pulse. KEEP IT: the sheet current '
+                         'is still ringing when the drive ends and every reported number is '
+                         'a fluence integral, so cutting the tail biases T low by ~0.02 and '
+                         'inflates A several-fold (README sec. 6)')
     ap.add_argument('--no-sheet', action='store_true', help='switch the self-consistent sheet field off')
     ap.add_argument('--temp-k', type=float, default=300.0)
     ap.add_argument('--eps-r', type=float, default=10.0)

@@ -226,7 +226,7 @@ undoped one -- the Dirac point here, mid-gap in a semiconductor) and
 `sbe_temp_init_k` replace the integer filling by
 $$
 f_n(\mathbf k)=\text{occ}_{\max}\,f_{\rm FD}\!\big(\varepsilon_n(\mathbf k);\ \mu,\ T_{\rm init}\big),
-\qquad \mu=E_F^{\rm undoped}+\texttt{sbe\_ef\_ev}, \tag{5}
+\qquad \mu=E_F^{\rm undoped}+\texttt{sbe\_ef\_ev}, \tag{4a.4}
 $$
 with the added charge left uncompensated (a gated or adsorbate-doped sheet) and
 reported per cell and as a sheet density. Three couplings in the solver had to
@@ -275,7 +275,7 @@ all. The start-up banner counts the partially occupied points and warns below 20
 ![initial level occupation, undoped and doped, on the 147x147 mesh](figures/graphene_doped_levels.png)
 
 *The initial density matrix the solver starts from, on the same $147^2$ mesh
-(`plot_occupation.py`, which applies Eq. (5) to the ground-state files).* **Left** --
+(`plot_occupation.py`, which applies Eq. (4a.4) to the ground-state files).* **Left** --
 the undoped filling: the valence cone full, the conduction cone empty, nothing
 partially occupied, $n_{2D}=0$. **Middle** -- $E_F=0.2$ eV, $T_{\rm init}=300$ K:
 the conduction cone is filled up to $E_F$, which adds $1.71\times10^{-3}$
@@ -307,7 +307,7 @@ $k_F\simeq3\,\Delta k$. Quantitative Drude work therefore wants $k_F\gtrsim3\,\D
 The sheet conductance of a Drude metal is $\sigma_{dc}=D\tau/\pi$ with the
 Dirac-cone Drude weight
 $$
-D(\mu,T)=2k_BT\,\ln\!\big[2\cosh(\mu/2k_BT)\big]\ \longrightarrow\ |\mu|\quad(\mu\gg k_BT). \tag{6}
+D(\mu,T)=2k_BT\,\ln\!\big[2\cosh(\mu/2k_BT)\big]\ \longrightarrow\ |\mu|\quad(\mu\gg k_BT). \tag{4a.7}
 $$
 A field-induced *rise* of transmission must therefore reduce $D$, reduce $\tau$, or
 break the linear relation between current and field. All three are separable:
@@ -457,7 +457,7 @@ $$
 $k_F$ being the only reciprocal length the doping introduces ($n_{2D}=k_F^2/\pi$;
 $E_F=0.2$ eV gives $k_F=0.0167\ a_0^{-1}$ and $3.2\times10^{12}$ cm⁻²). It is not a
 fitted quantity and not a numerical parameter: it is the radius of the initial
-occupation Eq. (5) puts on the mesh, and `plot_occupation.py` prints and draws it.
+occupation Eq. (4a.4) puts on the mesh, and `plot_occupation.py` prints and draws it.
 
 The drive enters through the vector potential, and in the velocity gauge $\mathbf A$
 is *literally a displacement in reciprocal space*: $H_{\mathbf k}(\mathbf A)$ has the
@@ -666,7 +666,7 @@ run of the x14 README §6, not a laptop calculation. Accordingly the comparison 
 quantitative; the coherent runs give the shape of $T(E_0)$, the dissipative ones its
 character.
 
-*Discretization.* The one caveat. Equation (4a.7) is a continuum statement; a mesh
+*Discretization.* The one caveat. Equation (4a.12) is a continuum statement; a mesh
 represents it only as well as it fills the Fermi disc. Evaluating the same adiabatic
 sum on real meshes:
 
@@ -693,7 +693,7 @@ test, because a physical darkening would not care about the mesh:
 
 Halving the mesh bump halves the dip, and its position tracks the bump rather than any
 field scale of the physics. As the disc is filled further the bump shrinks ($300^2$:
-1.06 at its worst) and the curve converges onto Eq. (4a.7).
+1.06 at its worst) and the curve converges onto Eq. (4a.13).
 
 Two deviations must not be confused with it. At **large $u$** the mesh curves lie
 systematically above the continuum ($0.31$ against $0.199$ at $u=5$): there the

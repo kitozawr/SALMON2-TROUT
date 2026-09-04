@@ -70,7 +70,7 @@ def continuum_curve(e0, sig_c0, ef_ev, t_init_k, t0=None):
 
     The velocity-gauge displacement k -> k + A turns the direction of a Dirac-cone
     velocity but not its modulus, so the chord response of the whole doped disc is
-    sigma(E_0) = sigma_lin * G(u)/u with u = A_0/k_F (wiki/12 Eqs. 4a.7-4a.13). Only
+    sigma(E_0) = sigma_lin * G(u)/u with u = A_0/k_F (wiki/12 Eqs. 4a.9-4a.13). Only
     that field dependence is the model. The anchor is the run's OWN lowest-field
     point: the PHASE of z = Z_0 sigma is the band-averaged complex conductivity of
     that run (how resistive vs how inductive the sheet is), and its MODULUS is fixed
@@ -146,13 +146,12 @@ def main(argv=None):
         if args.continuum:
             tc = continuum_curve(arr[:, 0], asig[0], aef, atk, t0=arr[0, 1])
             if tc is not None:
-                ax[0].semilogx(arr[:, 0], tc, ':', lw=1.6, color=col,
-                               label=f'continuum $G(u)/u$, {lab}')
+                ax[0].semilogx(arr[:, 0], tc, ':', lw=1.4, color=col, alpha=0.75)
     if args.continuum:
         tc = continuum_curve(dop[:, 0], dsig[0], ef, tinit, t0=dop[0, 1])
         if tc is not None:
             ax[0].semilogx(dop[:, 0], tc, ':', lw=1.6, color='#c0392b',
-                           label='continuum drift saturation $G(u)/u$')
+                           label='continuum drift saturation $G(u)/u$ (dotted, per series)')
             uu = dop[:, 0] * A0_PER_KVCM / kF if kF else np.zeros(len(dop))
             lo = uu <= 1.0
             if lo.any():

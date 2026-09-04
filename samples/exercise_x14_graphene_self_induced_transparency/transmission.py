@@ -123,6 +123,43 @@ def band_tra(t, E_inc, E_t, E_r, J_sheet, n_sub=1.0, halfwidth=None):
     return T, R, 1.0 - T - R, re_sig / SIGMA_UNIV, w0, sig_c / SIGMA_UNIV
 
 
+def stack_from_one_layer(t, E_inc, E_t, J_sheet, n_layers, n_sub=1.0, floor=1e-8):
+    """Fluence transmission of N identical decoupled sheets, from a ONE-layer run.
+
+    The single-frequency estimate T_N = |2/(2+N z)|^2 with one band-averaged z is too
+    crude for a single-cycle transient: sigma(omega) varies across a band as wide as
+    its own centre, and the fluence ratio is not the ratio at the centroid. Here the
+    sheet's own frequency-resolved response is used instead,
+
+        sigma(omega) = J_s(omega) / E_t(omega),     T_N = int |2 E_inc/(2 + N Z0 sigma)|^2 / int |E_inc|^2,
+
+    which reproduces the explicitly propagated two-layer run to ~1 % where the single-
+    frequency formula is off by 12 %. Bins with negligible incident weight are dropped
+    (`floor`, relative to the spectral peak) so the division does not amplify noise.
+    Valid while the response is LINEAR. Each layer of a real stack sees the field
+    reduced by both currents, so once drift saturation is under way the prediction
+    fails in a definite direction: the weaker local field pushes every layer back
+    towards its more conductive small-u response, and the true stack is DARKER than
+    predicted. Against explicit two-layer runs at E_F = 0.6 eV, 72^2 (u = A_0/k_F):
+
+        E_0 [kV/cm]      3      10      30     100     300
+        u             0.04    0.12    0.37    1.24    3.71
+        predicted   0.4292  0.4239  0.3758  0.3868  0.6004
+        propagated  0.4362  0.4341  0.4128  0.3778  0.4715
+
+    i.e. ~2 % while u < 0.15 and useless by u ~ 4. Nothing about a stack of doped
+    sheets in a strong field can be obtained by scaling one run."""
+    Ei = np.fft.rfft(E_inc)
+    Et = np.fft.rfft(E_t)
+    Js = np.fft.rfft(J_sheet)
+    P = np.abs(Ei)**2
+    m = P > floor * P.max()
+    z = np.zeros_like(Js)
+    z[m] = (4.0 * np.pi / C_AU) * Js[m] / Et[m]
+    tN = 2.0 / (2.0 + n_layers * z)
+    return n_sub * np.sum(np.abs(tN[m] * Ei[m])**2) / np.sum(P[m])
+
+
 def spectral_tra(t, E_inc, E_t, E_r, n_sub=1.0, w0=None):
     """Single-bin (T, R, A, omega) at the carrier. Kept for the unit test on a
     long quasi-monochromatic pulse; NOT used in the report (see module doc)."""
@@ -299,6 +336,10 @@ def main(argv=None):
                     help='identical decoupled sheets in the same field (default: sbe_sheet_nlayers of the run, else 1); '
                          'pert mode only -- a self-consistent run already carries it in E_tot')
     ap.add_argument('--plot', action='store_true', help='write transmission_scan.png (needs matplotlib)')
+    ap.add_argument('--predict-layers', type=int, default=None, metavar='N',
+                    help='also print the fluence transmission of N identical decoupled '
+                         'sheets predicted from this ONE-layer run via its own '
+                         'frequency-resolved sigma(omega) (see stack_from_one_layer)')
     ap.add_argument('--allow-partial', action='store_true',
                     help='analyse records shorter than the run\'s own nt (default: refuse -- '
                          'the fluence integrals of a half-finished run are meaningless)')
@@ -327,10 +368,18 @@ def main(argv=None):
             print(f'# SKIPPED (incomplete): {exc}')
             continue
         rows.append(r)
+        if args.predict_layers:
+            dd = read_rt(f)
+            axx = r['axis']
+            Ei = dd[f'E_ext_{axx}']
+            Ett = dd.get(f'E_tot_{axx}', Ei)
+            Jss = -dd[f'Jm_{axx}'] * args.lz_bohr * r['n_layers']
+            r['T_stack'] = stack_from_one_layer(dd['Time'], Ei, Ett, Jss,
+                                                args.predict_layers / r['n_layers'], args.n_sub)
         sp = r.get('shell_pts', np.nan)
         print(f'{r["E0_kvcm"]:10.3f} {r["I_wcm2"]:10.3e} {r["hw_ev"]:7.3f} {r["mode"]:>4} {r["dEt"]:8.1e} {r["T"]:9.6f} '
               f'{r["R"]:9.2e} {r["A"]:9.6f} {r["A_energy"]:9.6f} {r["S_rr"]:9.2e} {r["T_band"]:8.5f} {r["resig"]:7.3f} '
-              f'{sp:6.2f}  {f}')
+              f'{sp:6.2f}  ' + (f'T{args.predict_layers}={r["T_stack"]:.5f}  ' if 'T_stack' in r else '') + f'{f}')
     if rows and rows[0].get('nk'):
         sp = rows[0].get('shell_pts', np.nan)
         flag = 'RESOLVED' if sp >= 3 else ('marginal' if sp >= 1 else 'UNRESOLVED -- the mesh sees a few discrete'
