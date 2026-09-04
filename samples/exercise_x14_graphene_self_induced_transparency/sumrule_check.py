@@ -153,7 +153,10 @@ def main(argv=None):
     if files:
         print('# eta_dyn = A-projection of the sheet current in units of the diamagnetic N_e A/area (the reactive'
               ' artifact; ~0 after the pure-gauge restoration); eta_res = the same after subtracting the adiabatic'
-              ' ground-state current of this truncated basis (run flag yn_sbe_vg_sumrule auto-detected: corr = y/n)')
+              ' ground-state current of this truncated basis (run flag yn_sbe_vg_sumrule auto-detected: corr = y/n).')
+        print('# NOTE for a DOPED run (sbe_ef_ev): a partially filled band has a REAL inductive current, so eta_res'
+              ' is then the physical Drude weight in units of N_e/area, not an artifact -- eta_res * N_e/A_2D = D/pi'
+              ' (use drude_check.py, which separates D and tau).')
         print(f'{"eta_dyn":>8} {"eta_res":>8} {"corr":>4} {"corr(J,A)":>9} {"|J|peak":>9} {"A_tot/A_ext":>11} {"T":>9} {"R":>9} {"A":>9}  file')
         for f in files:
             r = dynamic_eta(f, ne, args.area_bohr2, args.lz_bohr, gs=(k, w, eig, p), nval=args.nval)

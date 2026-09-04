@@ -7,7 +7,7 @@
 
 ## Abstract
 
-We describe the graphene branch of the SALMON2-TROUT semiconductor-Bloch-equation (SBE) solver, built to study field-induced transparency / absorption of a monolayer graphene sheet under 1–100 kV/cm single-cycle THz transients (the maintainer's DAST source) and near-infrared pulses. Three elements were added to the general velocity-gauge, completely-positive (GKLS) SBE machinery: (i) a **collisional-memory (non-Markovian) treatment of the ring dissipators adapted to the gapless Dirac cone** — the electron–phonon sectors keep their phonon-line kernels while the Coulomb (Auger / carrier-multiplication) sector, which on the cone is a *global* rate model, receives the 2D Dirac-plasmon line of the instantaneous electron–hole plasma as its memory kernel; (ii) a **two-temperature description of the Coulomb sector**, in which a carrier temperature $T_e$ and the quasi-Fermi levels are read from the first two moments of the gathered Dirac-cone populations while the lattice stays at the phonon-bath temperature and cools the carriers through the phonon channel; (iii) a **self-consistent sheet field** (radiation reaction) in the single-cell driver, so that the total field written by the solver *is* the transmitted field and the transmission coefficient follows from the field before and after the sheet. A fourth element turned out to be indispensable at THz: a **parameter-free pure-gauge restoration of the velocity-gauge current** — a truncated basis cancels only part of the diamagnetic current of the filled π band (70 % for two bands), the remainder, proportional to $A=E/\omega$, turns the sheet into a plasma mirror, and the fitted linear correction first tried over-corrects at high field and makes the self-consistent sheet unstable; subtracting the adiabatic ground-state current of the same truncated Hamiltonian removes the artifact exactly at every field with no adjustable quantity (§6a). We give the equations, the numerical realization, the cost scaling ($O(N_k^2)$ for the graphene ring), the k-mesh rules (resonance-shell resolution; Dirac point on the half-shifted Monkhorst–Pack mesh only for odd multiples of 3; Zener excursion $A_0$ versus mesh spacing), the unit tests that pin each piece, and the calculation-level validations. A level check performed on the way exposed and removed a spurious 0.21 eV gap at the Dirac point of the previously used 7-plane-wave empirical pseudopotential basis.
+We describe the graphene branch of the SALMON2-TROUT semiconductor-Bloch-equation (SBE) solver, built to study field-induced transparency / absorption of a monolayer graphene sheet under 1–100 kV/cm single-cycle THz transients (the maintainer's DAST source) and near-infrared pulses. Three elements were added to the general velocity-gauge, completely-positive (GKLS) SBE machinery: (i) a **collisional-memory (non-Markovian) treatment of the ring dissipators adapted to the gapless Dirac cone** — the electron–phonon sectors keep their phonon-line kernels while the Coulomb (Auger / carrier-multiplication) sector, which on the cone is a *global* rate model, receives the 2D Dirac-plasmon line of the instantaneous electron–hole plasma as its memory kernel; (ii) a **two-temperature description of the Coulomb sector**, in which a carrier temperature $T_e$ and the quasi-Fermi levels are read from the first two moments of the gathered Dirac-cone populations while the lattice stays at the phonon-bath temperature and cools the carriers through the phonon channel; (iii) a **self-consistent sheet field** (radiation reaction) in the single-cell driver, so that the total field written by the solver *is* the transmitted field and the transmission coefficient follows from the field before and after the sheet; and (iv) a **doped / finite-temperature initial occupation**, which turns the intrinsic semimetal into the metal a real sample is and gives it a Drude sector, with the velocity-gauge pure-gauge reference kept undoped so that the physical intraband current survives the correction of point (v). A further element turned out to be indispensable at THz (v): a **parameter-free pure-gauge restoration of the velocity-gauge current** — a truncated basis cancels only part of the diamagnetic current of the filled π band (70 % for two bands), the remainder, proportional to $A=E/\omega$, turns the sheet into a plasma mirror, and the fitted linear correction first tried over-corrects at high field and makes the self-consistent sheet unstable; subtracting the adiabatic ground-state current of the same truncated Hamiltonian removes the artifact exactly at every field with no adjustable quantity (§6a). We give the equations, the numerical realization, the cost scaling ($O(N_k^2)$ for the graphene ring), the k-mesh rules (resonance-shell resolution; Dirac point on the half-shifted Monkhorst–Pack mesh only for odd multiples of 3; Zener excursion $A_0$ versus mesh spacing), the unit tests that pin each piece, and the calculation-level validations. A level check performed on the way exposed and removed a spurious 0.21 eV gap at the Dirac point of the previously used 7-plane-wave empirical pseudopotential basis.
 
 ---
 
@@ -86,6 +86,132 @@ with the closed forms $n_D(0,T)=\frac{\pi}{6}(k_BT/v_F)^2$ and $\varepsilon_D(0,
 $k_BT_e$ replaces the bath temperature in every carrier-side quantity of the Coulomb sector: the R07 integrals, $Q_{TF}$, the plasmon line and its thermal split. The phonon Bose factors keep the lattice temperature. **No separate rate equation for $T_e$ is integrated**: heating by the field and cooling by optical/acoustic phonon emission are already contained in the SBE kinetics; the two-temperature model is realized by *reading* $T_e$ from the distribution at every ring step. The time series $(T_e,\mu_c,\mu_h,n,p,n_i(T_e))$ is written to `*_sbe_te.data`. Interpretation: for a hot, non-thermal photo-excited shell the fit returns an effective temperature at which the R07 channel *generates* pairs toward $n_i(T_e)$ — the carrier-multiplication regime of graphene [8,9] — and switches to recombination as phonon cooling lowers $T_e$.
 
 Unit test `tests/test_dirac_te_fit.f90`: the closed form of $\varepsilon_D(0,T)$; explicit 2D-mesh moments of thermal populations reproduce $n_D,\varepsilon_D$ to $0.5\%$ and the fit recovers $T$ to $10^{-4}$ and $\mu$ to $10^{-4}k_BT$; the degenerate case $E_F=0.3$ eV at 300 K; fallbacks; monotonicity.
+
+## 4a. The doped sheet: initial occupation, the Drude sector, and the field scales of transparency
+
+### 4a.1 Initial occupation
+Everything above describes an *intrinsic* sheet: integer filling, $f_v=2$, $f_c=0$.
+A real CVD sample is a metal. `sbe_ef_ev` (the Fermi level measured from the
+undoped one -- the Dirac point here, mid-gap in a semiconductor) and
+`sbe_temp_init_k` replace the integer filling by
+$$
+f_n(\mathbf k)=\text{occ}_{\max}\,f_{\rm FD}\!\big(\varepsilon_n(\mathbf k);\ \mu,\ T_{\rm init}\big),
+\qquad \mu=E_F^{\rm undoped}+\texttt{sbe\_ef\_ev}, \tag{5}
+$$
+with the added charge left uncompensated (a gated or adsorbate-doped sheet) and
+reported per cell and as a sheet density. Three couplings in the solver had to
+follow.
+
+**(i) The pure-gauge reference must stay undoped.** The restoration of §6a
+subtracts the adiabatic ground-state current of the truncated $H_{\mathbf k}(\mathbf A)$.
+For a *filled* band that current is the truncation artifact and nothing else. For
+a *partially filled* band the same object is the physical intraband response --
+the shifted Fermi sea *is* the Drude current -- so subtracting it would delete the
+quantity a doped run exists to compute. The solver therefore keeps the undoped
+$T\to0$ filling in `gs%occup_ref` and uses it, and only it, in Eq. (10). What
+remains uncorrected is the doped carriers' own truncation error: each carries an
+uncancelled diamagnetic unit against a Drude weight per carrier
+$\langle\partial^2\varepsilon/\partial k_a^2\rangle=v_F/k_F$, i.e. a relative
+error $k_F/v_F\approx3.8\,\%$ at $E_F=0.2$ eV, falling as $1/E_F$.
+
+**(ii) The dressed reference follows the doped baseline.** `dressed_ref_delta`
+now accepts the initial diagonal $f^{(0)}$ and returns
+$\delta_a=\sum_b f^{(0)}_b|W_{ba}|^2-f^{(0)}_a$ -- the adiabatically rotated
+initial state minus the initial state. Trace-neutral by unitarity, zero at
+$\mathbf A\to0$, and identical to the old form when $f^{(0)}$ is
+$\{\text{occ},\dots,\text{occ},0,\dots\}$.
+
+**(iii) The basis-edge monitor measures an excess.** $P_{\rm top}$ is now
+$\max_{\mathbf k}[f_{\rm top}(\mathbf k)-f^{(0)}_{\rm top}(\mathbf k)]$: a metal
+legitimately fills its top band at every $\mathbf k$ inside the Fermi surface,
+which is not a velocity-gauge basis failure.
+
+### 4a.2 The mesh a Fermi surface needs
+A uniform mesh represents a Fermi sea only if $k_F=E_F/\hbar v_F$ exceeds several
+spacings $|\mathbf b|/N$. The number of mesh points inside the Fermi disc per
+valley is $\pi k_F^2/(\Delta k^2\sqrt3/2)$:
+
+| $E_F$ [eV] | $k_F$ [a.u.] | $n_{2D}$ [cm⁻²] | $N=48$ | $N=147$ | $N=300$ | $N=600$ |
+|---|---|---|---|---|---|---|
+| 0.2 | 0.0167 | 3.2×10¹² | 0.9 | 9.0 | 37.6 | 150 |
+| 0.4 | 0.0335 | 1.3×10¹³ | 3.7 | 36.1 | 150 | 601 |
+| 0.6 | 0.0502 | 2.9×10¹³ | 8.4 | 81.2 | 338 | 1353 |
+
+Measured: at $N=147$, $E_F=0.2$ eV, $T=300$ K the solver reports
+$n=3.27\times10^{12}$ cm⁻² against the analytic $3.36\times10^{12}$ (2.6 %); at
+$N=24$ it reports $1.8\times10^{10}$ -- the Fermi circle contains no mesh point at
+all. The start-up banner counts the partially occupied points and warns below 20.
+The Drude *weight* converges more slowly than the density, because
+$\partial^2\varepsilon/\partial k_a^2=v_F\sin^2\theta/k$ weights the innermost
+shells: on the one-shell meshes above, $D$ extracted from the dynamics scatters by
+tens of per cent around the analytic value ($0.54$–$0.66$ eV against 0.60 eV at
+$N=48$, $E_F=0.6$ eV; 0.13 eV against 0.20 eV at $N=147$, $E_F=0.2$ eV). Quantitative
+Drude work therefore wants $k_F\gtrsim3\,\Delta k$.
+
+### 4a.3 What can bleach a doped sheet
+The sheet conductance of a Drude metal is $\sigma_{dc}=D\tau/\pi$ with the
+Dirac-cone Drude weight
+$$
+D(\mu,T)=2k_BT\,\ln\!\big[2\cosh(\mu/2k_BT)\big]\ \longrightarrow\ |\mu|\quad(\mu\gg k_BT). \tag{6}
+$$
+A field-induced *rise* of transmission must therefore reduce $D$, reduce $\tau$, or
+break the linear relation between current and field. All three are separable:
+
+1. **Drude weight, heating at fixed density.** As $T_e$ rises, $\mu$ falls, but
+   thermally generated pairs add weight; $D$ passes a shallow minimum and returns.
+   Over 300–3000 K the deepest excursion is $D/D_0=0.88$ at $10^{13}$ cm⁻² and
+   $0.90$ at $3\times10^{12}$ cm⁻² (`tests/test_doped_drude.py`). **Heating alone
+   is worth ~10 %.**
+2. **Momentum relaxation.** $v_FA_0=0.74$ eV at 100 kV/cm, far above the
+   optical-phonon thresholds (E$_{2g}$ 196 meV, A$_1'$ 160 meV): twice per cycle
+   the whole distribution is pushed over the emission threshold, and every
+   emission randomises momentum. This is the channel the solver already has
+   (§2); it needs a dissipative run on a Fermi-surface-resolving mesh.
+3. **Current saturation on the cone.** The Fermi sea is displaced by $\mathbf A(t)$.
+   When the excursion $A_0$ exceeds $k_F$, the displaced sea is no longer a small
+   perturbation: the drift velocity saturates at $v_F$ and the differential
+   conductivity falls as $k_F/A_0$. For the DAST transient
+   $A_0=6.21\times10^{-4}\,$a.u. per kV/cm, so
+   $$
+   A_0=k_F \iff E_0 = 27\ \text{kV/cm}\ (E_F=0.2\ \text{eV}),\quad 81\ \text{kV/cm}\ (E_F=0.6\ \text{eV}). \tag{7a}
+   $$
+   The collisional excursion $eE\tau/\hbar$ crosses $k_F$ at the same place for
+   $\tau\simeq60$ fs, so at THz the two scales coincide. Saturation is a
+   *coherent* effect and needs no dissipator at all. The calculated curve (doped
+   coherent runs, $N=48$, $E_F=0.6$ eV, $T_{\rm init}=300$ K, self-consistent
+   sheet; $D_{\rm fit}$ from the run's own current):
+
+   | $E_0$ [kV/cm] | 1 | 10 | 30 | 100 | 200 | 300 | 500 | 1000 |
+   |---|---|---|---|---|---|---|---|---|
+   | $T$ | 0.7286 | 0.7257 | 0.6990 | 0.6622 | 0.7202 | 0.7716 | 0.8122 | 0.8263 |
+   | $D_{\rm fit}$ [eV] | 0.533 | 0.537 | 0.580 | 0.664 | 0.546 | 0.424 | 0.325 | 0.290 |
+   | $\mathrm{Re}\,\sigma/\sigma_{\rm univ}$ | 23.6 | 23.8 | 25.8 | 30.3 | 25.4 | 20.5 | 15.8 | 13.4 |
+
+   $T$ is flat through the linear regime, dips near 100 kV/cm (below saturation the
+   field first *adds* conductivity), then rises monotonically once $A_0>k_F$
+   (81 kV/cm at this doping): $\sigma$ falls from $30.3$ to
+   $13.4\,\sigma_{\rm univ}$, $-56\,\%$. The fitted $D$ sits below the analytic
+   $E_F$ by the mesh factor of §4a.2 ($D_{\rm fit}/D_{\rm eq}=0.66$ / $0.89$ /
+   $0.89$ for $E_F=0.2$ eV at $N=147$, $0.4$ eV at $N=147$, $0.6$ eV at $N=48$) --
+   a scale error common to all fields, so the shape of $T(E_0)$ is intact.
+
+The fit that produces those numbers is the run's own current obeying
+$\dot J_s=(D/\pi)E_{\rm tot}-J_s/\tau$; least squares over the driven window
+returns $D$ and $\tau$ separately (`drude_check.py`), so the three mechanisms above
+are read off rather than assumed.
+
+### 4a.4 Comparison with a measured sample
+A monolayer on PET transmitting 60 % with the substrate included is, with
+$n_{\rm PET}=1.65$ and two incoherent faces (bare substrate 88.3 %),
+$Z_0\sigma=0.565$, i.e. $\sigma=24.7\,\sigma_{\rm univ}$; 70 % is
+$14.3\,\sigma_{\rm univ}$ -- a 42 % fall. $E_F=0.2$ eV with $\tau=63$ fs
+reproduces the low-field value exactly. Mechanism 1 can supply ~10 % of the 42 %; mechanism 3
+alone produces $-56\,\%$ in the calculated scan above, and mechanism 2 adds to it
+in the same direction. All three read "the carriers stop responding linearly",
+not "the carriers disappear". Note that the onset
+Eq. (7a) sits at 27 kV/cm for that doping -- inside the measured range, and the
+approach to saturation is gradual ($\propto k_F/A_0$), which is why the
+transmission creeps up by ten points instead of jumping.
 
 ## 5. Sheet electrodynamics
 

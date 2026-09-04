@@ -443,16 +443,55 @@ puts at ~27 kV/cm for E_F = 0.2 eV is inside the measured range, and the
 predicted saturation is *sub-linear in the drift*, which is why the transmission
 creeps up by ten points rather than jumping.
 
-*Direct check in the solver.* A coherent doped run (147², E_F = 0.2 eV, 300 K,
-100 kV/cm) already shows it: the initial occupation gives n = 3.27×10¹² cm⁻²
-(analytic 3.36×10¹², 2.6 % mesh error, 36 partially occupied k-points), the
-Drude carriers screen the field to A_tot/A_ext = 0.87, and a least-squares fit
-of the current to dJ_s/dt = (D/π)E − J_s/τ over the pulse returns
-τ = 1.4×10³ fs (collisionless, as it must be with no dissipators) and
-**D_fit = 0.102 eV against the equilibrium D = 0.200 eV — the current
-saturation, factor 2 down, at A₀ = 3.7 k_F.** The τ half of the story needs the
-phonon ring on a mesh that resolves the Fermi surface; that is a production run
-(§6 cost note), and the settings are `--ef-ev 0.2 --temp-init-k 300 --variants diss,mem`.
+**7.9 The doped sheet, calculated: transmission rises above the saturation
+onset.** 48² mesh, E_F = 0.6 eV (n = 3.0×10¹³ cm⁻², 8 mesh points per valley
+inside the Fermi disc), T_init = 300 K, nstate = 2, pure gauge, self-consistent
+sheet, **coherent** (no dissipators at all — so everything below is mechanism 3
+alone). D_fit and τ_fit come from fitting the run's own current to
+dJ_s/dt = (D/π)E_tot − J_s/τ.
+
+| E₀ [kV/cm] | T | R | A | D_fit [eV] | Re σ/σ_univ |
+|---|---|---|---|---|---|
+| 1 | 0.7286 | 0.2497 | 0.022 | 0.533 | 23.6 |
+| 3 | 0.7284 | 0.2498 | 0.022 | 0.533 | 23.6 |
+| 10 | 0.7257 | 0.2519 | 0.022 | 0.537 | 23.8 |
+| 30 | 0.6990 | 0.2737 | 0.027 | 0.580 | 25.8 |
+| 100 | 0.6622 | 0.3304 | 0.007 | 0.664 | 30.3 |
+| 200 | 0.7202 | 0.2736 | 0.006 | 0.546 | 25.4 |
+| 300 | 0.7716 | 0.2066 | 0.022 | 0.424 | 20.5 |
+| 500 | 0.8122 | 0.1455 | 0.042 | 0.325 | 15.8 |
+| 1000 | 0.8263 | 0.1124 | 0.061 | 0.290 | 13.4 |
+
+Read from the bottom up, this is the measurement. **T is flat at 0.726 through
+the linear regime (1–10 kV/cm), dips to 0.66 near 100 kV/cm, then rises
+monotonically to 0.83.** The turn is where predicted: A₀ = k_F at 81 kV/cm for
+E_F = 0.6 eV. Above it the fitted Drude weight collapses, 0.66 → 0.29 eV, and
+with it the sheet conductivity, **30.3 → 13.4 σ_univ (−56 %)** — against the
+−42 % (24.7 → 14.3 σ_univ) the PET measurement implies. Same sign, same
+mechanism, same order. The dip before the turn is real too: below saturation the
+field first *adds* conductivity (interband pairs and the broadening of the
+distribution), which is why a doped sample can darken slightly before it
+brightens.
+
+Note what is **not** in this table: no phonons, no Auger, no heating — the
+dissipators are off. Mechanism 3 (current saturation on the Dirac cone) accounts
+for the whole effect on its own. Mechanisms 1 and 2 add to it: heating supplies
+≈10 % more, and optical-phonon emission above 196 meV shortens τ, which lowers σ
+further in the same direction. So the measured rise does not need all three —
+but none of them makes the sheet *darker*, and the model has no mechanism that
+would.
+
+*Drude-weight accuracy.* The fitted D is below the analytic D = E_F because the
+mesh under-resolves ∂²ε/∂k² ∝ 1/k near the Dirac point: D_fit/D_eq = 0.66 at
+E_F = 0.2 eV on 147² (9 mesh points per valley in the Fermi disc), 0.89 at
+E_F = 0.4 eV on 147² (36 points) and 0.89 at E_F = 0.6 eV on 48² (8 points). The
+ratio is a scale error, common to all fields, so the *shape* of the T(E₀) curve
+above is unaffected; absolute conductivities want k_F ≳ 3 mesh spacings.
+
+*Still to run (cluster).* The τ half of the story: `--ef-ev 0.2 --temp-init-k 300
+--variants diss,mem` on a Fermi-surface-resolving mesh (147² or denser), where
+the phonon ring can shorten τ and `*_sbe_te.data` records the carrier
+temperature. Cost as in §6.
 
 ## 8. What to look for at production (147², DAST)
 

@@ -105,6 +105,26 @@ ready»*. Delivered (branch `claude/si-direct-gap-isosurfaces-mp0mbd`, restarted
     the whole "response" at 10 kV/cm, and at 1 kV/cm with the sheet field a relay that pins
     A_tot to 0 (R > 1). `gs_info_ssbe` now gives degenerate partially filled groups their
     group-average occupation (the T → 0 density matrix; inert for gapped materials).
+  - **High field (2026-09-04, second round).** Intrinsic sheet 1 kV/cm .. 1 MV/cm
+    (147^2 K-averaged and 150^2, coherent, self-consistent sheet): T falls
+    monotonically 1.000 -> 0.916/0.910 and never rises; absorption saturates near 5 %
+    above 300 kV/cm = the analytic Landau-Zener value; the two meshes agree to 1-2 %
+    above 200 kV/cm. So the model has NO self-induced transparency of undoped graphene.
+  - **Doped sheet added (`sbe_ef_ev`, `sbe_temp_init_k`, wiki/12 sec. 4a)** -- the
+    initial occupation becomes occ*f_FD(mu,T), giving a partially filled band, a Drude
+    weight and an intraband conductivity. The velocity-gauge pure-gauge restoration
+    keeps the UNDOPED filling as its reference (`gs%occup_ref`), else it would subtract
+    the physical Drude current; `dressed_ref_delta` takes the initial occupation vector;
+    the VG basis-edge monitor measures the excess over it. Mesh rule: k_F must exceed a
+    few spacings (E_F = 0.2 eV -> N >= 147; the solver counts partially occupied
+    k-points and warns below 20).
+    **Result:** a doped coherent scan (48^2, E_F = 0.6 eV) reproduces the maintainer's
+    measurement -- T flat at 0.726 to 10 kV/cm, dip to 0.662 at 100, then a monotone
+    rise to 0.826 at 1 MV/cm, sigma 30.3 -> 13.4 sigma_univ (-56 %) against the -42 %
+    implied by 60 % -> 70 % on PET. The mechanism is current (velocity) saturation on
+    the Dirac cone once A_0 > k_F (81 kV/cm at that doping, 27 kV/cm at E_F = 0.2 eV) --
+    i.e. mobility/mean-free-path, not Drude-weight loss: at fixed density heating moves
+    D by <= 12 % (test_doped_drude). `drude_check.py` fits D and tau per run.
   - New this round: `sbe_sheet_nlayers` (decoupled layers in one local field — incoherent
     bilayer), `make_inputs.py --pol x|y --n-layers --snap-fs`, `plot_levels.py` (k-resolved
     level-population snapshots → BZ-averaged band populations vs t + k-maps around K).
