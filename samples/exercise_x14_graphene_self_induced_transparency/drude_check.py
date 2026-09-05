@@ -129,6 +129,20 @@ def analyze(path, ef_ev, temp_k, lz=LZ_BOHR, area=AREA_BOHR2):
         coef, *_ = np.linalg.lstsq(M, dJ[m], rcond=None)
         D_fit = np.pi * coef[0]
         tau_fit = -1.0 / coef[1] if coef[1] < 0 else np.inf
+    # A second, FIT-FREE reading of the same quantity. A collisionless metal has a
+    # purely reactive intraband response, sigma(w) = i D / (pi w), so every frequency
+    # bin of the driven band carries its own estimate D(w) = -pi w Im sigma(w) with
+    # nothing adjustable. This is the robust route for coherent runs, where the
+    # time-domain fit above has to determine an essentially infinite tau at the same
+    # time and D rides on that; the two agree to ~1 % once the Fermi disc is resolved.
+    wf = 2.0 * np.pi * np.fft.rfftfreq(len(t), d=t[1] - t[0])
+    ei, et, js = np.fft.rfft(E_inc), np.fft.rfft(E_t), np.fft.rfft(J_s)
+    Pw = np.abs(ei)**2
+    mb = Pw >= 0.10 * Pw[1:].max()
+    D_spec = np.nan
+    if mb.sum():
+        sw = js[mb] / et[mb]
+        D_spec = float(np.sum(-np.pi * wf[mb] * sw.imag * Pw[mb]) / np.sum(Pw[mb]))
     ef_run = float(run_variable(path, 'sbe_ef_ev', ef_ev) or ef_ev)
     ti_run = float(run_variable(path, 'sbe_temp_init_k', temp_k) or temp_k)
     kT = KB_AU * max(ti_run, 1.0)
@@ -142,7 +156,7 @@ def analyze(path, ef_ev, temp_k, lz=LZ_BOHR, area=AREA_BOHR2):
                 T=T, R=R, A=A, resig=resig, sigma_au=sig, ef_ev=ef_run, temp_init=ti_run,
                 D_au=D, D_ev=D * AU_EV, n0_cm2=n0, tau_fs=tau * AU_T_FS,
                 mfp_nm=VF_EPM_AU * tau * BOHR_CM * 1e7, Z0sig=Z0 * sig,
-                D_fit_ev=D_fit * AU_EV, tau_fit_fs=tau_fit * AU_T_FS,
+                D_fit_ev=D_fit * AU_EV, D_spec_ev=D_spec * AU_EV, tau_fit_fs=tau_fit * AU_T_FS,
                 mfp_fit_nm=VF_EPM_AU * tau_fit * BOHR_CM * 1e7,
                 sig_fit_s0=sig_fit / SIGMA_UNIV)
 
@@ -181,7 +195,9 @@ def main(argv=None):
         return 0
     print('# D_fit, tau_fit: least-squares fit of dJ_s/dt = (D/pi) E_tot - J_s/tau over the driven window'
           ' (the run\'s OWN Drude weight and momentum-relaxation time); D_eq = the equilibrium Drude weight of E_F, T_init.')
-    print(f'{"E0[kV/cm]":>9} {"hw[eV]":>7} {"E_F[eV]":>8} {"n0[cm^-2]":>10} {"D_eq[eV]":>9} {"D_fit[eV]":>10}'
+    print('# D_spec: the same weight read straight off the reactive response, D = -pi w Im sigma(w),'
+          ' band-averaged -- no fit, no tau (see analyze()).')
+    print(f'{"E0[kV/cm]":>9} {"hw[eV]":>7} {"E_F[eV]":>8} {"n0[cm^-2]":>10} {"D_eq[eV]":>9} {"D_fit[eV]":>10} {"D_spec[eV]":>11}'
           f' {"tau[fs]":>8} {"l[nm]":>7} {"s_fit/s0":>9} {"Re s/s0":>8} {"T":>8} {"R":>8} {"A":>8}  file')
     for f in files:
         try:
@@ -190,7 +206,7 @@ def main(argv=None):
             print(f'# SKIPPED (incomplete): {exc}')
             continue
         print(f'{r["E0_kvcm"]:9.2f} {r["hw_ev"]:7.4f} {r["ef_ev"]:8.3f} {r["n0_cm2"]:10.2e} {r["D_ev"]:9.4f}'
-              f' {r["D_fit_ev"]:10.4f} {r["tau_fit_fs"]:8.2f} {r["mfp_fit_nm"]:7.1f} {r["sig_fit_s0"]:9.2f}'
+              f' {r["D_fit_ev"]:10.4f} {r["D_spec_ev"]:11.4f} {r["tau_fit_fs"]:8.2f} {r["mfp_fit_nm"]:7.1f} {r["sig_fit_s0"]:9.2f}'
               f' {r["resig"]:8.3f} {r["T"]:8.5f} {r["R"]:8.5f} {r["A"]:8.5f}  {f}')
     return 0
 

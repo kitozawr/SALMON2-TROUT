@@ -290,18 +290,33 @@ The Drude *weight* converges more slowly than the density, because
 $\partial^2\varepsilon/\partial k_a^2=v_F\sin^2\theta/k$ weights the innermost
 shells. Measured with the trajectory fit of §4a.3 at 1 kV/cm (linear regime):
 
-| mesh | $E_F$ [eV] | partially occupied points | $n_{2D}$ vs analytic | $D_{\rm fit}/E_F$ |
-|---|---|---|---|---|
-| $147^2$ | 0.2 | 36 | $3.27$ vs $3.36\times10^{12}$ (−2.6 %) | 0.659 |
-| $300^2$ | 0.2 | 116 | $3.345$ vs $3.36\times10^{12}$ (−0.5 %) | **0.930** |
-| $147^2$ | 0.4 | 72 | $1.284\times10^{13}$ | 0.894 |
-| $48^2$ | 0.6 | 8 | $3.04$ vs $2.89\times10^{13}$ (+5 %) | 0.888 |
+| mesh | $E_F$ [eV] | $k_F/\Delta k$ | partially occupied points | $n_{2D}$ vs analytic | $D_{\rm fit}/E_F$ | $D_{\rm spec}/E_F$ |
+|---|---|---|---|---|---|---|
+| $147^2$ | 0.2 | 1.58 | 36 | $3.27$ vs $3.36\times10^{12}$ (−2.6 %) | 0.659 | — |
+| $300^2$ | 0.2 | 3.22 | 116 | $3.345$ vs $3.36\times10^{12}$ (−0.5 %) | **0.930** | — |
+| $147^2$ | 0.4 | 3.15 | 72 | $1.284\times10^{13}$ | 0.894 | — |
+| $72^2$ | 0.4 | 1.54 | — | — | 0.846 | 0.858 |
+| $48^2$ | 0.6 | 1.54 | 8 | $3.04$ vs $2.89\times10^{13}$ (+5 %) | 0.888 | 0.900 |
+| $72^2$ | 0.6 | 2.32 | 22 | — | 0.961 | 0.976 |
+| $111^2$ | 0.6 | 3.57 | — | — | 0.954 | 0.970 |
+| $147^2$ | 0.6 | 4.73 | — | — | **0.998** | **1.013** |
+
+$D_{\rm spec}$ is the same weight read off the reactive response with **nothing
+fitted**: a collisionless metal has $\sigma(\omega)=iD/\pi\omega$, so each bin of the
+driven band gives $D(\omega)=-\pi\omega\,\mathrm{Im}\,\sigma(\omega)$ directly
+(`drude_check.py`, column `D_spec`). It matters because for a coherent run the
+trajectory fit of §4a.3 has to determine an essentially infinite $\tau$ at the same
+time, and $D_{\rm fit}$ rides on that; the two nevertheless agree to $\sim1\,\%$
+throughout, which is a check on both.
 
 The density is good to a few per cent as soon as the Fermi circle contains a shell;
-the Drude weight needs three or four, and reaches 93 % of $E_F$ at
-$k_F\simeq3\,\Delta k$. Quantitative Drude work therefore wants $k_F\gtrsim3\,\Delta k$
-(Eq. 4a.3); below that the deficit is a field-independent scale error, so the
-*shape* of $\sigma(E_0)$ survives while its absolute value does not.
+the Drude weight needs three or four. Read against $k_F/\Delta k$ rather than against
+the mesh, the deficit collapses onto one curve regardless of doping — $0.85$–$0.90$ at
+$1.5$ spacings, $0.97$ at $2.3$–$3.6$, and $1.00$ at $4.7$, i.e. **the calculated Drude
+weight becomes the analytic $D=E_F$ of the Dirac cone once the disc is resolved**, with
+no parameter anywhere in the comparison. Quantitative Drude work therefore wants
+$k_F\gtrsim3\,\Delta k$ (Eq. 4a.3); below that the deficit is a field-independent scale
+error, so the *shape* of $\sigma(E_0)$ survives while its absolute value does not.
 
 ### 4a.3 What can bleach a doped sheet
 The sheet conductance of a Drude metal is $\sigma_{dc}=D\tau/\pi$ with the
