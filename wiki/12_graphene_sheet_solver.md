@@ -827,6 +827,17 @@ ring-down):
 | $R$ | 0.020 | 0.026 | 0.024 | 0.020 | 0.016 |
 | $A$ | 0.202 | 0.195 | 0.178 | 0.152 | 0.089 |
 
+![T(E0) with and without the phonon ring](figures/graphene_T_of_field_ring.png)
+
+*The dissipative scan (orange, $72^2$) against the best coherent one (red, $147^2$),
+same doping and same transient.* The ring turns an inductive mirror into a Drude
+absorber — $R$ falls from 0.28 to 0.02, $A$ rises from 0.01 to 0.20 — which moves the
+whole curve up towards the measured band and, more importantly, removes the residual
+darkening: the coherent curve still dips before the shaded saturation region, the
+dissipative one is flat and then rises. The two are on different meshes because the
+ring is $O(N_k^2)$ (see below), so the vertical offset between them mixes the mesh with
+the physics; the *shapes* are the comparison.
+
 Flat through 10–30 kV/cm, then a monotone rise to 0.895, with $\sigma$ down $54\,\%$
 from its peak. **The mesh dip is gone**: the coherent curve on this same $72^2$ mesh
 dips $7.2\,\%$ before rising (§4a.5.5 table above), the dissipative one does not dip at

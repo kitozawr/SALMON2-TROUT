@@ -29,6 +29,7 @@ between meshes, not between occupations.
 """
 import argparse
 import glob
+import re
 import os
 import sys
 
@@ -148,10 +149,10 @@ def main(argv=None):
     extra = []
     for spec in args.series:
         lab, _, pat = spec.partition(':')
-        # the remainder may hold several colon-separated globs, so a series can be
-        # assembled from a subset of a run directory (e.g. dropping a field whose
-        # control run showed it contaminated)
-        arr, _ef, asig, atk, _nl, _nk = collect([p for p in pat.split(':') if p])
+        # the remainder may hold several globs separated by colons or whitespace, so a
+        # series can be assembled from a subset of a run directory (e.g. dropping a
+        # field whose dark control showed it contaminated)
+        arr, _ef, asig, atk, _nl, _nk = collect([g for g in re.split(r'[:\s]+', pat) if g])
         if arr.size:
             extra.append((lab, arr, asig, _ef or ef, atk))
     fig, ax = plt.subplots(1, npan, figsize=(5.5 * npan, 4.0))
