@@ -736,20 +736,31 @@ doping (same transient, +100 fs tail, coherent, E_F = 0.6 eV unless noted):
 | 72², E_F = 0.4 eV | 1.54 | 12.9 | 17.4 | **+35 %** | 0.8487 | 0.7939 | −6.5 % |
 | 72², E_F = 0.6 eV | 2.32 | 25.9 | 30.8 | **+19 %** | 0.7081 | 0.6571 | −7.2 % |
 | 111², E_F = 0.6 eV | 3.57 | 25.6 | 27.8 | **+8.6 %** | 0.7149 | 0.6900 | −3.5 % |
+| 147², E_F = 0.6 eV | 4.73 | 27.0 | 29.0 | **+7.6 %** | 0.6997 | 0.6763 | −3.3 % |
 
 Two different meshes at two different dopings but the same k_F/Δk give the same bump;
-filling the disc from 1.5 to 3.6 spacings takes it from a third to under a tenth. How
+filling the disc from 1.5 to 3.6 spacings takes it from a third to under a tenth —
+and then it stops, 111² and 147² differing by 78 % in k-points and by nothing in the
+dip. How
 much of the bump reaches T depends on the sheet impedance, which is why the same
 artifact makes a 11.8 % dent at 0.6 eV and 6.5 % at 0.4 eV — the dip depth is not the
 artifact, the conductivity bump is. Reproduce the comparison with
 `field_scan_plot.py --continuum`, which draws the parameter-free continuum curve
 beside the data and prints the residual.
 
-**So the converged model predicts a monotone brightening**, flat while
-A₀ ≲ 0.5 k_F and rising as 1/E₀ thereafter, with darkening only when Landau–Zener
-pair creation takes over at several hundred kV/cm. Any darkening computed before the
-rise on an under-resolved Fermi surface is numerical. `drift_saturation.py` produces
-the table and `graphene_drift_saturation.png`.
+**Most of the darkening before the rise is numerical, but not all of it.** The mesh
+series settles the first half: three quarters of the dip disappears between
+k_F/Δk = 1.5 and 3.6, and the disappearance is governed by that ratio alone, not by
+the doping. It does not settle the second: the dip stops shrinking after that —
+−3.5 % at 111² and −3.3 % at 147², with 78 % more k-points between them — so a
+residual few-per-cent darkening near A₀ ≈ k_F survives mesh refinement. Its origin is
+open; it is not the O(N_k) sampling of the Fermi disc, and the candidates left are the
+truncated basis (nstate = 2) and the departure of the EPM cone from an ideal linear
+one. The honest shape is therefore: flat while A₀ ≲ 0.5 k_F, a residual few-per-cent
+dip around A₀ ≈ k_F, the drift-saturation rise as 1/E₀, and Landau–Zener darkening at
+several hundred kV/cm. An under-resolved Fermi surface multiplies that residual dip by
+three or four, which is why Eq. (4a.3) still has to be satisfied.
+`drift_saturation.py` produces the table and `graphene_drift_saturation.png`.
 
 ## 8. What to look for at production (147², DAST)
 

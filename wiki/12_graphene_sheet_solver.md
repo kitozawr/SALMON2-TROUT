@@ -358,9 +358,13 @@ break the linear relation between current and field. All three are separable:
    | $\mathrm{Re}\,\sigma/\sigma_{\rm univ}$ | 23.6 | 23.8 | 25.8 | 30.3 | 25.4 | 20.5 | 15.8 | 13.4 |
 
    $T$ is flat through the linear regime, dips near 60 kV/cm, then rises monotonically
-   once $A_0>k_F$ (81 kV/cm at this doping). **The dip is not physics**: §4a.5.5 shows
-   it is the discretization bump of a Fermi disc holding only 12 mesh points, and the
-   converged curve has no darkening before the rise. The rise itself is robust: $\sigma$ falls from $30.3$ to
+   once $A_0>k_F$ (81 kV/cm at this doping). **Most of the dip is not physics**:
+   §4a.5.5 refines this run on three finer meshes and shows that three quarters of the
+   darkening is the discretization bump of a Fermi disc holding only 8 mesh points —
+   the dip falls from $11.8\,\%$ here to $3.3\,\%$ once the disc holds $3.6$ spacings,
+   after which it stops falling. A residual few-per-cent darkening near $A_0\simeq k_F$
+   therefore survives mesh refinement and is not yet explained. The rise itself is
+   robust: $\sigma$ falls from $30.3$ to
    $13.4\,\sigma_{\rm univ}$, $-56\,\%$.
 
    ![strong-doping proxy on the 48x48 mesh](figures/graphene_doped_proxy_ef06.png)
@@ -780,10 +784,22 @@ makes a bigger dent at heavier doping. The control parameter is $k_F/\Delta k$ a
 | $72^2$, $E_F=0.4$ eV | 1.54 | 12.9 | 17.4 | **+35 %** | 0.8487 | 0.7939 | −6.5 % |
 | $72^2$, $E_F=0.6$ eV | 2.32 | 25.9 | 30.8 | **+19 %** | 0.7081 | 0.6571 | −7.2 % |
 | $111^2$, $E_F=0.6$ eV | 3.57 | 25.6 | 27.8 | **+8.6 %** | 0.7149 | 0.6900 | −3.5 % |
+| $147^2$, $E_F=0.6$ eV | 4.73 | 27.0 | 29.0 | **+7.6 %** | 0.6997 | 0.6763 | −3.3 % |
 
 The two runs at $k_F/\Delta k=1.54$ are different meshes at different dopings and give
 the same bump to within the sampling of the field grid; filling the disc from 1.5 to
-3.6 spacings takes the bump from a third to under a tenth, and the dip in $T$ with it. The dip in $T$ follows the bump and
+3.6 spacings takes the bump from a third to under a tenth, and the dip in $T$ with it.
+
+**But it does not go to zero.** Between $111^2$ and $147^2$ — a 78 % increase in
+k-points, taking the disc from 3.6 to 4.7 spacings — the bump moves only from $+8.6\,\%$
+to $+7.6\,\%$ and the dip stays at $3.3\,\%$. The mesh-driven part of the darkening is
+therefore essentially gone by $k_F\simeq3.5\,\Delta k$, and what remains is a residual
+few-per-cent dip near $u\simeq0.7$–$1.2$ whose origin these runs do not settle. It is
+*not* the $O(N_k)$ sampling of the Fermi disc; the candidates left are the truncated
+basis (`nstate = 2`) and the departure of the EPM cone from an ideal linear one. An
+earlier version of this page said the converged curve is monotone, on the strength of
+the $48^2\to72^2$ trend alone; the two finer meshes do not support that and the claim
+is withdrawn — see the end of this section. The dip in $T$ follows the bump and
 its position tracks the bump rather than any field scale of the physics.
 
 As the disc is filled further the bump shrinks — the adiabatic sum is down to 1.06 at
@@ -797,12 +813,17 @@ structure, not discretization. At **small $u$** the doped carriers carry their o
 uncancelled diamagnetic remainder $\eta k_F/v_F$ (§4a.1), $\sim1\,\%$ at $E_F=0.2$ eV
 and $\sim3\,\%$ at 0.6 eV, which is a basis effect and shrinks with `nstate`.
 
-**The converged prediction is therefore monotone**: the transmission of a doped
-sheet is flat while $A_0\lesssim0.5\,k_F$ and rises thereafter, with no intrinsic
-darkening until pair creation takes over at several hundred kV/cm. The darkening seen
-before the rise in an under-resolved run is numerical, and a scan meant to be
-compared with experiment quantitatively must satisfy Eq. (4a.3),
-$k_F\gtrsim3\Delta k$. Reproduce the figure and the table with
+**What the mesh series does and does not establish.** It establishes that most of the
+darkening before the rise is numerical: three quarters of it disappears between
+$k_F/\Delta k=1.5$ and $3.6$, and the disappearance is governed by that ratio alone, not
+by the doping. It does **not** establish that the converged curve is monotone. A dip of
+$3.3\,\%$ near $u\simeq0.7$–$1.2$ survives at both $111^2$ and $147^2$, unchanged, and
+the transmission then rises exactly as Eq. (4a.13) requires. So the honest reading is:
+flat while $A_0\lesssim0.5\,k_F$, a residual few-per-cent darkening around
+$A_0\simeq k_F$ of unsettled origin, then the drift-saturation rise, and finally
+Landau–Zener darkening at several hundred kV/cm. A scan meant to be compared with
+experiment quantitatively must still satisfy Eq. (4a.3), $k_F\gtrsim3\Delta k$, because
+below it the darkening is several times larger and is an artifact. Reproduce the figure and the table with
 `python3 drift_saturation.py GSDIR/graphene_sit --ef-ev 0.2`.
 
 ## 5. Sheet electrodynamics
