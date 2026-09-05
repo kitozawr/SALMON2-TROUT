@@ -1116,20 +1116,23 @@ subtracts.
 
 **How many bands the doped sheet needs.** A scan at $72^2$, $E_F=0.6$ eV, 1 kV/cm:
 
-| `nstate` | 2 | 3 | 4 | 6 |
-|---|---|---|---|---|
-| $T$ | 0.7096 | 0.7443 | 0.7445 | 0.7298 |
-| $\mathrm{Re}\,\sigma/\sigma_{\rm univ}$ | 25.81 | 22.62 | 22.60 | 23.11 |
-| $D_{\rm spec}$ [eV] | 0.586 | 0.526 | 0.525 | 0.528 |
+| `nstate` | 2 | 3 | 4 | 6 | 8 ($\Delta t=0.05$ fs) |
+|---|---|---|---|---|---|
+| $T$ | 0.7096 | 0.7443 | 0.7445 | 0.7298 | 0.7473 |
+| $\mathrm{Re}\,\sigma/\sigma_{\rm univ}$ | **25.81** | 22.62 | 22.60 | 23.11 | 22.34 |
+| $D_{\rm spec}$ [eV] | 0.586 | 0.526 | 0.525 | 0.528 | 0.521 |
+| $D_{\rm spec}/E_F$ | **0.976** | 0.876 | 0.875 | 0.881 | 0.868 |
 
-The whole error is in the $2\to3$ step; 3 and 4 agree to $0.1\,\%$ and 6 sits within
-$2\,\%$. `nstate = 2` is the outlier, not a converged choice. **Production is therefore
-`nstate = 4`** — the largest basis still clean at $\Delta t=0.1$ fs (§6a: $n_b\ge8$
-needs $0.05$ fs) — and `make_inputs.py` defaults to it.
+The whole error is in the $2\to3$ step. Everything from 3 to 8 agrees to $\pm1.7\,\%$ in
+$\sigma$ and $\pm0.7\,\%$ in $D$, while `nstate = 2` sits $14\,\%$ above all of them:
+it is the outlier, not a converged choice. **Production is therefore `nstate = 4`** —
+within $1.2\,\%$ of the $n_b=8$ answer and the largest basis still clean at
+$\Delta t=0.1$ fs (§6a: $n_b\ge8$ needs $0.05$ fs) — and `make_inputs.py` defaults to
+it.
 
 Two consequences for what has been quoted from $n_b=2$ runs:
 
-* the converged Drude weight is $\approx0.88\,E_F$, not $E_F$. The apparent agreement
+* the converged Drude weight is $\approx0.87\,E_F$, not $E_F$. The apparent agreement
   with the analytic Dirac value at $n_b=2$ (§4a.2) was **coincidental**: near K the
   $2\times2$ EPM block *is* the Dirac Hamiltonian, so it returns the ideal-cone answer
   by construction, and adding the bands above it brings in the real band structure's

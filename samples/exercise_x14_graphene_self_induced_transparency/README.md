@@ -863,19 +863,22 @@ restoration subtracts.
 
 **How many bands are enough** (72², E_F = 0.6 eV, 1 kV/cm):
 
-| nstate | 2 | 3 | 4 | 6 |
-|---|---|---|---|---|
-| T | 0.7096 | 0.7443 | 0.7445 | 0.7298 |
-| Re σ/σ_univ | 25.81 | 22.62 | 22.60 | 23.11 |
-| D_spec [eV] | 0.586 | 0.526 | 0.525 | 0.528 |
+| nstate | 2 | 3 | 4 | 6 | 8 (dt = 0.05 fs) |
+|---|---|---|---|---|---|
+| T | 0.7096 | 0.7443 | 0.7445 | 0.7298 | 0.7473 |
+| Re σ/σ_univ | **25.81** | 22.62 | 22.60 | 23.11 | 22.34 |
+| D_spec [eV] | 0.586 | 0.526 | 0.525 | 0.528 | 0.521 |
+| D_spec/E_F | **0.976** | 0.876 | 0.875 | 0.881 | 0.868 |
 
-The whole error is in the 2 → 3 step; 3 and 4 agree to 0.1 % and 6 sits within 2 %.
+The whole error is in the 2 → 3 step. Everything from 3 to 8 agrees to ±1.7 % in σ and
+±0.7 % in D, while nstate = 2 sits 14 % above all of them.
 **`nstate = 2` is the outlier, not a converged choice, and production is now
-`nstate = 4`** — the largest basis still clean at dt = 0.1 fs (§7.2). `make_inputs.py`
-defaults to it and the four shipped sets were regenerated on 2026-09-05.
+`nstate = 4`** — within 1.2 % of the nb = 8 answer and the largest basis still clean
+at dt = 0.1 fs (§7.2). `make_inputs.py` defaults to it and the four shipped sets were
+regenerated on 2026-09-05.
 
 Two consequences for numbers quoted from earlier nb = 2 runs. **(i)** The converged
-Drude weight is ≈0.88 E_F, not E_F: the agreement with the analytic Dirac value at
+Drude weight is ≈0.87 E_F, not E_F: the agreement with the analytic Dirac value at
 nb = 2 (§7.12) was coincidental, because near K the 2×2 EPM block *is* the Dirac
 Hamiltonian and returns the ideal-cone answer by construction. **(ii)** Ratios,
 shapes and field dependences at fixed nstate are unaffected — the dip of §7.12 is
