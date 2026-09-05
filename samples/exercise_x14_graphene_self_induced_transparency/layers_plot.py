@@ -46,7 +46,7 @@ def collect(patterns):
         except TruncatedRun as exc:
             print(f'# SKIPPED: {exc}')
             continue
-        rows.append((r['E0_kvcm'], r['T'], r['R'], r['A'], r['sig_c']))
+        rows.append((r['E0_kvcm'], r['T'], r['R'], r['A'], r['sig_c'], r['nk']))
     rows.sort(key=lambda r: r[0])
     return rows
 
@@ -66,7 +66,7 @@ def main(argv=None):
         a, b = collect([spec[1]]), collect([spec[2]])
         if a and b:
             sets.append((ef, np.array([r[:4] for r in a]), np.array([r[:4] for r in b]),
-                         [r[4] for r in a]))
+                         [r[4] for r in a], a[0][5]))
     if not sets:
         print('# nothing matched'); return 1
 
@@ -79,7 +79,7 @@ def main(argv=None):
 
     fig, ax = plt.subplots(1, 2, figsize=(11.5, 4.3))
     cols = ('#c0392b', '#2980b9', '#16a085', '#8e44ad')
-    for isr, ((ef, a, b, sg), c) in enumerate(zip(sets, cols)):
+    for isr, ((ef, a, b, sg, nk), c) in enumerate(zip(sets, cols)):
         kF = (abs(ef) / AU_EV) / VF_EPM_AU
         esat = kF / A0_PER_KVCM
         ax[0].semilogx(a[:, 0], a[:, 1], 'o-', color=c, label=f'1 layer, $E_F$ = {ef:g} eV')
@@ -113,9 +113,11 @@ def main(argv=None):
     ax[1].set_ylabel(r'error of $T\cdot T$:  $100\,(T_1^2/T_2 - 1)$  [%]')
     ax[1].set_title('A reactive sheet makes $T_1^2$ an OVERestimate at every field', fontsize=9)
     ax[1].legend(fontsize=8); ax[1].grid(alpha=0.25)
+    nks = ' / '.join(str(int(round(np.sqrt(s[4])))) + '^2' for s in sets if s[4])
     fig.text(0.008, 0.008,
              'Free-standing calculation (no substrate); 2 layers = sbe_sheet_nlayers = 2, one shared '
-             'local field, NOT two Fresnel interfaces. 72^2, DAST transient + 100 fs ring-down, coherent.',
+             f'local field, NOT two Fresnel interfaces. Mesh {nks}, DAST transient + 100 fs '
+             'ring-down, coherent.',
              fontsize=7.0, color='#34495e')
     fig.tight_layout(rect=(0, 0.05, 1, 1)); fig.savefig(args.out, dpi=150)
     print(f'# wrote {args.out}')

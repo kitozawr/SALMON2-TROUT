@@ -504,7 +504,43 @@ Three things to read off it.
   not of the solver: the two-layer transmitted field is filtered more strongly at the
   low-frequency end of the band, where $|\sigma|$ is largest, so the average moves.
 
-**At the sample's own doping.** The same scan at $E_F=0.2$ eV on the production
+**Does the bilayer brighten at the sample's own doping?** Yes — and the monolayer at
+the same doping essentially does not. $297^2$ (the first mesh that resolves
+$k_F=0.0167$ a.u., $k_F/\Delta k=3.19$), $E_F=0.2$ eV, coherent, saturation at
+27 kV/cm:
+
+| $E_0$ [kV/cm] | 1 | 10 | 30 | 60 | 100 | 300 |
+|---|---|---|---|---|---|---|
+| $u=A_0/k_F$ | 0.04 | 0.37 | 1.11 | 2.23 | 3.71 | 11.1 |
+| one layer, $T$ | 0.9502 | 0.9447 | 0.9438 | 0.9475 | 0.9438 | 0.9334 |
+| two layers, $T$ | 0.8540 | 0.8445 | **0.8346** | 0.8616 | **0.8710** | 0.8539 |
+| $|Z_0\sigma|$, one layer | 0.377 | 0.401 | 0.401 | 0.329 | 0.284 | 0.278 |
+
+![one against two layers at the sample doping](figures/graphene_layers_ef02.png)
+
+The bilayer rises **+4.4 %** from its minimum at 30 kV/cm (just past saturation) to
+100 kV/cm; the monolayer moves by $0.4\,\%$ and then drifts down. Both sheets saturate
+identically — $|Z_0\sigma|$ falls by $29\,\%$ from its peak in each — so the difference
+is not in the physics but in how much transmission a given change in $\sigma$ can buy.
+For $T=|2/(2+z)|^2$ with $z$ nearly imaginary, $T\simeq(1+y^2/4)^{-1}$ with
+$y=|{\rm Im}\,z|$, so
+$$
+\frac{\delta T}{T}=-\frac{y/2}{1+y^2/4}\,\delta y \tag{4a.17}
+$$
+— the leverage grows with $y$, and doubling the layers doubles both $y$ and $\delta y$.
+A sheet that already transmits 95 % has almost nothing to gain; one at 85 % has four
+times as much. Meanwhile Landau–Zener absorption grows the same way in both ($A$ from
+0.008 to 0.031 in one layer), and in the monolayer it cancels the gain outright.
+
+**This is why the measurement needs the ring, not a bigger mesh.** The sample's
+$Z_0\sigma=0.565$ is 1.5× the coherent monolayer's $0.377$ and its $\mathrm{Re}\,\sigma$
+is six times larger, because the real conductance is $D\tau/\pi$ with a finite $\tau$
+that a collisionless run does not have. At that conductance Eq. (4a.17) turns the same
+$29\,\%$ saturation into roughly ten points of transmission — the measured
+$0.68\to0.79$. The coherent run at $E_F=0.2$ eV cannot show the effect; the $E_F=0.6$
+eV proxy of §4a.3 stands in for exactly that missing conductance.
+
+**At the sample's own doping (coherent, against the intrinsic control).** The same scan at $E_F=0.2$ eV on the production
 $147^2$ mesh is quieter in the raw transmission, because a $3\times10^{12}$ cm⁻²
 sheet without dissipators is only a weak inductor ($T=0.968$ at 1 kV/cm, not 0.68 --
 the coherent run has no momentum relaxation, so it cannot produce the measured
