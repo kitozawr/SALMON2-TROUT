@@ -562,6 +562,39 @@ therefore reduces to one question: how does the sheet conductance of a doped Dir
 sheet depend on the strength of the drive? Three contributions enter $\sigma$, and
 they respond to the field in different ways and on different scales.
 
+**The semiclassical picture first.** Everything in this section is one kinematic fact
+about a cone, and it is worth having in front of the equations:
+
+![semiclassical kinematics of a doped Dirac cone in a velocity-gauge field](figures/graphene_cone_kinematics.png)
+
+*Where the field pushes, where the electron turns, when it can jump, and where Pauli
+forbids it.* In the velocity gauge the canonical label $\mathbf k$ **does not move**;
+the field enters only through $H_{\mathbf k}(\mathbf A)=v_F\boldsymbol\sigma\cdot
+(\mathbf k+\mathbf A)$. So the occupied disc stays where it is and what travels
+through it is the point of instantaneous degeneracy, $\mathbf k=-\mathbf A(t)$, the
+only place the two branches touch.
+
+* **(a), (b) — where the electron turns.** The velocity of an occupied conduction
+  state is $v_F(\mathbf k+\mathbf A)/|\mathbf k+\mathbf A|$: it points radially *away
+  from the moving degeneracy point*, and its modulus is $v_F$ whatever the field does.
+  At $A=0$ the arrows point outward from the centre and cancel — no current. As $A$
+  grows they all swing towards $+\mathbf A$, and by $u=2$ they are nearly parallel:
+  the drift cannot exceed $v_F$, so the current saturates and the sheet brightens.
+* **(a) versus (b) — where Pauli forbids the jump.** For $|A|<k_F$ the degeneracy sits
+  *inside* the occupied disc: the upper-cone state there is already filled, so no
+  interband transition is possible and the response is pure drift. For $|A|>k_F$ the
+  degeneracy has left the disc, the upper cone is empty there, and pairs are created in
+  a strip of half-width $\sqrt{E/\pi v_F}$ about its path.
+* **(c) — the consequence.** $J/nev_F=G(u)$ rises linearly and then flattens at 1;
+  the chord conductivity $G(u)/u$ is flat and then falls as $1/u$.
+* **(d), (e) — the same thing in energy and in time.** The cone slides by $-A$ while
+  the occupation stays put; the drive's own $A(t)/k_F$ shows when the excursion leaves
+  the shaded disc, which is when panel (b) applies.
+
+**One number does both.** $A_0=k_F$ ends the linear regime *and* opens pair creation —
+27 kV/cm at $E_F=0.2$ eV, 81 kV/cm at 0.6 eV. Reproduce the figure with
+`cone_kinematics.py --ef-ev 0.6 --drive DAST_E100kVcm.txt`.
+
 #### 4a.5.1 The Fermi radius $k_F$: the yardstick the doping sets
 
 Doping puts electrons into the conduction cone up to $E_F$, i.e. it fills a disc in

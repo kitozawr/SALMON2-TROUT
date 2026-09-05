@@ -733,7 +733,26 @@ Fermi sea is stationary under the dissipators; the ledger column is not a net lo
 diss,mem` on a Fermi-surface-resolving mesh (147² or denser, §3b), which replaces
 the E_F = 0.6 eV proxy by the sample's own doping. Cost as in §6.
 
-**7.12 Drift saturation, and separating it from the mesh.** The rise of T is the
+**7.12 Drift saturation, and separating it from the mesh.** The semiclassical picture
+behind all of this is drawn by `cone_kinematics.py` (figure
+`wiki/figures/graphene_cone_kinematics.png`):
+
+```bash
+python3 cone_kinematics.py --ef-ev 0.6 --drive prod_nk147/DAST_E100kVcm.txt
+```
+
+In the velocity gauge the label k does not move; the field enters only through
+H_k(A) = v_F σ·(k + A). So the occupied disc stays put and what travels through it is
+the point of instantaneous degeneracy, k = −A. An occupied conduction state has
+velocity v_F (k+A)/|k+A| — it points radially *away* from that moving point, with
+modulus v_F always — so at A = 0 the arrows cancel and by A ≫ k_F they are parallel
+and the current saturates. Whether the electron can jump to the upper cone is pure
+Pauli: for |A| < k_F the degeneracy sits inside the occupied disc and the target state
+is already filled; for |A| > k_F it has left the disc and pairs are created in a strip
+of half-width √(E/πv_F). The same number A₀ = k_F therefore ends the linear regime and
+opens pair creation — 27 kV/cm at E_F = 0.2 eV, 81 kV/cm at 0.6 eV.
+
+The rise of T is the
 kinematics of the Dirac cone: the band velocity has fixed modulus v_F, so a Fermi
 disc displaced by A saturates at J = n e v_F, and the differential conductivity is
 
