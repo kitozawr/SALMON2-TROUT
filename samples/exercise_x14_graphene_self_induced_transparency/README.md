@@ -221,6 +221,15 @@ python3 ../saturation_check.py runs/E100kVcm_mem/graphene_sit runs/dark_mem/grap
 Everything can also be driven end to end by `run_field_scan.sh` with `NK`, `EF`,
 `FIELDS` and `VARIANTS`. A 24² smoke set is in `smoke_nk24/`.
 
+**Watching a long scan.** `run_scan.sh` appends every finished field to
+`runs/scan_progress.log` as well as printing it. Use the file, not the driver's
+stdout: a driver that pipes the script through `grep` or `tee` block-buffers it, so a
+watcher tailing the driver log sees nothing at all until the whole scan ends (this bit
+us on a 14-run 297² scan). `tail -f runs/scan_progress.log`, or poll the row count —
+a finished run has `nt + 7` lines in `graphene_sit_sbe_rt.data`. A watcher should also
+alarm on "no `salmon` process while the scan is unfinished", since a crash and a
+still-running job look identical to a completion-only filter.
+
 **Why 297² for the transmission and 147² for the dissipators.** The Fermi surface
 must be resolved (§3b: k_F ≳ 3 mesh spacings means N ≳ 280 at E_F = 0.2 eV), and at
 ~300² the drift-saturation curve is converged onto the continuum (§7.12). The unitary
