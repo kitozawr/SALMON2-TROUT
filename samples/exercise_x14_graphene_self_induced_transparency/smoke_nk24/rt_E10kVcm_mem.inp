@@ -25,7 +25,7 @@
   al_vec2(1:3) = 1.22999834d0, 2.13042512d0,  0.00000000d0
   al_vec3(1:3) = 0.00000000d0, 0.00000000d0, 19.99999867d0     ! 20 Ang vacuum: L_z of the sheet cell
   nelec  = 2
-  nstate = 2
+  nstate = 4
 /
 
 &kgrid
@@ -69,4 +69,6 @@
   yn_sbe_vg_sumrule     = 'y'    ! velocity-gauge pure-gauge restoration: J(t) -= adiabatic ground-
                                  ! state current of the same truncated H_k(A(t)) (parameter-free;
                                  ! = eta N_e A/V at linear order, exact beyond; wiki/12 sec. 6a)
+  frozen_core_threshold_ev = -15.0d0 ! active (dissipated) window around E_F(Gamma): pi, pi* (+ the
+  frozen_free_threshold_ev =  14.0d0 ! state degenerate with pi* at Gamma); the unitary runs on all nstate
 /

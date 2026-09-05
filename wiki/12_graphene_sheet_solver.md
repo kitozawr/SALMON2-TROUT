@@ -1068,13 +1068,43 @@ potential ($6\times10^{-4}$ a.u.) can mix nothing. The natural reading is the
 second-order repulsion of the π\* level by the bands above it,
 $\Delta E\propto A^2$ — precisely a Drude-weight shift (§4a.2). Consequently:
 
-* **intrinsic / coherent work**: `nstate = 2` is exact to $10^{-6}$ by §6a, and the
-  ponderomotive and dressing margins above are the only thing to watch;
-* **doped work**: `nstate = 2` carries an $\approx10\,\%$ systematic in absolute
-  $\sigma$, $T$ and $D$. Ratios, shapes and field dependences at fixed `nstate` are
-  unaffected — the transmission dip of §4a.5.5 is $3.39\,\%$ at $n_b=2$ and
-  $3.41\,\%$ at $n_b=4$ — but an absolute conductance quoted against a measurement
-  should not be taken from $n_b=2$.
+**The control that separates the two.** Repeating the *same* mesh, pulse and field
+with the intrinsic filling isolates it completely:
+
+| $72^2$, 1 kV/cm | $n_b=2$ | $n_b=4$ |
+|---|---|---|
+| intrinsic, $T$ | 0.999996 | 0.999996 |
+| doped $E_F=0.6$ eV, $T$ | 0.70961 | 0.74452 |
+
+The undoped sheet is basis-independent to six digits, exactly as §6a promises; the
+doped one moves by 3.5 points. So this is not a general basis insufficiency — it is
+specifically the carriers the doping adds on top of the reference the restoration
+subtracts.
+
+**How many bands the doped sheet needs.** A scan at $72^2$, $E_F=0.6$ eV, 1 kV/cm:
+
+| `nstate` | 2 | 3 | 4 | 6 |
+|---|---|---|---|---|
+| $T$ | 0.7096 | 0.7443 | 0.7445 | 0.7298 |
+| $\mathrm{Re}\,\sigma/\sigma_{\rm univ}$ | 25.81 | 22.62 | 22.60 | 23.11 |
+| $D_{\rm spec}$ [eV] | 0.586 | 0.526 | 0.525 | 0.528 |
+
+The whole error is in the $2\to3$ step; 3 and 4 agree to $0.1\,\%$ and 6 sits within
+$2\,\%$. `nstate = 2` is the outlier, not a converged choice. **Production is therefore
+`nstate = 4`** — the largest basis still clean at $\Delta t=0.1$ fs (§6a: $n_b\ge8$
+needs $0.05$ fs) — and `make_inputs.py` defaults to it.
+
+Two consequences for what has been quoted from $n_b=2$ runs:
+
+* the converged Drude weight is $\approx0.88\,E_F$, not $E_F$. The apparent agreement
+  with the analytic Dirac value at $n_b=2$ (§4a.2) was **coincidental**: near K the
+  $2\times2$ EPM block *is* the Dirac Hamiltonian, so it returns the ideal-cone answer
+  by construction, and adding the bands above it brings in the real band structure's
+  second-order response.
+* ratios, shapes and field dependences at fixed `nstate` are unaffected — the
+  transmission dip of §4a.5.5 is $3.39\,\%$ at $n_b=2$ and $3.41\,\%$ at $n_b=4$ — so
+  every conclusion of §4a.5 about the *shape* of $T(E_0)$ stands. Only absolute
+  conductances change.
 
 ## 7. Expected physics (analytic anchors for the validation)
 

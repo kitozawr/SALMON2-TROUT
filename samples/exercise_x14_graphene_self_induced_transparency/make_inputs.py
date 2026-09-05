@@ -76,7 +76,7 @@ GS_TEMPLATE = """!##############################################################
     yn_periodic = 'y'
     al(1:3) = 2.46000197d0, 2.46000197d0, 19.99999867d0   ! informational: the EPM fixes a = 2.46 Ang
     nelec  = 2                                     ! 2 atoms x 1 pi e- -> 1 filled valence pi band
-    nstate = {nstate}                                    ! bands in the GS/SBE basis (2 = pi/pi* only; see README on the velocity-gauge f-sum rule)
+    nstate = {nstate}                                    ! bands in the GS/SBE basis (2 = pi/pi* only; 4 = production, doped runs need it -- README sec. 7.13)
 /
 
 &kgrid
@@ -211,7 +211,15 @@ def scaled_dast(t, A, e_target_kvcm, window_fs=10.0):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--nk', type=int, default=147)
-    ap.add_argument('--nstate', type=int, default=2, help='bands in the basis (2 = production with the pure-gauge restoration; static eta 2/4/8/16 -> 0.30/0.10/0.036/0.030 is removed exactly at any nstate; nstate >= 8 needs --dt-fs 0.05: the 34-90 eV bands leak population in the S4 step at 0.1 fs; see README sec. 7)')
+    ap.add_argument('--nstate', type=int, default=4,
+                    help='bands in the basis. 4 is production. The pure-gauge restoration '
+                         'makes an UNDOPED sheet basis-independent (nstate 2 and 4 agree to '
+                         '1e-6 in T), but it subtracts the reference occupation only, so the '
+                         'carriers a doping ADDS keep the truncation error: at 72^2, '
+                         'E_F = 0.6 eV, 1 kV/cm, nstate 2 -> 3 moves Re sigma by -12 %%, while '
+                         '3, 4 and 6 agree to 2 %%. nstate >= 8 needs --dt-fs 0.05 (the '
+                         '34-90 eV bands leak population in the S4 step at 0.1 fs); 4 is the '
+                         'largest basis that is clean at 0.1 fs. See README sec. 7.13.')
     ap.add_argument('--no-sumrule', action='store_true', help='switch the VG pure-gauge restoration of the current off')
     ap.add_argument('--n-layers', type=int, default=1, help='identical electronically decoupled sheets in the same local field (incoherent/twisted bilayer = 2)')
     ap.add_argument('--snap-fs', type=float, default=50.0, help='interval of the k-resolved level-population snapshots [fs] (0 = final only)')

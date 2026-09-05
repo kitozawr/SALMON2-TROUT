@@ -191,19 +191,27 @@ in the exercise; they are the server runs this exercise exists for.
 
 | set | mesh | occupation | variants | fields [kV/cm] | what it gives | cost |
 |---|---|---|---|---|---|---|
-| `prod_nk300_doped/` | 300² | E_F = 0.2 eV, 300 K | coh | 1…1000 (7) | **the converged T(E₀) curve — the headline result** | O(N_k): minutes/field per node, few core-hours total |
-| `prod_nk300_intrinsic/` | 300² | undoped | coh | 1…1000 (7) | the control the doping is measured against | same |
+| `prod_nk297_doped/` | 297² | E_F = 0.2 eV, 300 K | coh | 1…1000 (7) | **the converged T(E₀) curve — the headline result** | O(N_k): minutes/field per node, few core-hours total |
+| `prod_nk297_intrinsic/` | 297² | undoped | coh | 1…1000 (7) | the control the doping is measured against | same |
 | `prod_nk147/` | 147² | E_F = 0.2 eV, 300 K | diss, mem | 1…300 (5) + dark | τ, the mean free path, T_e, the absolute absorption | ring is O(N_k²): ≈7.5 h/run on 48 threads |
+
+All four sets are `nstate = 4` since 2026-09-05 (§7.13): the pure-gauge restoration
+makes an *undoped* sheet basis-independent, but it subtracts the reference occupation
+only, so a **doped** run at `nstate = 2` carries a 12 % error in σ. And the mesh is
+297², not 300²: 297 = 3 × 99 is an odd multiple of 3, so the Dirac point sits **on**
+the half-shifted MP mesh, which is the grid rule this exercise states for 147² and
+which the old 300² set quietly broke (k_F/Δk is 3.19 at 297² against 3.22 at 300², so
+nothing is lost).
 
 ```bash
 cd samples/exercise_x14_graphene_self_induced_transparency
 # 1) the converged transmission curve (cheap, this is the main result)
-for d in prod_nk300_doped prod_nk300_intrinsic; do
+for d in prod_nk297_doped prod_nk297_intrinsic; do
   ( cd $d && cp ../run_scan.sh . && OMP_NUM_THREADS=48 SALMON=../../../build/salmon bash run_scan.sh )
 done
-python3 field_scan_plot.py --doped 'prod_nk300_doped/runs/*/graphene_sit_sbe_rt.data'                            --intrinsic 'prod_nk300_intrinsic/runs/*/graphene_sit_sbe_rt.data'                            --t-meas 0.60 0.70 --n-sub 1.65 --out T_of_field_nk300.png
-python3 plot_occupation.py prod_nk300_doped/graphene_sit --ef-ev 0.2   # pre-flight: 140 partial k-points
-python3 drift_saturation.py prod_nk300_doped/graphene_sit --ef-ev 0.2  # the saturation curve vs continuum
+python3 field_scan_plot.py --doped 'prod_nk297_doped/runs/*/graphene_sit_sbe_rt.data'                            --intrinsic 'prod_nk297_intrinsic/runs/*/graphene_sit_sbe_rt.data'                            --t-meas 0.60 0.70 --n-sub 1.65 --continuum --out T_of_field_nk297.png
+python3 plot_occupation.py prod_nk297_doped/graphene_sit --ef-ev 0.2   # pre-flight: 140 partial k-points
+python3 drift_saturation.py prod_nk297_doped/graphene_sit --ef-ev 0.2  # the saturation curve vs continuum
 
 # 2) the dissipative half (tau and the absolute absorption)
 cd prod_nk147 && cp ../run_scan.sh . && OMP_NUM_THREADS=48 SALMON=../../../build/salmon bash run_scan.sh
@@ -213,13 +221,13 @@ python3 ../saturation_check.py runs/E100kVcm_mem/graphene_sit runs/dark_mem/grap
 Everything can also be driven end to end by `run_field_scan.sh` with `NK`, `EF`,
 `FIELDS` and `VARIANTS`. A 24² smoke set is in `smoke_nk24/`.
 
-**Why 300² for the transmission and 147² for the dissipators.** The Fermi surface
+**Why 297² for the transmission and 147² for the dissipators.** The Fermi surface
 must be resolved (§3b: k_F ≳ 3 mesh spacings means N ≳ 280 at E_F = 0.2 eV), and at
-300² the drift-saturation curve is converged onto the continuum (§7.12). The unitary
+~300² the drift-saturation curve is converged onto the continuum (§7.12). The unitary
 propagation is O(N_k), so that mesh is cheap. The graphene ring is **O(N_k²)**, so
-the same mesh costs (90000/21609)² ≈ 17× the 147² dissipative run; the dissipative
+the same mesh costs (88209/21609)² ≈ 17× the 147² dissipative run; the dissipative
 production therefore runs at 147², where the Fermi surface is marginal but the
-scattering physics is not mesh-critical. A converged dissipative 300² scan needs MPI
+scattering physics is not mesh-critical. A converged dissipative 297² scan needs MPI
 over k across nodes (`wiki/11`).
 Variants: `coh` (no dissipation), `diss` (ring e-ph + acoustic + Rana at the lattice
 T, Markovian — as x11), `mem` (diss + 2D colmem analog + dressed reference + T_e).
@@ -820,16 +828,40 @@ ledger 5×10⁻⁹ eV/cell, nex baseline identical to nstate = 2 — no leakage)
 An 11 % change in the sheet response from the basis alone, at 1 kV/cm, where the
 vector potential (6×10⁻⁴ a.u.) cannot mix anything — so this is not field-induced.
 The natural reading is the second-order repulsion of the π* level by the bands above
-it, ΔE ∝ A², which is precisely a shift of the Drude weight: D_spec falls from
-0.608 eV to 0.548 eV against the analytic E_F = 0.600.
+it, ΔE ∝ A², which is precisely a shift of the Drude weight.
 
-Two consequences. **(i)** The D → E_F agreement of §7.12's table is a consistency
-check, not an independent confirmation: near K the two-band EPM *is* the Dirac model,
-so the adiabatic band derivative the restoration leaves behind for the doped carriers
-is the exact Dirac velocity and D = E_F follows almost by construction. **(ii)**
-Absolute doped conductances from this solver carry an ~10 % basis systematic; ratios,
-shapes and field dependences at fixed nstate do not. Notably the dip of §7.12 does
-**not**: 3.41 % at nb = 4 against 3.39 % at nb = 2.
+**The control that pins it.** Same mesh, same pulse, same field, intrinsic filling:
+
+| 72², 1 kV/cm | nb = 2 | nb = 4 |
+|---|---|---|
+| intrinsic, T | 0.999996 | 0.999996 |
+| doped E_F = 0.6 eV, T | 0.70961 | 0.74452 |
+
+The undoped sheet is basis-independent to six digits, exactly as §7.1 promises; the
+doped one moves by 3.5 points. It is not a general basis insufficiency — it is
+specifically the carriers the doping adds on top of the reference that the
+restoration subtracts.
+
+**How many bands are enough** (72², E_F = 0.6 eV, 1 kV/cm):
+
+| nstate | 2 | 3 | 4 | 6 |
+|---|---|---|---|---|
+| T | 0.7096 | 0.7443 | 0.7445 | 0.7298 |
+| Re σ/σ_univ | 25.81 | 22.62 | 22.60 | 23.11 |
+| D_spec [eV] | 0.586 | 0.526 | 0.525 | 0.528 |
+
+The whole error is in the 2 → 3 step; 3 and 4 agree to 0.1 % and 6 sits within 2 %.
+**`nstate = 2` is the outlier, not a converged choice, and production is now
+`nstate = 4`** — the largest basis still clean at dt = 0.1 fs (§7.2). `make_inputs.py`
+defaults to it and the four shipped sets were regenerated on 2026-09-05.
+
+Two consequences for numbers quoted from earlier nb = 2 runs. **(i)** The converged
+Drude weight is ≈0.88 E_F, not E_F: the agreement with the analytic Dirac value at
+nb = 2 (§7.12) was coincidental, because near K the 2×2 EPM block *is* the Dirac
+Hamiltonian and returns the ideal-cone answer by construction. **(ii)** Ratios,
+shapes and field dependences at fixed nstate are unaffected — the dip of §7.12 is
+3.41 % at nb = 4 against 3.39 % at nb = 2 — so the conclusions about the *shape* of
+T(E₀) stand; only absolute conductances move.
 
 ## 8. What to look for at production (147², DAST)
 
