@@ -814,10 +814,43 @@ $v_FA_0=0.74$ eV at 100 kV/cm puts the whole distribution over them twice per cy
 Switching the ring on changes the *character* of the sheet, and that part is robust.
 At 100 kV/cm on $48^2$ the sheet goes from an inductive mirror ($R=0.33$, $A=0.007$,
 $\tau=7.9\times10^3$ fs, i.e. collisionless) to a Drude absorber ($R=0.048$,
-$A=0.231$) -- which is what a real sample is -- and $\mathrm{Re}\,\sigma$ drops from
-30.3 to $14.5\,\sigma_{\rm univ}$ while $T$ rises from 0.662 to 0.721. The same
-happens at $72^2$ and 10 kV/cm: $R=0.260\to0.019$, $A=0.059\to0.204$,
-$\mathrm{Re}\,\sigma=25.1\to10.5\,\sigma_{\rm univ}$, $T=0.681\to0.778$.
+$A=0.231$) -- which is what a real sample is. The same happens at $72^2$:
+$R=0.285\to0.020$, $A=0.010\to0.202$ at 10 kV/cm.
+
+**The full dissipative scan** ($72^2$, $E_F=0.6$ eV, ring at a 300 K lattice, 100 fs
+ring-down):
+
+| $E_0$ [kV/cm] | 10 | 30 | 60 | 100 | 300 |
+|---|---|---|---|---|---|
+| $T$ | 0.7786 | 0.7789 | 0.7978 | 0.8279 | **0.8949** |
+| $\mathrm{Re}\,\sigma/\sigma_{\rm univ}$ | 10.65 | 11.16 | 10.07 | 8.49 | **5.15** |
+| $R$ | 0.020 | 0.026 | 0.024 | 0.020 | 0.016 |
+| $A$ | 0.202 | 0.195 | 0.178 | 0.152 | 0.089 |
+
+Flat through 10–30 kV/cm, then a monotone rise to 0.895, with $\sigma$ down $54\,\%$
+from its peak. **The mesh dip is gone**: the coherent curve on this same $72^2$ mesh
+dips $7.2\,\%$ before rising (§4a.5.5 table above), the dissipative one does not dip at
+all. Momentum relaxation broadens the Fermi surface over many mesh cells, which is
+exactly what the discretization error needs.
+
+*The 3 kV/cm point is omitted, and the reason is a caveat for every low-field
+dissipative run.* Its residual current at the end of the record is
+$3.225\times10^{-8}$ a.u. against $3.214\times10^{-8}$ at 10 kV/cm — **identical, hence
+field-independent**: it is the ring relaxing the initial doped occupation, not a
+response to the drive. That floor is $48\,\%$ of the peak current at 3 kV/cm but only
+$19\,\%$ at 10, and it shows up as a broken linearity (the peak $|J|$ ratio between the
+two fields is 2.56 where it must be 3.33) and a spuriously high $T=0.797$. A
+dissipative scan therefore needs the zero-field `dark_*` control at its low-field end,
+and points where the dark current is a sizeable fraction of the driven one must be
+discarded.
+
+**A number that did not survive the mesh.** On $48^2$ this scan gave $T=0.644\to0.721$
+and a high-field $14.5\,\sigma_{\rm univ}$ against the measured $14.3$ — an almost exact
+match. At $72^2$ the same calculation gives $0.779\to0.895$ and $5.15\,\sigma_{\rm
+univ}$. The $48^2$ agreement was a coincidence of an under-resolved Fermi disc, in the
+same family as the $D\to E_F$ agreement at `nstate = 2` (§6b). What is robust is the
+*shape* — flat, then a rise of the right size once $A_0>k_F$ — not the absolute level,
+which still carries the unconverged $\tau$ below.
 
 **The absolute $\tau$, however, is not converged with the k-mesh** and must not be
 quoted as a first-principles number:

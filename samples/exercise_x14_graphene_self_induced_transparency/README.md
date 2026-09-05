@@ -698,8 +698,36 @@ coherent runs:
 
 Two things are robust here. **(i)** Scattering turns the sheet from an inductive
 mirror (R = 0.33, A = 0.007) into a Drude absorber (R = 0.048, A = 0.231) — a real
-sample, not a mirror. **(ii)** T rises 0.644 → 0.721 and the high-field conductivity
-is 14.5 σ_univ, against a measured 0.68 → 0.79 and 14.3 σ_univ.
+sample, not a mirror. **(ii)** T rises with field.
+
+**The full scan on the better mesh** (72², E_F = 0.6 eV, ring at 300 K, 100 fs tail):
+
+| E₀ [kV/cm] | 10 | 30 | 60 | 100 | 300 |
+|---|---|---|---|---|---|
+| T | 0.7786 | 0.7789 | 0.7978 | 0.8279 | **0.8949** |
+| Re σ/σ_univ | 10.65 | 11.16 | 10.07 | 8.49 | **5.15** |
+| A | 0.202 | 0.195 | 0.178 | 0.152 | 0.089 |
+
+Flat through 10–30, then monotone to 0.895, σ down 54 % from its peak — and **no mesh
+dip**, where the coherent curve on the same 72² dips 7.2 %. Momentum relaxation
+broadens the Fermi surface over many mesh cells, which is what the discretization
+error needs.
+
+**The 3 kV/cm point is omitted; read this before running any low-field dissipative
+scan.** Its end-of-record current is 3.225×10⁻⁸ a.u. against 3.214×10⁻⁸ at 10 kV/cm —
+identical, so field-independent: the ring relaxing the initial doped occupation, not a
+response to the drive. That floor is 48 % of the peak current at 3 kV/cm and 19 % at
+10, it breaks linearity (peak |J| ratio 2.56 where it must be 3.33) and inflates T to
+0.797. Run the zero-field `dark_*` control at the low-field end of every dissipative
+scan and discard points where the dark current is a sizeable fraction of the driven
+one.
+
+**A number that did not survive the mesh.** On 48² this scan gave T = 0.644 → 0.721
+and 14.5 σ_univ at high field against the measured 14.3 — an almost exact match. At
+72² the same calculation gives 0.779 → 0.895 and 5.15 σ_univ. That agreement was a
+coincidence of an under-resolved Fermi disc, in the same family as the D → E_F
+agreement at nstate = 2 (§7.13). The *shape* is robust; the absolute level carries the
+unconverged τ below.
 
 **Caveat: neither the absolute τ nor its field dependence is mesh-converged.**
 Repeating the scan on 72² (2.25× the k-points):
