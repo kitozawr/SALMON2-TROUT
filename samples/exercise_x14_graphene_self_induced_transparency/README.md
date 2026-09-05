@@ -760,7 +760,21 @@ doping (same transient, +100 fs tail, coherent, E_F = 0.6 eV unless noted):
 Two different meshes at two different dopings but the same k_F/Δk give the same bump;
 filling the disc from 1.5 to 3.6 spacings takes it from a third to under a tenth —
 and then it stops, 111² and 147² differing by 78 % in k-points and by nothing in the
-dip. How
+dip. The four-mesh figure is `wiki/figures/graphene_T_of_field_mesh.png`; rebuild it
+with
+
+```bash
+V=<scan root>
+python3 field_scan_plot.py \
+  --doped "$V/n147/runs/*/graphene_sit_sbe_rt.data" --doped-label '147² ($k_F/\Delta k$ = 4.7)' \
+  --series "111² (3.6):$V/n111/runs/*/graphene_sit_sbe_rt.data" \
+           "72² (2.3):$V/n72/runs/*/graphene_sit_sbe_rt.data" \
+           "48² (1.5):$V/n48/runs/*/graphene_sit_sbe_rt.data" \
+  --continuum --t-meas 0.60 0.70 --n-sub 1.65 --out T_of_field_mesh.png
+```
+
+The four curves agree above A₀ = k_F to better than 0.02 and disagree below it, which
+is what makes the disagreement a discretization error rather than a field scale. How
 much of the bump reaches T depends on the sheet impedance, which is why the same
 artifact makes a 11.8 % dent at 0.6 eV and 6.5 % at 0.4 eV — the dip depth is not the
 artifact, the conductivity bump is. Reproduce the comparison with

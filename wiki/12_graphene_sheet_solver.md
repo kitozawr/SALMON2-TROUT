@@ -406,6 +406,27 @@ break the linear relation between current and field. All three are separable:
    compared as sheet conductances in the same units, nothing fitted in between, the
    calculated fall across saturation ($-56\,\%$) against the measured $-42\,\%$.
 
+**The same scan on four meshes.** The $48^2$ figure above is the coarsest member of a
+series. Repeating it at $72^2$, $111^2$ and $147^2$ — same doping, same transient, same
+solver settings, only $\Delta k$ changing — separates what the mesh does from what the
+sheet does:
+
+![T(E0) of a doped Dirac sheet on four k-meshes, against the continuum drift-saturation curve](figures/graphene_T_of_field_mesh.png)
+
+*$E_F=0.6$ eV, coherent, self-consistent sheet, 100 fs ring-down; the legend gives
+$k_F/\Delta k$, the number of mesh spacings inside the Fermi disc.* **Left** —
+transmission against peak field. The four curves agree above $A_0=k_F$ (shaded) to
+better than 0.02 and disagree below it, which is the signature of a discretization
+error rather than a field scale: the dip at 60 kV/cm deepens from $3.3\,\%$ to
+$11.8\,\%$ as the disc empties from 4.7 spacings to 1.5. Dotted: the continuum
+drift-saturation prediction $T(\sigma_{\rm lin}G(u)/u)$ of §4a.5.3, anchored on each
+series' own lowest-field point and drawn only where the cone picture behind it holds
+($u\le2$); the gap to it at $u\lesssim1$ is the artifact, and it closes with the mesh.
+**Right** — the sheet conductivity, with the two conductances Eq. (4a.1) extracts from
+the measured transmissions. The spurious pre-saturation peak falls from $+32\,\%$ to
+$+7.6\,\%$ over the series while the collapse above saturation, $-56\,\%$, does not move.
+Reproduce with `field_scan_plot.py --continuum --series ...` (x14 README §7.12).
+
 **How the substrate and the layer count enter these figures — read before comparing
 with a measurement.**
 

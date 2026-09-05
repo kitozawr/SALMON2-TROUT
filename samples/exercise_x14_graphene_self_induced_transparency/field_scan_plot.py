@@ -124,6 +124,8 @@ def main(argv=None):
                          'to it is the k-mesh artifact of the Fermi disc')
     ap.add_argument('--out', default='doped_vs_intrinsic.png')
     ap.add_argument('--title', default=None)
+    ap.add_argument('--doped-label', default=None,
+                    help="legend label for the --doped series (default: 'doped, E_F = ... (metal)')")
     args = ap.parse_args(argv)
 
     try:
@@ -148,8 +150,8 @@ def main(argv=None):
         if arr.size:
             extra.append((lab, arr, asig, _ef or ef, atk))
     fig, ax = plt.subplots(1, npan, figsize=(5.5 * npan, 4.0))
-    ax[0].semilogx(dop[:, 0], dop[:, 1], 'o-', color='#c0392b',
-                   label=f'doped, $E_F$ = {ef:g} eV (metal)')
+    dlab = args.doped_label or f'doped, $E_F$ = {ef:g} eV (metal)'
+    ax[0].semilogx(dop[:, 0], dop[:, 1], 'o-', color='#c0392b', label=dlab)
     for (lab, arr, asig, aef, atk), col, mk in zip(extra, ('#e67e22', '#16a085', '#8e44ad'), ('D-', 'v-', '^-')):
         ax[0].semilogx(arr[:, 0], arr[:, 1], mk, ms=5, color=col, label=lab)
         if args.continuum:
@@ -178,18 +180,19 @@ def main(argv=None):
     if e_sat:
         ax[0].axvline(e_sat, ls='--', c='#7f8c8d', lw=1)
         ax[0].axvspan(e_sat, max(dop[:, 0].max(), 1.0), color='#f1c40f', alpha=0.13)
-        ax[0].annotate('$A_0 = k_F$ (current saturation)',
-                       xy=(e_sat * 1.15, 0.03), xycoords=('data', 'axes fraction'),
-                       fontsize=8, va='bottom', color='#7f8c8d')
+        ax[0].annotate('$A_0 = k_F$\n(current saturation)',
+                       xy=(e_sat * 1.15, 0.97), xycoords=('data', 'axes fraction'),
+                       fontsize=8, va='top', color='#7f8c8d')
     zs_meas = []
     for tm in args.t_meas:
         zs, t_bare = sheet_from_transmission(tm, args.n_sub)
         zs_meas.append(zs / Z0 / SIGMA_UNIV)
         ax[0].axhline(tm / t_bare, ls=':', c='#27ae60', lw=1.2)
     if args.t_meas:
-        ax[0].text(dop[0, 0] * 1.15, min(t / sheet_from_transmission(t, args.n_sub)[1] for t in args.t_meas),
-                   'measured sheet transmission (substrate divided out)', fontsize=7.5,
-                   color='#27ae60', va='bottom')
+        ax[0].text(0.995, 0.02, 'green: measurement, substrate divided out',
+                   transform=ax[0].transAxes, fontsize=7.5, color='#27ae60',
+                   ha='right', va='bottom', zorder=5,
+                   bbox=dict(fc='white', ec='none', alpha=0.75, pad=1.5))
     ax[0].set_xlabel('peak field $E_0$ [kV/cm]'); ax[0].set_ylabel('transmission $T$')
     ax[0].set_title(args.title or ('Same mesh, same pulse: only the initial occupation differs'
                                    if ins.size else 'Transmission of a doped Dirac sheet against the peak field'),
@@ -216,13 +219,15 @@ def main(argv=None):
                             fontsize=9)
             ax[1].grid(alpha=0.25)
     ia = npan - 1
-    ax[ia].semilogx(dop[:, 0], dop[:, 4], 'o-', color='#c0392b', label=r'Re $\sigma$, doped')
+    ax[ia].semilogx(dop[:, 0], dop[:, 4], 'o-', color='#c0392b', label=f'Re $\\sigma$, {dlab}')
     for (lab, arr, _s, _e, _t), col, mk in zip(extra, ('#e67e22', '#16a085', '#8e44ad'), ('D-', 'v-', '^-')):
         ax[ia].semilogx(arr[:, 0], arr[:, 4], mk, ms=5, color=col, label=f'Re $\\sigma$, {lab}')
     for z, tm in zip(zs_meas, args.t_meas):
         ax[ia].axhline(z, ls=':', c='#27ae60')
-        ax[ia].text(dop[0, 0] * 1.2, z * 1.02, f'measured {z:.1f} $\\sigma_{{univ}}$ (T = {100 * tm:.0f} %)',
-                    fontsize=7.5, color='#27ae60')
+        ax[ia].annotate(f'measured {z:.1f} $\\sigma_{{univ}}$ (T = {100 * tm:.0f} %)',
+                        xy=(0.985, z), xycoords=('axes fraction', 'data'), fontsize=7.5,
+                        color='#27ae60', ha='right', va='bottom', zorder=5,
+                        bbox=dict(fc='white', ec='none', alpha=0.75, pad=1.5))
     if e_sat:
         ax[ia].axvline(e_sat, ls='--', c='#7f8c8d', lw=1)
     if len(dop) > 1:
@@ -230,7 +235,7 @@ def main(argv=None):
         drop = 100.0 * (dop[-1, 4] / dop[imax, 4] - 1.0)
         ax[ia].set_title(rf'Sheet conductivity: {drop:+.0f} % from its peak to {dop[-1, 0]:.0f} kV/cm', fontsize=9)
     ax[ia].set_xlabel('peak field $E_0$ [kV/cm]'); ax[ia].set_ylabel(r'Re $\sigma$ / $\sigma_{univ}$')
-    ax[ia].legend(fontsize=8); ax[ia].grid(alpha=0.25)
+    ax[ia].legend(fontsize=8, loc='lower left', framealpha=0.9); ax[ia].grid(alpha=0.25)
     # ---- the provenance line the reader needs before comparing with a measurement:
     # what the calculation contains (no substrate, N sheets) and what was done to the
     # measured numbers (the substrate's Fresnel factor DIVIDED OUT, not added).
