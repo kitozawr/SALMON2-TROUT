@@ -454,6 +454,15 @@ with a measurement.**
 100 fs ring-down, coherent, self-consistent sheet; only `sbe_sheet_nlayers` and
 `sbe_ef_ev` differ. $u=A_0/k_F$ is the drift parameter of §4a.5.1.
 
+![one layer against two at two Fermi levels](figures/graphene_layers_1_vs_2.png)
+
+*Left* — the two occupations, each with one and two layers, and the naive $T_1^2$
+dotted. The dotted curve lies **above** the propagated two-layer curve everywhere, at
+both dopings. *Right* — the size of that error, $100(T_1^2/T_2-1)$: $+15\,\%$ at
+$E_F=0.6$ eV and $+11\,\%$ at $0.4$ eV in the linear regime, never negative. Dashed
+verticals mark each doping's own saturation field $A_0=k_F$ (81 and 54 kV/cm), where
+the transmission of both stacks turns up. Reproduce with `layers_plot.py`.
+
 | $E_0$ [kV/cm] | 3 | 10 | 30 | 100 | 300 |
 |---|---|---|---|---|---|
 | **$E_F=0.6$ eV** ($E_{\rm sat}=81$ kV/cm) | $u=0.04$ | 0.12 | 0.37 | 1.24 | 3.71 |
@@ -991,6 +1000,81 @@ $$
 \frac{T_1^2}{T_2}=\frac{16\,|1+z|^2}{|2+z|^4}=1+\tfrac12\big[(\mathrm{Im}\,z)^2-(\mathrm{Re}\,z)^2\big]+\mathcal O(z^3). \tag{6a}
 $$
 For a purely **dissipative** sheet ($z$ real) $T_1^2<T_2$: squaring *under*estimates the bilayer transmission — at the sample's $z=0.565$ by $-9.6\,\%$ ($T_1^2/T_2=0.904$). For a purely **reactive** (inductive) sheet ($z$ imaginary), the same $|z|$ gives $T_1^2/T_2=1.133$, a $+13\,\%$ *over*estimate. A doped THz sheet is a mixture of the two, so the error can have either sign and $|z|$ alone does not bound it; only $\lesssim1\,\%$ for $|z|\le0.15$ ($T_1\ge0.87$) is safe. Both estimates also ignore that each layer sees the field reduced by *both* currents, which is what makes the non-linear (field-dependent) part genuinely non-multiplicative.
+
+## 6b. How large must `nstate` be?
+
+`wiki/03` states the general rule — *keep `nstate` large for the basis and pay only
+for the window you dissipate*, because a strong field pushes population up through the
+high bands and brings it back, so velocity-gauge basis sufficiency has to be preserved
+even where nothing is dissipated. x14 runs production at `nstate = 2`, which is a
+departure, and this section says on what grounds and where the grounds run out. Two
+different requirements are involved and they bind at opposite ends of the field range.
+
+### 6b.1 The ponderomotive requirement, and why it is not the binding one here
+
+In this solver the velocity-gauge Hamiltonian is built as
+$H_{nm}(\mathbf A)=\varepsilon_n\delta_{nm}+\mathbf A\cdot\mathbf p_{nm}$
+(`build_HVG`): **the $A^2/2$ term is not there**. It is band-uniform, so it is a global
+phase and drops out of every commutator; the same cancellation is why the scattering
+thresholds must not restore it (`wiki/00`, 2026-07-12). The ponderomotive energy
+therefore never shifts a level in this code, and "the top level must lie above $U_p$"
+is a statement about whether the basis can represent the *dressed* states, whose scale
+is the off-diagonal $\mathbf A\cdot\mathbf p$. On the Dirac cone
+$\mathbf p=v_F\boldsymbol\sigma$ exactly, so that scale is $v_FA_0$ — the same energy
+the drift picture of §4a.5.3 uses, and larger than $U_p$ everywhere below
+$A_0=2v_F=0.88$ a.u.
+
+| $E_0$ [kV/cm] | 1 | 10 | 30 | 100 | 300 | 1000 |
+|---|---|---|---|---|---|---|
+| $A_0$ [a.u.] | 0.0006 | 0.0062 | 0.0186 | 0.0621 | 0.1864 | 0.6213 |
+| $U_p=A_0^2/2$ [eV] | $7\times10^{-6}$ | 0.001 | 0.005 | 0.053 | 0.473 | **5.25** |
+| $v_FA_0$ [eV] | 0.007 | 0.074 | 0.223 | 0.742 | 2.23 | **7.42** |
+| $A_0/|\mathbf b|$ | 0.0004 | 0.004 | 0.012 | 0.040 | 0.119 | **0.398** |
+
+Against the `nstate = 2` basis of this exercise, whose two bands are the full π
+($-7.79$ to $0$ eV) and π\* ($0$ to $+19.68$ eV) pairs over the whole zone, with the
+third band starting at $+13.13$ eV above the Dirac point:
+
+* **the ponderomotive criterion is satisfied at every field in the scan** — the basis
+  top is $19.68$ eV against $U_p\le5.25$ eV, a factor 3.7 even at 1000 kV/cm;
+* the *dressing* scale is the tighter one, $v_FA_0=7.42$ eV at 1000 kV/cm against the
+  $13.13$ eV to the third band — a factor 1.8, i.e. **marginal**. At 300 kV/cm and
+  below it is a factor 6 or more and the two-band basis is uncontroversial.
+
+So the answer to "should `nstate` be raised until the top level clears $U_p$?" is that
+on this system it already does, and by the tighter $v_FA_0$ measure the two-band basis
+is comfortable to $\sim300$ kV/cm and marginal at 1000.
+
+### 6b.2 The requirement that does bind: f-sum completeness of the doped current
+
+The constraint that actually limits `nstate` here is field-*independent*. A truncated
+basis captures only the fraction $S=\langle\sum_m2|p_{nm}|^2/\Delta\varepsilon\rangle$
+of the f-sum strength — 0.70 for two bands — and the missing part appears as an
+uncancelled diamagnetic current $\propto A$ (§6a). The pure-gauge restoration removes
+it *exactly*, but only for the occupation it is evaluated with, which is the undoped
+reference: for the intrinsic sheet $n_b=2,3,4$ then agree to $10^{-6}$ in $T$ (§6a).
+The carriers **added** on top of that reference get no such subtraction, and they do
+not converge as fast. Same mesh, same doping, 1 kV/cm — where $U_p=7\times10^{-6}$ eV
+and no ponderomotive argument can apply at all:
+
+| $147^2$, $E_F=0.6$ eV, 1 kV/cm | `nstate = 2` | `nstate = 4` |
+|---|---|---|
+| $T$ | 0.70004 | 0.73477 |
+| $\mathrm{Re}\,\sigma/\sigma_{\rm univ}$ | 26.92 | 23.77 |
+| $D_{\rm spec}$ [eV] (analytic $E_F=0.600$) | 0.608 | 0.548 |
+
+An $11\,\%$ change in the sheet response from the basis alone, at a field whose vector
+potential ($6\times10^{-4}$ a.u.) can mix nothing. The natural reading is the
+second-order repulsion of the π\* level by the bands above it,
+$\Delta E\propto A^2$ — precisely a Drude-weight shift (§4a.2). Consequently:
+
+* **intrinsic / coherent work**: `nstate = 2` is exact to $10^{-6}$ by §6a, and the
+  ponderomotive and dressing margins above are the only thing to watch;
+* **doped work**: `nstate = 2` carries an $\approx10\,\%$ systematic in absolute
+  $\sigma$, $T$ and $D$. Ratios, shapes and field dependences at fixed `nstate` are
+  unaffected — the transmission dip of §4a.5.5 is $3.39\,\%$ at $n_b=2$ and
+  $3.41\,\%$ at $n_b=4$ — but an absolute conductance quoted against a measurement
+  should not be taken from $n_b=2$.
 
 ## 7. Expected physics (analytic anchors for the validation)
 

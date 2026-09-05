@@ -432,7 +432,14 @@ substrate's own Fresnel factor must also be divided out *before* squaring. For B
 itself changes and neither estimate applies.
 
 **The same comparison on a DOPED sheet (72², +100 fs tail, coherent), which is what
-a real CVD bilayer is:**
+a real CVD bilayer is** — figure `wiki/figures/graphene_layers_1_vs_2.png`, rebuilt by
+
+```bash
+python3 layers_plot.py --set 0.6 'ef0.6_L1/runs/*/*_rt.data' 'ef0.6_L2/runs/*/*_rt.data' \
+                       --set 0.4 'ef0.4_L1/runs/*/*_rt.data' 'ef0.4_L2/runs/*/*_rt.data' \
+                       --t-meas 0.60 0.70 --out layers.png
+```
+
 
 | E₀ [kV/cm] | 3 | 10 | 30 | 100 | 300 |
 |---|---|---|---|---|---|
