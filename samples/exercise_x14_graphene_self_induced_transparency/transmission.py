@@ -415,6 +415,13 @@ def main(argv=None):
               f'{sp:6.2f}  ' + (f'T{args.predict_layers}={r["T_stack"]:.5f}  ' if 'T_stack' in r else '')
               + (f'dark={100 * r["dark_frac"]:.1f}%{"!" if r["dark_frac"] > 0.10 else ""} '
                  f'T_sub={r["T_dark_sub"]:.5f}  ' if 'dark_frac' in r else '') + f'{f}')
+    neg = [r for r in rows if r['A'] < -1e-6]
+    if neg:
+        print('# *** NEGATIVE ABSORPTION in ' + ', '.join(f'{r["E0_kvcm"]:.0f} kV/cm (A = {r["A"]:+.3f})'
+                                                          for r in neg))
+        print('#     A passive sheet cannot emit. This means the electronic state is INVERTED and the'
+              '\n#     sheet has gain -- check the ground state for "ZERO partially occupied k-points"'
+              '\n#     (a doping the mesh cannot represent) before using any number from that run.')
     if rows and rows[0].get('nk'):
         sp = rows[0].get('shell_pts', np.nan)
         flag = 'RESOLVED' if sp >= 3 else ('marginal' if sp >= 1 else 'UNRESOLVED -- the mesh sees a few discrete'

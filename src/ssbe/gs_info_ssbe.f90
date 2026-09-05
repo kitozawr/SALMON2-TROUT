@@ -274,10 +274,28 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
                 write(*, '(a)') '#   pure-gauge f-sum-rule reference stays the UNDOPED filling (wiki/12 sec. 6a)'
                 write(*, '(a,i0,a)') '#   partially occupied k-points (Fermi surface on the mesh): ', nfs, &
                     ' -- the intraband/Drude response is carried by these'
-                if (nfs < 20 .and. abs(dne) > 0d0) write(*, '(a)') &
-                    '#   WARNING: the Fermi surface is UNDER-RESOLVED (< 20 partially occupied k-points):'// &
-                    ' the carrier density and the Drude weight are set by a few mesh points.'// &
-                    ' Raise num_kgrid (k_F = E_F/hbar v_F must exceed a few mesh spacings) or |sbe_ef_ev|.'
+                if (nfs == 0 .and. abs(dne) > 0d0) then
+                    ! Qualitatively worse than "few": the doping charge has NO partially
+                    ! occupied state to occupy, so it lands entirely on fully filled or
+                    ! empty levels and the initial state is not a Fermi-Dirac metal at
+                    ! all. Observed consequence (33^2, E_F = 0.2 eV, ring on): population
+                    ! inversion and a sheet with NEGATIVE absorption, A = -0.24, the
+                    ! electrons pumping 1.2e-3 eV/cell into the field.
+                    write(*, '(a)') &
+                        '#   *** ERROR-LEVEL WARNING: ZERO partially occupied k-points. The Fermi disc'// &
+                        ' contains no mesh point, so the requested doping cannot be represented:'
+                    write(*, '(a)') &
+                        '#       the added charge lands on fully occupied / empty levels, the initial'// &
+                        ' state is not a metal, and the run can develop population inversion and GAIN'
+                    write(*, '(a)') &
+                        '#       (negative absorption). Raise num_kgrid until k_F = E_F/hbar v_F spans'// &
+                        ' at least a few mesh spacings, or raise |sbe_ef_ev|. Do not use this run.'
+                else if (nfs < 20 .and. abs(dne) > 0d0) then
+                    write(*, '(a)') &
+                        '#   WARNING: the Fermi surface is UNDER-RESOLVED (< 20 partially occupied k-points):'// &
+                        ' the carrier density and the Drude weight are set by a few mesh points.'// &
+                        ' Raise num_kgrid (k_F = E_F/hbar v_F must exceed a few mesh spacings) or |sbe_ef_ev|.'
+                end if
             end if
         end block
     end if
