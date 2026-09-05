@@ -115,8 +115,10 @@ def main(argv=None):
     ap.add_argument('--intrinsic', nargs='*', default=[], help='*_sbe_rt.data of the undoped control scan')
     ap.add_argument('--t-meas', nargs='*', type=float, default=[], help='measured transmissions, substrate included')
     ap.add_argument('--series', nargs='*', default=[],
-                    help='extra doped series to overlay, each "label:glob" (e.g. "with e-ph ring:diss/runs/*/..._rt.data"); '
-                         'plotted on the T and sigma panels beside --doped')
+                    help='extra doped series to overlay, each "label:glob[:glob...]" (e.g. '
+                         '"with e-ph ring:diss/runs/*/..._rt.data"); several colon-separated '
+                         'globs are unioned, so a series can be built from a subset of a run '
+                         'directory. Plotted on the T and sigma panels beside --doped')
     ap.add_argument('--n-sub', type=float, default=1.65, help='substrate index for --t-meas (PET ~ 1.65)')
     ap.add_argument('--continuum', action='store_true',
                     help='overlay the parameter-free continuum drift-saturation curve '
@@ -146,7 +148,10 @@ def main(argv=None):
     extra = []
     for spec in args.series:
         lab, _, pat = spec.partition(':')
-        arr, _ef, asig, atk, _nl, _nk = collect([pat])
+        # the remainder may hold several colon-separated globs, so a series can be
+        # assembled from a subset of a run directory (e.g. dropping a field whose
+        # control run showed it contaminated)
+        arr, _ef, asig, atk, _nl, _nk = collect([p for p in pat.split(':') if p])
         if arr.size:
             extra.append((lab, arr, asig, _ef or ef, atk))
     fig, ax = plt.subplots(1, npan, figsize=(5.5 * npan, 4.0))
