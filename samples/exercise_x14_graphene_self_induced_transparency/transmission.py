@@ -285,7 +285,28 @@ def check_complete(path, nrows, allow_partial=False):
     return nt
 
 
-def analyze(path, lz=LZ_BOHR, area=AREA_BOHR2, n_sub=1.0, n_layers=None, allow_partial=False):
+def dark_fraction(J_s, J_dark):
+    """|J_dark|max / |J_s|max -- how much of a driven run is the zero-field artifact.
+
+    A dissipative run started from a Fermi-Dirac occupation carries a current even at
+    zero field: the ring's fixed point is not exactly the initial distribution, and on
+    a finite mesh its relaxation is not isotropic. That current is FIELD-INDEPENDENT,
+    so it matters in proportion to how weak the drive is. Measured at 72^2, E_F = 0.6
+    eV (|J_dark|max = 2.42e-8 a.u.): 36 % of the peak current at 3 kV/cm, 14 % at 10,
+    3.3 % at 30, 0.6 % at 300.
+
+    The effect on T, from subtracting the dark run and re-applying the sheet BC:
+    +0.047 at 3 kV/cm, +0.004 at 10, below 0.001 from 30 kV/cm up. Above ~10 % the
+    point is unusable -- and NOT repairable by subtraction either, because the dark
+    current of a driven run is not the field-free one (the field changes the
+    distribution the ring acts on), so the first-order correction over-shoots.
+    """
+    p = np.max(np.abs(J_s))
+    return float(np.max(np.abs(J_dark)) / p) if p > 0 else np.nan
+
+
+def analyze(path, lz=LZ_BOHR, area=AREA_BOHR2, n_sub=1.0, n_layers=None, allow_partial=False,
+            dark=None):
     d = read_rt(path)
     t = d['Time']
     check_complete(path, len(t), allow_partial)
@@ -316,6 +337,13 @@ def analyze(path, lz=LZ_BOHR, area=AREA_BOHR2, n_sub=1.0, n_layers=None, allow_p
                I_wcm2=(E0 * AU_E_VM)**2 / (2.0 * Z0_SI) / 1e4, hw_ev=w0 * AU_EV,
                T=T, R=R, A=A, T_band=Tb, R_band=Rb, A_band=Ab, resig=resig, sig_c=sig_c,
                S_rr=radiation_reaction_term(t, E_inc, J_s), A_energy=np.nan, nk=count_kpoints(path))
+    if dark is not None:
+        dd = read_rt(dark)
+        Jd = -dd[f'Jm_{ax}'] * lz * n_layers
+        m = min(len(Jd), len(J_s))
+        res['dark_frac'] = dark_fraction(J_s, Jd[:m])
+        Etd, Erd = sheet_fields(E_inc[:m], J_s[:m] - Jd[:m], n_sub)
+        res['T_dark_sub'] = fluence_tra(t[:m], E_inc[:m], Etd, Erd, n_sub)[0]
     epath = path.replace('_sbe_rt.data', '_sbe_rt_energy.data')
     if os.path.exists(epath):
         dE = read_energy_delta(epath)                                    # Ha per cell
@@ -340,6 +368,11 @@ def main(argv=None):
                     help='also print the fluence transmission of N identical decoupled '
                          'sheets predicted from this ONE-layer run via its own '
                          'frequency-resolved sigma(omega) (see stack_from_one_layer)')
+    ap.add_argument('--dark', default=None, metavar='DARK_RT',
+                    help='the zero-field control run of the same mesh and doping. Reports what '
+                         'fraction of each driven current is the field-independent ring artifact '
+                         'and what T becomes without it. Above ~10 %% the point is unusable (see '
+                         'dark_fraction)')
     ap.add_argument('--allow-partial', action='store_true',
                     help='analyse records shorter than the run\'s own nt (default: refuse -- '
                          'the fluence integrals of a half-finished run are meaningless)')
@@ -363,7 +396,7 @@ def main(argv=None):
     for f in files:
         try:
             r, _ = analyze(f, args.lz_bohr, args.area_bohr2, args.n_sub, args.n_layers,
-                           allow_partial=args.allow_partial)
+                           allow_partial=args.allow_partial, dark=args.dark)
         except TruncatedRun as exc:
             print(f'# SKIPPED (incomplete): {exc}')
             continue
@@ -379,7 +412,9 @@ def main(argv=None):
         sp = r.get('shell_pts', np.nan)
         print(f'{r["E0_kvcm"]:10.3f} {r["I_wcm2"]:10.3e} {r["hw_ev"]:7.3f} {r["mode"]:>4} {r["dEt"]:8.1e} {r["T"]:9.6f} '
               f'{r["R"]:9.2e} {r["A"]:9.6f} {r["A_energy"]:9.6f} {r["S_rr"]:9.2e} {r["T_band"]:8.5f} {r["resig"]:7.3f} '
-              f'{sp:6.2f}  ' + (f'T{args.predict_layers}={r["T_stack"]:.5f}  ' if 'T_stack' in r else '') + f'{f}')
+              f'{sp:6.2f}  ' + (f'T{args.predict_layers}={r["T_stack"]:.5f}  ' if 'T_stack' in r else '')
+              + (f'dark={100 * r["dark_frac"]:.1f}%{"!" if r["dark_frac"] > 0.10 else ""} '
+                 f'T_sub={r["T_dark_sub"]:.5f}  ' if 'dark_frac' in r else '') + f'{f}')
     if rows and rows[0].get('nk'):
         sp = rows[0].get('shell_pts', np.nan)
         flag = 'RESOLVED' if sp >= 3 else ('marginal' if sp >= 1 else 'UNRESOLVED -- the mesh sees a few discrete'

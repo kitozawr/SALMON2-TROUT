@@ -847,13 +847,28 @@ exactly what the discretization error needs.
 *The 3 kV/cm point is omitted, and the reason is a caveat for every low-field
 dissipative run.* Its residual current at the end of the record is
 $3.225\times10^{-8}$ a.u. against $3.214\times10^{-8}$ at 10 kV/cm — **identical, hence
-field-independent**: it is the ring relaxing the initial doped occupation, not a
-response to the drive. That floor is $48\,\%$ of the peak current at 3 kV/cm but only
-$19\,\%$ at 10, and it shows up as a broken linearity (the peak $|J|$ ratio between the
-two fields is 2.56 where it must be 3.33) and a spuriously high $T=0.797$. A
-dissipative scan therefore needs the zero-field `dark_*` control at its low-field end,
-and points where the dark current is a sizeable fraction of the driven one must be
-discarded.
+field-independent**: the ring's fixed point is not exactly the initial Fermi–Dirac
+occupation, and on a finite mesh its relaxation is not isotropic, so the sheet carries
+a current with no field at all. The zero-field `dark_diss` control on this mesh
+measures it directly: $|J_{\rm dark}|_{\max}=2.42\times10^{-8}$ a.u., steady over the
+whole 384 fs record ($2.19$, $2.31$, $1.93\times10^{-8}$ at 50, 200, 384 fs), sign
+mixed, not growing. Being field-independent it matters in proportion to how weak the
+drive is:
+
+| $E_0$ [kV/cm] | 3 | 10 | 30 | 60 | 100 | 300 |
+|---|---|---|---|---|---|---|
+| $\|J_{\rm dark}\|/\|J\|_{\rm peak}$ | **36 %** | **14 %** | 3.3 % | 2.0 % | 1.3 % | 0.6 % |
+| $T$ as reported | 0.7968 | 0.7786 | 0.7789 | 0.7978 | 0.8279 | 0.8949 |
+| $T$ with the dark run subtracted | 0.8439 | 0.7826 | 0.7780 | 0.7973 | 0.8275 | 0.8947 |
+| shift | **+0.047** | +0.004 | −0.001 | −0.000 | −0.000 | −0.000 |
+
+**The rule.** Above $\sim10\,\%$ the point is unusable, and *not repairable by
+subtraction either*: the dark current of a driven run is not the field-free one,
+because the field changes the distribution the ring acts on, so the first-order
+correction overshoots — at 3 kV/cm it lands on 0.844 where the linear-regime plateau
+is 0.778. Below $\sim3\,\%$ the correction is under 0.001 and can be ignored. Between
+them, subtract and quote both. Every dissipative scan therefore needs its `dark_*`
+control, and `transmission.py --dark` prints the fraction and flags it past $10\,\%$.
 
 **A number that did not survive the mesh.** On $48^2$ this scan gave $T=0.644\to0.721$
 and a high-field $14.5\,\sigma_{\rm univ}$ against the measured $14.3$ — an almost exact

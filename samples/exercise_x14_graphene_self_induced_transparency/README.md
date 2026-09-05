@@ -714,13 +714,26 @@ broadens the Fermi surface over many mesh cells, which is what the discretizatio
 error needs.
 
 **The 3 kV/cm point is omitted; read this before running any low-field dissipative
-scan.** Its end-of-record current is 3.225×10⁻⁸ a.u. against 3.214×10⁻⁸ at 10 kV/cm —
-identical, so field-independent: the ring relaxing the initial doped occupation, not a
-response to the drive. That floor is 48 % of the peak current at 3 kV/cm and 19 % at
-10, it breaks linearity (peak |J| ratio 2.56 where it must be 3.33) and inflates T to
-0.797. Run the zero-field `dark_*` control at the low-field end of every dissipative
-scan and discard points where the dark current is a sizeable fraction of the driven
-one.
+scan.** A dissipative run started from a Fermi–Dirac occupation carries a current at
+**zero field**: the ring's fixed point is not exactly that occupation, and on a finite
+mesh its relaxation is not isotropic. The `dark_diss` control measures it —
+|J_dark|max = 2.42×10⁻⁸ a.u., steady over the whole 384 fs record. Being
+field-independent it matters in proportion to how weak the drive is:
+
+| E₀ [kV/cm] | 3 | 10 | 30 | 60 | 100 | 300 |
+|---|---|---|---|---|---|---|
+| dark / peak current | **36 %** | **14 %** | 3.3 % | 2.0 % | 1.3 % | 0.6 % |
+| T as reported | 0.7968 | 0.7786 | 0.7789 | 0.7978 | 0.8279 | 0.8949 |
+| T, dark subtracted | 0.8439 | 0.7826 | 0.7780 | 0.7973 | 0.8275 | 0.8947 |
+| shift | **+0.047** | +0.004 | −0.001 | −0.000 | −0.000 | −0.000 |
+
+Above ~10 % the point is unusable and **not repairable by subtraction**: the dark
+current of a driven run is not the field-free one (the field changes the distribution
+the ring acts on), so the first-order correction overshoots — at 3 kV/cm it lands on
+0.844 where the linear plateau is 0.778. Below ~3 % the correction is under 0.001.
+Between them, subtract and quote both. Run `dark_*` with every dissipative scan;
+`transmission.py --dark runs/dark_diss/graphene_sit_sbe_rt.data` prints the fraction
+and flags anything past 10 %.
 
 **A number that did not survive the mesh.** On 48² this scan gave T = 0.644 → 0.721
 and 14.5 σ_univ at high field against the measured 14.3 — an almost exact match. At
