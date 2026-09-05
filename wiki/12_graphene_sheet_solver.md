@@ -312,11 +312,32 @@ throughout, which is a check on both.
 The density is good to a few per cent as soon as the Fermi circle contains a shell;
 the Drude weight needs three or four. Read against $k_F/\Delta k$ rather than against
 the mesh, the deficit collapses onto one curve regardless of doping — $0.85$–$0.90$ at
-$1.5$ spacings, $0.97$ at $2.3$–$3.6$, and $1.00$ at $4.7$, i.e. **the calculated Drude
-weight becomes the analytic $D=E_F$ of the Dirac cone once the disc is resolved**, with
-no parameter anywhere in the comparison. Quantitative Drude work therefore wants
-$k_F\gtrsim3\,\Delta k$ (Eq. 4a.3); below that the deficit is a field-independent scale
-error, so the *shape* of $\sigma(E_0)$ survives while its absolute value does not.
+$1.5$ spacings, $0.97$ at $2.3$–$3.6$, and $1.00$ at $4.7$. Quantitative Drude work
+therefore wants $k_F\gtrsim3\,\Delta k$ (Eq. 4a.3); below that the deficit is a
+field-independent scale error, so the *shape* of $\sigma(E_0)$ survives while its
+absolute value does not.
+
+**How much of that last row is a real convergence, though?** Every number in the table
+is `nstate = 2`. Repeating the $147^2$, $E_F=0.6$ eV run at `nstate = 4` (1 kV/cm,
+$\Delta t=0.1$ fs, energy ledger $5\times10^{-9}$ eV per cell, no leakage) gives
+$D_{\rm spec}=0.548$ eV instead of $0.608$, $\mathrm{Re}\,\sigma=23.8$ instead of
+$27.0\,\sigma_{\rm univ}$, and $T=0.735$ instead of $0.700$ — an $11\,\%$ change in the
+sheet response from the basis alone, at a field so small that the vector potential
+cannot mix anything. Two things follow.
+
+* The $D/E_F\to1$ agreement at `nstate = 2` is a **consistency check, not an
+  independent confirmation**. Near K the two-band EPM *is* the Dirac model
+  (Eq. 4a.9), so the adiabatic band derivative $\partial E/\partial A$ that the
+  restoration leaves behind for the doped carriers is the exact Dirac velocity, and
+  $D=E_F$ follows almost by construction once the disc is sampled well enough.
+* A **doped** sheet is therefore not `nstate`-converged in the way the intrinsic one
+  is. The restoration of §6a makes the *undoped* filling basis-independent to $10^{-6}$
+  in $T$, because it subtracts the adiabatic ground-state current of exactly the same
+  truncated Hamiltonian. The carriers *added* on top of the reference have no such
+  subtraction, and the natural reading of the $11\,\%$ is the second-order repulsion of
+  the $\pi^*$ level by the bands above it, $\Delta E\propto A^2$, which is precisely a
+  shift of the Drude weight. Absolute doped conductances quoted from this solver carry
+  that systematic; ratios and shapes at fixed `nstate` do not.
 
 ### 4a.3 What can bleach a doped sheet
 The sheet conductance of a Drude metal is $\sigma_{dc}=D\tau/\pi$ with the
@@ -706,8 +727,15 @@ quoted as a first-principles number:
 |---|---|---|---|---|---|
 | $48^2$ | 10 | 141 | 136 | 18.1 | 0.644 |
 | $48^2$ | 100 | 60 | 58 | 14.5 | 0.721 |
-| $72^2$ | 10 | **32** | 31 | 10.5 | 0.778 |
-| $72^2$ | 100 | **72** | 69 | 8.4 | 0.828 |
+| $72^2$ | 10 | **33** | 31 | 10.6 | 0.779 |
+| $72^2$ | 100 | **72** | 69 | 8.5 | 0.828 |
+
+(the $72^2$ rows are the tail-inclusive repeat; the ring damps the current, so dropping
+the tail moves $T$ by 0.0009 there against 0.025 in a coherent run.) A second,
+independent route confirms the reversal: inverting $\sigma(\omega)$ bin by bin,
+$\tau=-\mathrm{Im}\,\sigma/(\omega\,\mathrm{Re}\,\sigma)$, with no time-domain fit and no
+driven window, gives $21.5$ fs at 10 kV/cm and $58.0$ fs at 100 — the same rise, from
+data the fit never touches.
 
 Two things are wrong with $\tau$ at these mesh densities, and they must both be said.
 *Its magnitude is not converged*: the same field on a mesh with 2.25× the points gives
@@ -794,12 +822,16 @@ the same bump to within the sampling of the field grid; filling the disc from 1.
 k-points, taking the disc from 3.6 to 4.7 spacings — the bump moves only from $+8.6\,\%$
 to $+7.6\,\%$ and the dip stays at $3.3\,\%$. The mesh-driven part of the darkening is
 therefore essentially gone by $k_F\simeq3.5\,\Delta k$, and what remains is a residual
-few-per-cent dip near $u\simeq0.7$–$1.2$ whose origin these runs do not settle. It is
-*not* the $O(N_k)$ sampling of the Fermi disc; the candidates left are the truncated
-basis (`nstate = 2`) and the departure of the EPM cone from an ideal linear one. An
-earlier version of this page said the converged curve is monotone, on the strength of
-the $48^2\to72^2$ trend alone; the two finer meshes do not support that and the claim
-is withdrawn — see the end of this section. The dip in $T$ follows the bump and
+few-per-cent dip near $u\simeq0.7$–$1.2$. It is *not* the $O(N_k)$ sampling of the Fermi
+disc, and **it is not the basis either**: the same $147^2$ scan at `nstate = 4` gives a
+dip of $3.41\,\%$ against $3.39\,\%$ at `nstate = 2`, unchanged to two digits, even
+though the basis moves the absolute transmission by $0.035$ and $\mathrm{Re}\,\sigma$ by
+$11\,\%$ (§4a.2). So the two numerical suspects are both excluded and the dip is left
+unexplained; the remaining candidate this page can name is the departure of the real
+EPM band from an ideal cone over the excursion $A_0\simeq k_F$, which the continuum
+derivation of §4a.5.3 assumes away. An earlier version of this page said the converged
+curve is monotone, on the strength of the $48^2\to72^2$ trend alone; the finer meshes
+do not support that and the claim is withdrawn — see the end of this section. The dip in $T$ follows the bump and
 its position tracks the bump rather than any field scale of the physics.
 
 As the disc is filled further the bump shrinks — the adiabatic sum is down to 1.06 at
@@ -817,8 +849,9 @@ and $\sim3\,\%$ at 0.6 eV, which is a basis effect and shrinks with `nstate`.
 darkening before the rise is numerical: three quarters of it disappears between
 $k_F/\Delta k=1.5$ and $3.6$, and the disappearance is governed by that ratio alone, not
 by the doping. It does **not** establish that the converged curve is monotone. A dip of
-$3.3\,\%$ near $u\simeq0.7$–$1.2$ survives at both $111^2$ and $147^2$, unchanged, and
-the transmission then rises exactly as Eq. (4a.13) requires. So the honest reading is:
+$3.3\,\%$ near $u\simeq0.7$–$1.2$ survives at both $111^2$ and $147^2$ and at both
+`nstate = 2` and `nstate = 4`, unchanged, and the transmission then rises exactly as
+Eq. (4a.13) requires. So the honest reading is:
 flat while $A_0\lesssim0.5\,k_F$, a residual few-per-cent darkening around
 $A_0\simeq k_F$ of unsettled origin, then the drift-saturation rise, and finally
 Landau–Zener darkening at several hundred kV/cm. A scan meant to be compared with

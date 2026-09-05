@@ -277,9 +277,23 @@ T comes out 0.024 low at every field (the shape survives, the absolute value doe
 not) and the absorption of a *coherent* run — which has no dissipation at all and
 must be near zero away from pair creation — is inflated six-fold, because the
 transmitted fluence that is still in flight at the last step is simply not counted.
-`transmission.py` now also refuses to analyse a record shorter than the run's own
-`nt` (`--allow-partial` overrides), so a job that is still going cannot quietly
-contribute a number.
+
+**Dissipative runs are the exception, and for the reason you would guess:** the ring
+damps the current, so by the end of the drive there is little left in flight. Same
+mesh and doping, `diss`:
+
+| | T, no tail | T, +100 fs | A, no tail | A, +100 fs |
+|---|---|---|---|---|
+| 10 kV/cm | 0.77773 | 0.77864 | 0.20363 | 0.20182 |
+| 100 kV/cm | 0.82761 | 0.82785 | 0.15297 | 0.15248 |
+
+— a shift of 0.0009 and 0.0002 against the coherent run's 0.0246. So the tail is
+cheap insurance in general and indispensable for `coh`; if the ring is on and the
+budget is tight, it is the one place the 25 % can honestly be saved.
+
+`transmission.py` also refuses to analyse a record shorter than the run's own `nt`
+(`--allow-partial` overrides), so a job that is still going cannot quietly contribute
+a number.
 
 ## 7. Local validation (2026-09-04, 4 threads, container)
 
@@ -670,8 +684,13 @@ Repeating the scan on 72² (2.25× the k-points):
 |---|---|---|---|---|---|
 | 48² | 10 | 141 | 136 | 18.1 | 0.644 |
 | 48² | 100 | 60 | 58 | 14.5 | 0.721 |
-| 72² | 10 | 32 | 31 | 10.5 | 0.778 |
-| 72² | 100 | 72 | 69 | 8.4 | 0.828 |
+| 72² | 10 | 33 | 31 | 10.6 | 0.779 |
+| 72² | 100 | 72 | 69 | 8.5 | 0.828 |
+
+(72² rows: the tail-inclusive repeat. A second, independent route agrees — inverting
+σ(ω) bin by bin, τ = −Im σ/(ω Re σ), with no time-domain fit and no driven window,
+gives 21.5 fs at 10 kV/cm and 58.0 fs at 100. Same rise, from data the fit never
+touches, so the reversal against 48² is not an artifact of the fitting window.)
 
 The magnitude moves by 4× at fixed field, and the *trend* reverses: at 48² τ falls
 2.3× from 10 to 100 kV/cm, at 72² it rises by 2.2× over the same interval. An earlier
@@ -753,14 +772,43 @@ series settles the first half: three quarters of the dip disappears between
 k_F/Δk = 1.5 and 3.6, and the disappearance is governed by that ratio alone, not by
 the doping. It does not settle the second: the dip stops shrinking after that —
 −3.5 % at 111² and −3.3 % at 147², with 78 % more k-points between them — so a
-residual few-per-cent darkening near A₀ ≈ k_F survives mesh refinement. Its origin is
-open; it is not the O(N_k) sampling of the Fermi disc, and the candidates left are the
-truncated basis (nstate = 2) and the departure of the EPM cone from an ideal linear
-one. The honest shape is therefore: flat while A₀ ≲ 0.5 k_F, a residual few-per-cent
+residual few-per-cent darkening near A₀ ≈ k_F survives mesh refinement. It is not the
+basis either: the same 147² scan at nstate = 4 dips by 3.41 % against 3.39 % at
+nstate = 2, unchanged to two digits, though the basis moves T by 0.035 and Re σ by
+11 % (§7.13). Both numerical suspects are therefore excluded and the dip is left
+unexplained; the remaining candidate is the departure of the real EPM band from an
+ideal cone over the excursion A₀ ≈ k_F, which the continuum derivation assumes away. The honest shape is therefore: flat while A₀ ≲ 0.5 k_F, a residual few-per-cent
 dip around A₀ ≈ k_F, the drift-saturation rise as 1/E₀, and Landau–Zener darkening at
 several hundred kV/cm. An under-resolved Fermi surface multiplies that residual dip by
 three or four, which is why Eq. (4a.3) still has to be satisfied.
 `drift_saturation.py` produces the table and `graphene_drift_saturation.png`.
+
+**7.13 A doped sheet is not nstate-converged the way an intrinsic one is.** The
+pure-gauge restoration (§7.1) makes the *undoped* filling basis-independent to 10⁻⁶ in
+T, because it subtracts the adiabatic ground-state current of exactly the same
+truncated Hamiltonian. Carriers added on top of that reference get no such
+subtraction. Repeating the 147², E_F = 0.6 eV scan at nstate = 4 (dt = 0.1 fs, energy
+ledger 5×10⁻⁹ eV/cell, nex baseline identical to nstate = 2 — no leakage):
+
+| E₀ [kV/cm] | u | T (nb = 2) | T (nb = 4) | Re σ/σ_univ (nb = 2) | (nb = 4) |
+|---|---|---|---|---|---|
+| 1 | 0.01 | 0.70004 | 0.73477 | 26.92 | 23.77 |
+| 60 | 0.74 | 0.67629 | 0.70975 | 29.00 | 25.95 |
+| 100 | 1.24 | 0.68124 | 0.71716 | 28.69 | 25.46 |
+
+An 11 % change in the sheet response from the basis alone, at 1 kV/cm, where the
+vector potential (6×10⁻⁴ a.u.) cannot mix anything — so this is not field-induced.
+The natural reading is the second-order repulsion of the π* level by the bands above
+it, ΔE ∝ A², which is precisely a shift of the Drude weight: D_spec falls from
+0.608 eV to 0.548 eV against the analytic E_F = 0.600.
+
+Two consequences. **(i)** The D → E_F agreement of §7.12's table is a consistency
+check, not an independent confirmation: near K the two-band EPM *is* the Dirac model,
+so the adiabatic band derivative the restoration leaves behind for the doped carriers
+is the exact Dirac velocity and D = E_F follows almost by construction. **(ii)**
+Absolute doped conductances from this solver carry an ~10 % basis systematic; ratios,
+shapes and field dependences at fixed nstate do not. Notably the dip of §7.12 does
+**not**: 3.41 % at nb = 4 against 3.39 % at nb = 2.
 
 ## 8. What to look for at production (147², DAST)
 
