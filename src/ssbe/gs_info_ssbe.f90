@@ -280,7 +280,11 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
                     ! empty levels and the initial state is not a Fermi-Dirac metal at
                     ! all. Observed consequence (33^2, E_F = 0.2 eV, ring on): population
                     ! inversion and a sheet with NEGATIVE absorption, A = -0.24, the
-                    ! electrons pumping 1.2e-3 eV/cell into the field.
+                    ! electrons pumping 1.2e-3 eV/cell into the field. The zero-field
+                    ! control shows the inversion is in the INITIAL STATE, not made by
+                    ! the drive: with no field the same run still grows a current
+                    ! monotonically to 1.3e-9 a.u. while the electronic energy falls,
+                    ! against 1.2e-11 and flat when 2 points are partially occupied.
                     write(*, '(a)') &
                         '#   *** ERROR-LEVEL WARNING: ZERO partially occupied k-points. The Fermi disc'// &
                         ' contains no mesh point, so the requested doping cannot be represented:'

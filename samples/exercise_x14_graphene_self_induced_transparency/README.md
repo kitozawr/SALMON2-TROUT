@@ -881,6 +881,35 @@ several hundred kV/cm. An under-resolved Fermi surface multiplies that residual 
 three or four, which is why Eq. (4a.3) still has to be satisfied.
 `drift_saturation.py` produces the table and `graphene_drift_saturation.png`.
 
+**7.12b A doping the mesh cannot represent produces GAIN — check `nfs` before
+believing any dissipative number.** Compressing the mesh to exercise the ring (32² and
+33², E_F = 0.2 eV, two layers, `diss`) turned this up. 33 = 3×11 puts the Dirac point
+*on* the half-shifted mesh; at that size the Fermi disc (k_F = 0.0167) is smaller than
+one spacing (0.0473), so **no** k-point is partially occupied and the doping charge
+lands entirely on fully filled or empty levels:
+
+| | 32² (K off mesh) | 33² (K **on** mesh) |
+|---|---|---|
+| partially occupied k-points | 2 | **0** |
+| A at 100 kV/cm | +0.168 | **−0.240** |
+| Eall − Eall0 | +8.1×10⁻⁴ eV/cell | −1.2×10⁻³ eV/cell |
+| \|J\|last/\|J\|max | 0.36 | 0.90 |
+
+Energy is conserved — the electrons *lose* and the field *gains*. That is gain from an
+inverted population. The **zero-field control proves the inversion is in the initial
+state, not made by the drive**: with `ae_shape1 = 'none'` the 33² sheet still has a
+current that grows monotonically to the end of the record (|J| = 1.32×10⁻⁹ a.u., its
+own maximum, still rising) while the electronic energy falls, against 1.2×10⁻¹¹ and
+flat at 32². The dark current alone is far too small to explain A = −0.24, so the
+large negative absorption is the field *amplifying* a state that was already inverted
+at t = 0.
+
+Two guards now exist. `gs_info_ssbe` separates `nfs == 0` from `nfs < 20` and calls the
+first an error: the doping cannot be represented, the run can develop gain, do not use
+it. `transmission.py` refuses to let A < 0 pass silently. This is the same family as
+the degenerate-K bug of §7.1, which group-averaging the occupation fixed — that fix
+does not cover a Fermi disc containing no mesh point at all.
+
 **7.13 A doped sheet is not nstate-converged the way an intrinsic one is.** The
 pure-gauge restoration (§7.1) makes the *undoped* filling basis-independent to 10⁻⁶ in
 T, because it subtracts the adiabatic ground-state current of exactly the same
