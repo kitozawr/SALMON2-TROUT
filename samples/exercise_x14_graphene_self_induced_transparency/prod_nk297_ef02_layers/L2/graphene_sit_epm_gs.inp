@@ -1,0 +1,42 @@
+!########################################################################################!
+! x14 graphene PRIMITIVE-CELL EPM ground state (in-SALMON Fortran EPM, theory='epm').        !
+!----------------------------------------------------------------------------------------!
+! Writes graphene_sit_k/_eigen/_tm.data read by the rt_*.inp files (generated together by      !
+! make_inputs.py -- keep nk consistent). nk = 297: dense (cluster) and an ODD multiple of 3 !
+! so the Dirac point K = (2/3,1/3) is on the half-shifted Monkhorst-Pack mesh.             !
+!                                                                                          !
+! BASIS (x14 finding, tests/test_graphene_dirac_levels.py): the 7-plane-wave basis of the  !
+! old x11 input (epm_pw_cutoff_ry = 2.94) is NOT closed under the little group of K and    !
+! opens a SPURIOUS 0.21 eV gap at the Dirac point. |G|^2 <= 29.4 a.u. (43 PW, shell-        !
+! complete) restores the symmetry-protected degeneracy (gap 0) and meets the thesis        !
+! acceptance numbers (v_F = 0.96e6 m/s, Gamma bottom -7.8 eV, M dip -2.7 eV).               !
+!########################################################################################!
+
+&calculation
+    theory = 'epm'
+/
+
+&control
+    sysname = 'graphene_sit'
+/
+
+&units
+    unit_system = 'A_eV_fs'
+/
+
+&system
+    yn_periodic = 'y'
+    al(1:3) = 2.46000197d0, 2.46000197d0, 19.99999867d0   ! informational: the EPM fixes a = 2.46 Ang
+    nelec  = 2                                     ! 2 atoms x 1 pi e- -> 1 filled valence pi band
+    nstate = 4                                    ! bands in the GS/SBE basis (2 = pi/pi* only; 4 = production, doped runs need it -- README sec. 7.13)
+/
+
+&kgrid
+    num_kgrid(1:3) = 297, 297, 1
+/
+
+&epm
+    epm_material     = 'graphene'
+    epm_pw_cutoff_ry = 29.4d0                      ! |G|^2 <= 29.4 a.u.: 43 PW, gapless K (NOT 2.94)
+    epm_cell         = 'primitive'
+/

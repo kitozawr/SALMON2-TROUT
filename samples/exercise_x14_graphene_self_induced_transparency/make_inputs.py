@@ -175,6 +175,30 @@ SBE_MEM = (
     "                                 ! (T_e from the cone moments; lattice cools via e-ph) -> *_sbe_te.data\n"
 )
 SBE_SHEET = "  yn_sbe_sheet_field    = 'y'    ! 2D-sheet self-consistent (radiation-reaction) field\n"
+
+
+def comment_out_ring(block):
+    """Comment every ring switch, keeping the values so the ring is one edit away.
+
+    Used by --comment-dissipation: the set is shipped coherent (cheap, O(N_k)) and the
+    O(N_k^2) ring is turned on by removing the leading '!' from the marked lines."""
+    # ONLY the ring switches, and only the ring block is passed in. yn_sbe_vg_sumrule
+    # (the pure-gauge restoration) and yn_sbe_sheet_field live in the sheet block, are
+    # NOT dissipation, and must stay on -- commenting them out would change the physics
+    # of the coherent run itself.
+    ring = ('yn_sbe_superres', 'yn_sbe_eph', 'yn_sbe_eph_acoustic', 'yn_sbe_auger',
+            'yn_sbe_colmem', 'yn_sbe_colmem_pop', 'yn_sbe_dressed_ref', 'yn_sbe_rana_te',
+            'sbe_eph_temperature_k', 'sbe_coulomb_epsilon', 'sbe_search_sigma_e_ev')
+    out = ['  ! ==== DISSIPATION: OFF as shipped. Delete the leading "!" on the lines below\n',
+           '  ! ==== to switch the ring on. Cost jumps from O(N_k) to O(N_k^2) -- at this mesh\n',
+           '  ! ==== that is the difference between minutes and days per field.\n']
+    for line in block.splitlines(True):
+        key = line.strip().split('=')[0].strip()
+        if key in ring:
+            out.append('  !' + line.lstrip(' ').rstrip() + '\n')
+        else:
+            out.append(line)
+    return ''.join(out)
 SBE_DOPED = ("  ! ---- doped / finite-temperature initial occupation (wiki/12 sec. 4a) ----\n"
              "  sbe_ef_ev             = {ef:.4f}d0  ! Fermi level from the Dirac point -> Drude carriers\n"
              "  sbe_temp_init_k       = {ti:.1f}d0    ! temperature of the initial occupation\n")
@@ -227,6 +251,11 @@ def main():
     ap.add_argument('--dast-file', default=DAST_DEFAULT)
     ap.add_argument('--fields', default='1,3,10,30,100', help='peak fields [kV/cm]')
     ap.add_argument('--variants', default='coh,diss,mem')
+    ap.add_argument('--comment-dissipation', action='store_true',
+                    help='write the diss/mem inputs with every ring switch COMMENTED OUT, so the set '
+                         'runs coherently as shipped and the ring is enabled by deleting the "!" on '
+                         'those lines. For handing a ready set to a cluster where the coherent scan '
+                         'is cheap and the O(N_k^2) ring is the expensive follow-up.')
     ap.add_argument('--dt-fs', type=float, default=0.1)
     ap.add_argument('--tail-fs', type=float, default=100.0,
                     help='field-free evolution after the pulse. KEEP IT: the sheet current '
@@ -308,7 +337,8 @@ def main():
             if tag == 'coh':
                 sbe = "  ! coherent SBE only (no dissipation)\n" + sheet
             elif tag == 'diss':
-                sbe = SBE_COMMON_RING.format(temp=args.temp_k, eps=args.eps_r, sigma=args.sigma_ev) + sheet
+                ring = SBE_COMMON_RING.format(temp=args.temp_k, eps=args.eps_r, sigma=args.sigma_ev)
+                sbe = (comment_out_ring(ring) if args.comment_dissipation else ring) + sheet
             elif tag == 'mem':
                 sbe = SBE_COMMON_RING.format(temp=args.temp_k, eps=args.eps_r, sigma=args.sigma_ev) + SBE_MEM + sheet
             else:

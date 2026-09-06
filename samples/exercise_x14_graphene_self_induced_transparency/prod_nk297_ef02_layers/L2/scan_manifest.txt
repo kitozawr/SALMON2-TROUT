@@ -1,0 +1,10 @@
+# x14 scan: DAST single-cycle 3.36 THz proxy (DAST_singlecycle_100kV.txt, 284.4 fs) + 100 fs tail; nk=297, dt=0.1 fs, nt=3844; sheet field ON
+# DOPED sheet: E_F = 0.2 eV from the Dirac point, T_init = 300.0 K (Drude carriers; the pure-gauge reference stays the undoped filling)
+ E[kV/cm]   I[W/cm2]   A0[a.u.]  file/drive
+    1.000  1.327e+03  6.213e-04  DAST_E1kVcm.txt (peak 1.00 kV/cm)
+    3.000  1.194e+04  1.864e-03  DAST_E3kVcm.txt (peak 3.00 kV/cm)
+   10.000  1.327e+05  6.213e-03  DAST_E10kVcm.txt (peak 10.00 kV/cm)
+   30.000  1.194e+06  1.864e-02  DAST_E30kVcm.txt (peak 30.00 kV/cm)
+   60.000  4.778e+06  3.728e-02  DAST_E60kVcm.txt (peak 60.00 kV/cm)
+  100.000  1.327e+07  6.213e-02  DAST_E100kVcm.txt (peak 100.00 kV/cm)
+  300.000  1.194e+08  1.864e-01  DAST_E300kVcm.txt (peak 300.00 kV/cm)

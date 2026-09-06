@@ -194,6 +194,22 @@ in the exercise; they are the server runs this exercise exists for.
 | `prod_nk297_doped/` | 297² | E_F = 0.2 eV, 300 K | coh | 1…1000 (7) | **the converged T(E₀) curve — the headline result** | O(N_k): minutes/field per node, few core-hours total |
 | `prod_nk297_intrinsic/` | 297² | undoped | coh | 1…1000 (7) | the control the doping is measured against | same |
 | `prod_nk147/` | 147² | E_F = 0.2 eV, 300 K | diss, mem | 1…300 (5) + dark | τ, the mean free path, T_e, the absolute absorption | ring is O(N_k²): ≈7.5 h/run on 48 threads |
+| `prod_nk297_ef02_layers/L1`, `L2` | 297² | E_F = 0.2 eV, 300 K | ring **commented out** | 1…300 (7) + dark | **one against two layers at the sample doping** — the T(E₀) rise, and whether a bilayer brightens where a monolayer does not | coherent as shipped: minutes/field. With the ring uncommented: O(N_k²), a cluster job |
+
+**`prod_nk297_ef02_layers` is the set to run on the cluster.** 297² is the first mesh
+that resolves the 0.2 eV Fermi disc (k_F/Δk = 3.19; 147² gives 1.58 and 72² only 0.77 —
+below one spacing, where the doping stops being representable at all, §7.12b). It ships
+**coherent**: every ring switch is present but commented, so the cheap scan runs as-is
+and the expensive one is a one-character edit per line:
+
+```bash
+sed -i 's/^  !\(yn_sbe_\(superres\|eph\|eph_acoustic\|auger\)\|sbe_\(eph_temperature_k\|coulomb_epsilon\|search_sigma_e_ev\)\)/  \1/' prod_nk297_ef02_layers/L*/rt_*.inp
+```
+
+Note what is *not* commented: `yn_sbe_vg_sumrule` and `yn_sbe_sheet_field` stay on in
+both modes — they are the pure-gauge restoration and the sheet boundary condition, not
+dissipation. Run `rt_dark_diss.inp` whenever the ring is on: §7.11 shows the zero-field
+control is mandatory at the low-field end.
 
 All four sets are `nstate = 4` since 2026-09-05 (§7.13): the pure-gauge restoration
 makes an *undoped* sheet basis-independent, but it subtracts the reference occupation

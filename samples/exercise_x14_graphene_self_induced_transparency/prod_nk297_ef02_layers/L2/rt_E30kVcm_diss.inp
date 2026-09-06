@@ -1,0 +1,75 @@
+!########################################################################################!
+! x14 graphene self-induced transparency -- diss variant, peak E = 30 kV/cm
+!----------------------------------------------------------------------------------------!
+! DAST single-cycle 3.36 THz proxy (x12), rescaled to peak |E| = 30.00 kV/cm (DAST_E30kVcm.txt).
+! I_peak = 1.194e+06 W/cm^2, A0 = 1.86e-02 a.u. (peak k excursion) -- THz: A0 >> mesh spacing -> Zener/Landau-Zener pair creation at the Dirac point
+! Field BEFORE = E_ext column; field AFTER = E_tot column (2D-sheet self-consistent field,
+! yn_sbe_sheet_field) -> transmission.py.  Compare coh / diss / mem at the same field.
+!########################################################################################!
+
+&calculation
+  theory = 'sbe'
+/
+
+&control
+  sysname = 'graphene_sit'
+/
+
+&units
+  unit_system = 'A_eV_fs'
+/
+
+&system
+  yn_periodic  = 'y'
+  al_vec1(1:3) = 2.46000197d0, 0.00000000d0,  0.00000000d0
+  al_vec2(1:3) = 1.22999834d0, 2.13042512d0,  0.00000000d0
+  al_vec3(1:3) = 0.00000000d0, 0.00000000d0, 19.99999867d0     ! 20 Ang vacuum: L_z of the sheet cell
+  nelec  = 2
+  nstate = 4
+/
+
+&kgrid
+  num_kgrid(1:3) = 297, 297, 1
+/
+
+&tgrid
+  dt = 0.1000d0                     ! fs
+  nt = 3844
+/
+
+&emfield
+  ae_shape1   = 'input'
+  file_input1 = 'DAST_E30kVcm.txt'             ! DAST single-cycle 3.36 THz proxy, scaled to 30 kV/cm peak
+  epdir_re1(1:3) = 1.0d0, 0.0d0, 0.0d0     ! in-plane polarisation (x); the THz beam is at normal incidence (k || z)
+/
+
+&analysis
+  out_projection_k_step = 500   ! k-resolved level-population snapshots every 50 fs (plot_levels.py)
+/
+
+&epm
+  epm_material = 'graphene'
+/
+
+&sbe
+  ! ---- doped / finite-temperature initial occupation (wiki/12 sec. 4a) ----
+  sbe_ef_ev             = 0.2000d0  ! Fermi level from the Dirac point -> Drude carriers
+  sbe_temp_init_k       = 300.0d0    ! temperature of the initial occupation
+  ! ==== DISSIPATION: OFF as shipped. Delete the leading "!" on the lines below
+  ! ==== to switch the ring on. Cost jumps from O(N_k) to O(N_k^2) -- at this mesh
+  ! ==== that is the difference between minutes and days per field.
+  !yn_sbe_superres       = 'y'    ! ring (mandatory for both graphene channels)
+  !yn_sbe_eph            = 'y'    ! E2g(196 meV) + A1'(160 meV) Kohn-anomaly modes
+  !yn_sbe_eph_acoustic   = 'y'    ! D = 16 eV [Hwang-Das Sarma], TF-screened
+  !yn_sbe_auger          = 'y'    ! 2D Rana Auger / carrier multiplication [R07]
+  !sbe_eph_temperature_k = 300.0d0  ! lattice / phonon-bath temperature
+  !sbe_coulomb_epsilon   = 10.0d0   ! substrate eps_r of the Rana rates (10 = R07 benchmark)
+  !sbe_search_sigma_e_ev = 0.100d0 ! ring energy-matching width
+  yn_sbe_sheet_field    = 'y'    ! 2D-sheet self-consistent (radiation-reaction) field
+  sbe_sheet_nlayers     = 2      ! 2 identical decoupled sheets in the same local field (incoherent bilayer)
+  yn_sbe_vg_sumrule     = 'y'    ! velocity-gauge pure-gauge restoration: J(t) -= adiabatic ground-
+                                 ! state current of the same truncated H_k(A(t)) (parameter-free;
+                                 ! = eta N_e A/V at linear order, exact beyond; wiki/12 sec. 6a)
+  frozen_core_threshold_ev = -15.0d0 ! active (dissipated) window around E_F(Gamma): pi, pi* (+ the
+  frozen_free_threshold_ev =  14.0d0 ! state degenerate with pi* at Gamma); the unitary runs on all nstate
+/
