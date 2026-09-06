@@ -920,6 +920,22 @@ flat at 32². The dark current alone is far too small to explain A = −0.24, so
 large negative absorption is the field *amplifying* a state that was already inverted
 at t = 0.
 
+**Switching channels off does not fix it — only the mesh does.** The same zero-field
+33² state with the ring configured three ways:
+
+| channels | \|J\|max | still growing at t_end | Eall − Eall0 [eV/cell] |
+|---|---|---|---|
+| e-ph ON, Auger ON | 1.32×10⁻⁹ | yes | −8.2×10⁻¹⁰ |
+| e-ph OFF, Auger ON | 6.4×10⁻¹⁰ | **yes** | −5.0×10⁻¹¹ |
+| both OFF (coherent) | 1.3×10⁻¹⁶ | no | −3.4×10⁻²³ |
+
+Dropping the phonons and keeping Auger halves the amplitude but the current still grows
+— the instability is fed by *whichever* channel is on, because the pathological initial
+state is not a fixed point of any of them and on this mesh the relaxation runs towards
+more inversion, not less. Only disabling every dissipator removes it, and that is not a
+fix, it is deleting the physics. The cause is upstream of the ring: a Fermi disc the
+mesh cannot hold. Raise `num_kgrid`.
+
 Two guards now exist. `gs_info_ssbe` separates `nfs == 0` from `nfs < 20` and calls the
 first an error: the doping cannot be represented, the run can develop gain, do not use
 it. `transmission.py` refuses to let A < 0 pass silently. This is the same family as
