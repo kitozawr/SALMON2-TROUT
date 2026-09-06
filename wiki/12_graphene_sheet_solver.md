@@ -1019,6 +1019,40 @@ experiment quantitatively must still satisfy Eq. (4a.3), $k_F\gtrsim3\Delta k$, 
 below it the darkening is several times larger and is an artifact. Reproduce the figure and the table with
 `python3 drift_saturation.py GSDIR/graphene_sit --ef-ev 0.2`.
 
+#### 4a.5.6 The bilayer with the ring on: the $T\cdot T$ error changes sign
+
+Everything above about layers was coherent, where the doped sheet is an inductor. With
+the ring on it becomes a Drude absorber, and Eq. (6a) then predicts the opposite sign.
+The propagated pair confirms it. Same $72^2$ mesh, $E_F=0.6$ eV, ring at a 300 K
+lattice, 100 fs ring-down, `sbe_sheet_nlayers` 1 and 2:
+
+| $E_0$ [kV/cm] | 10 | 30 | 100 | 300 |
+|---|---|---|---|---|
+| $u=A_0/k_F$ | 0.12 | 0.37 | 1.24 | 3.71 |
+| one layer, $T$ | 0.7786 | 0.7789 | 0.8279 | **0.8949** |
+| two layers, $T$ | 0.6714 | 0.6164 | 0.6936 | **0.7969** |
+| $\mathrm{Re}\,\sigma_1/\sigma_{\rm univ}$ | 10.7 | 11.2 | 8.5 | 5.2 |
+| $\mathrm{Re}\,\sigma_2/\sigma_{\rm univ}$ | 23.2 | 20.7 | 15.1 | 9.6 |
+| $T_1^2/T_2$ | **0.903** | 0.984 | 0.988 | 1.005 |
+
+![one against two layers with the phonon ring](figures/graphene_layers_ring.png)
+
+**The sign flips.** Coherent, the same doping gave $T_1^2/T_2 = 1.15$ at every field
+(§4a.3); with the ring it is $0.90$–$0.99$. The reason is the phase of $z$, exactly as
+Eq. (6a) says: the coherent sheet has $\mathrm{Re}\,z/|z| = 0.014$ — an inductor — and
+the dissipative one $0.899$ — a Drude resistor. Nothing else changed. So a real CVD
+sample, which is resistive, sits on the branch where $T_1^2$ **under**estimates $T_2$,
+and inverting a measured bilayer as $\sqrt{T_2}$ makes the monolayer look brighter than
+it is, understating its conductance. That is the opposite of the coherent conclusion,
+and it is the one that applies to a measurement.
+
+**Both stacks brighten.** One layer rises $+14.9\,\%$ from 10 to 300 kV/cm, two layers
+$+18.7\,\%$, and measured from the two-layer minimum at 30 kV/cm the rise is
+$+29.3\,\%$. The bilayer gains more, for the reason Eq. (4a.17) gives: it starts at
+twice the conductance, where the same fractional saturation of $\sigma$ buys more
+transmission. $\sigma_2/\sigma_1$ stays near 2 throughout (2.18, 1.85, 1.78, 1.86), so
+the layers really are adding conductance and not something else.
+
 ## 5. Sheet electrodynamics
 
 ### 5.1 Boundary condition

@@ -943,6 +943,34 @@ it. `transmission.py` refuses to let A < 0 pass silently. This is the same famil
 the degenerate-K bug of §7.1, which group-averaging the occupation fixed — that fix
 does not cover a Fermi disc containing no mesh point at all.
 
+**7.11b The bilayer with the ring on — the T·T error changes sign.** Everything in
+§7.4 about layers was coherent, where the doped sheet is an inductor. With the ring it
+is a Drude absorber, and Eq. (6a) predicts the opposite sign. Same 72² mesh,
+E_F = 0.6 eV, ring at 300 K, +100 fs tail, `sbe_sheet_nlayers` 1 and 2:
+
+| E₀ [kV/cm] | 10 | 30 | 100 | 300 |
+|---|---|---|---|---|
+| u = A₀/k_F | 0.12 | 0.37 | 1.24 | 3.71 |
+| 1 layer, T | 0.7786 | 0.7789 | 0.8279 | **0.8949** |
+| 2 layers, T | 0.6714 | 0.6164 | 0.6936 | **0.7969** |
+| Re σ₁/σ_univ | 10.7 | 11.2 | 8.5 | 5.2 |
+| Re σ₂/σ_univ | 23.2 | 20.7 | 15.1 | 9.6 |
+| T₁²/T₂ | **0.903** | 0.984 | 0.988 | 1.005 |
+
+Coherent, the same doping gave T₁²/T₂ = 1.15 at every field; with the ring it is
+0.90–0.99. The cause is the phase of z: Re z/|z| = 0.014 coherent (inductor) against
+0.899 dissipative (Drude resistor). A real CVD sample is resistive, so it sits on the
+branch where T₁² **under**estimates T₂ and √T₂ understates the monolayer conductance —
+the opposite of the coherent conclusion, and the one that applies to a measurement.
+
+Both stacks brighten: +14.9 % for one layer from 10 to 300 kV/cm, +18.7 % for two, and
++29.3 % measured from the two-layer minimum at 30 kV/cm. The bilayer gains more for the
+reason Eq. (4a.17) gives — it starts at twice the conductance, where the same
+fractional saturation buys more transmission. σ₂/σ₁ stays near 2 throughout (2.18,
+1.85, 1.78, 1.86). Figure: `wiki/figures/graphene_layers_ring.png`, built by
+`layers_plot.py`, which reads the ring flag from the runs and labels the branch from
+the measured phase rather than assuming it.
+
 **7.13 A doped sheet is not nstate-converged the way an intrinsic one is.** The
 pure-gauge restoration (§7.1) makes the *undoped* filling basis-independent to 10⁻⁶ in
 T, because it subtracts the adiabatic ground-state current of exactly the same

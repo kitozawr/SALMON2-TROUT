@@ -32,6 +32,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from transmission import analyze, TruncatedRun, AU_EV, VF_EPM_AU, C_AU, SIGMA_UNIV  # noqa: E402
 from drude_check import sheet_from_transmission  # noqa: E402
+from transmission import run_variable  # noqa: E402
 
 A0_PER_KVCM = 6.213e-4
 Z0 = 4.0 * np.pi / C_AU
@@ -46,7 +47,8 @@ def collect(patterns):
         except TruncatedRun as exc:
             print(f'# SKIPPED: {exc}')
             continue
-        rows.append((r['E0_kvcm'], r['T'], r['R'], r['A'], r['sig_c'], r['nk']))
+        ring = (run_variable(f, 'yn_sbe_eph', 'n') or 'n').strip().strip("'\"").lower() == 'y'
+        rows.append((r['E0_kvcm'], r['T'], r['R'], r['A'], r['sig_c'], r['nk'], ring))
     rows.sort(key=lambda r: r[0])
     return rows
 
@@ -63,10 +65,12 @@ def main(argv=None):
     sets = []
     for spec in args.set:
         ef = float(spec[0])
-        a, b = collect([spec[1]]), collect([spec[2]])
+        # each of the two may hold several whitespace-separated globs, so a series can
+        # be assembled from a subset of a run directory (dropping a contaminated field)
+        a, b = collect(spec[1].split()), collect(spec[2].split())
         if a and b:
             sets.append((ef, np.array([r[:4] for r in a]), np.array([r[:4] for r in b]),
-                         [r[4] for r in a], a[0][5]))
+                         [r[4] for r in a], a[0][5], a[0][6]))
     if not sets:
         print('# nothing matched'); return 1
 
@@ -79,7 +83,7 @@ def main(argv=None):
 
     fig, ax = plt.subplots(1, 2, figsize=(11.5, 4.3))
     cols = ('#c0392b', '#2980b9', '#16a085', '#8e44ad')
-    for isr, ((ef, a, b, sg, nk), c) in enumerate(zip(sets, cols)):
+    for isr, ((ef, a, b, sg, nk, ring), c) in enumerate(zip(sets, cols)):
         kF = (abs(ef) / AU_EV) / VF_EPM_AU
         esat = kF / A0_PER_KVCM
         ax[0].semilogx(a[:, 0], a[:, 1], 'o-', color=c, label=f'1 layer, $E_F$ = {ef:g} eV')
@@ -94,8 +98,14 @@ def main(argv=None):
         ax[1].semilogx(a[:, 0], 100.0 * (ratio - 1.0), 'o-', color=c,
                        label=f'$E_F$ = {ef:g} eV')
         zb = Z0 * SIGMA_UNIV * sg[0]
+        cphi = zb.real / abs(zb)
+        # decide the branch from the data, not from an assumption: Re/|z| near 0 is an
+        # inductor (T_1^2 too high), near 1 a Drude absorber (T_1^2 too low)
+        kind = ('reactive (inductor)  -> T_1^2 too HIGH' if cphi < 0.4 else
+                'resistive (Drude)    -> T_1^2 too LOW' if cphi > 0.6 else
+                'mixed                -> either sign possible')
         print(f'# E_F = {ef:g} eV: band-averaged z = {zb.real:+.3f}{zb.imag:+.3f}j '
-              f'(Re/|z| = {zb.real / abs(zb):.3f}) -> reactive sheet, T_1^2 too HIGH')
+              f'(Re/|z| = {cphi:.3f}) -> {kind}')
         print(f'{"E0":>7} {"T1":>8} {"T2":>8} {"T1^2":>8} {"T1^2/T2":>9}')
         for i in range(len(a)):
             print(f'{a[i, 0]:7.1f} {a[i, 1]:8.5f} {b[i, 1]:8.5f} {a[i, 1]**2:8.5f} {ratio[i]:9.4f}')
@@ -111,13 +121,20 @@ def main(argv=None):
     ax[1].axhline(0.0, c='k', lw=0.8)
     ax[1].set_xlabel('peak field $E_0$ [kV/cm]')
     ax[1].set_ylabel(r'error of $T\cdot T$:  $100\,(T_1^2/T_2 - 1)$  [%]')
-    ax[1].set_title('A reactive sheet makes $T_1^2$ an OVERestimate at every field', fontsize=9)
+    cph = [(Z0 * SIGMA_UNIV * s[3][0]).real / abs(Z0 * SIGMA_UNIV * s[3][0]) for s in sets]
+    ttl = ('A reactive sheet makes $T_1^2$ an OVERestimate' if max(cph) < 0.4 else
+           'A resistive (Drude) sheet makes $T_1^2$ an UNDERestimate' if min(cph) > 0.6 else
+           'Sign of the $T\\cdot T$ error follows the phase of $\\sigma$')
+    ax[1].set_title(ttl, fontsize=9)
     ax[1].legend(fontsize=8); ax[1].grid(alpha=0.25)
     nks = ' / '.join(str(int(round(np.sqrt(s[4])))) + '^2' for s in sets if s[4])
+    mode = ('with the e-ph + Rana ring' if all(s[5] for s in sets) else
+            'coherent (no dissipation)' if not any(s[5] for s in sets) else
+            'MIXED coherent/dissipative -- check the run set')
     fig.text(0.008, 0.008,
              'Free-standing calculation (no substrate); 2 layers = sbe_sheet_nlayers = 2, one shared '
              f'local field, NOT two Fresnel interfaces. Mesh {nks}, DAST transient + 100 fs '
-             'ring-down, coherent.',
+             f'ring-down, {mode}.',
              fontsize=7.0, color='#34495e')
     fig.tight_layout(rect=(0, 0.05, 1, 1)); fig.savefig(args.out, dpi=150)
     print(f'# wrote {args.out}')
