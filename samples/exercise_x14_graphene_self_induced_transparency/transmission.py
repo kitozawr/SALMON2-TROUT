@@ -415,6 +415,19 @@ def main(argv=None):
               f'{sp:6.2f}  ' + (f'T{args.predict_layers}={r["T_stack"]:.5f}  ' if 'T_stack' in r else '')
               + (f'dark={100 * r["dark_frac"]:.1f}%{"!" if r["dark_frac"] > 0.10 else ""} '
                  f'T_sub={r["T_dark_sub"]:.5f}  ' if 'dark_frac' in r else '') + f'{f}')
+    # In a self-consistent run E_tot already carries the radiation reaction, so the
+    # fluence absorption and the SBE energy ledger must agree. They do to ~1 % on a
+    # clean run; a large gap means the current is carrying something the field did not
+    # put there (the zero-field ring drift is the usual culprit -- see dark_fraction).
+    bad = [r for r in rows if r['mode'] == 'SC' and np.isfinite(r['A_energy'])
+           and abs(r['A'] - r['A_energy']) > 0.25 * max(abs(r['A']), 1e-9)]
+    if bad:
+        print('# *** FLUENCE / LEDGER MISMATCH (self-consistent runs, should agree to ~1 %):')
+        for r in bad:
+            print(f'#     {r["E0_kvcm"]:.0f} kV/cm: A = {r["A"]:.4f} from fluences but '
+                  f'A_E = {r["A_energy"]:.4f} from the electron energy '
+                  f'({abs(r["A"] / max(r["A_energy"], 1e-12)):.1f}x)')
+        print('#     The current holds something the drive did not put there. Run the dark control.')
     neg = [r for r in rows if r['A'] < -1e-6]
     if neg:
         print('# *** NEGATIVE ABSORPTION in ' + ', '.join(f'{r["E0_kvcm"]:.0f} kV/cm (A = {r["A"]:+.3f})'
