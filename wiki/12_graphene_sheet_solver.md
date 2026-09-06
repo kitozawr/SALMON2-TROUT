@@ -483,10 +483,12 @@ Three things to read off it.
   That is the reactive branch of Eq. (6a): a coherent doped sheet at 14 meV is an
   inductor, $\mathrm{Im}\,z\gg\mathrm{Re}\,z$ (band-averaged $z=0.017-1.195i$ at
   $E_F=0.6$ eV), and for $\mathrm{Im}\,z$ the second-order term raises $T_1^2/T_2$
-  above 1. Inverting a measured bilayer transmission as $\sqrt{T_2}$ therefore
-  *understates* the monolayer conductance. A sample whose absorption is dominated by
-  momentum relaxation instead sits on the dissipative branch and the error changes
-  sign, so the direction has to be decided from $\sigma$'s phase, not assumed.
+  above 1, i.e. $\sqrt{T_2}<T_1$: inverting a measured bilayer transmission as
+  $\sqrt{T_2}$ makes the monolayer look *darker* than it is and therefore
+  **overstates** its conductance. A sample whose absorption is dominated by momentum
+  relaxation sits on the dissipative branch, where the inequality reverses — see the
+  propagated check in §4a.5.6 — so the direction has to be decided from $\sigma$'s
+  phase, not assumed.
 * **The single-frequency formula is not enough for this pulse.** Eq. (6a) with the
   band-averaged $z$ predicts $T_1^2/T_2=1.31$ where the propagated pair gives 1.153.
   Using the sheet's own frequency-resolved $\sigma(\omega)$ instead

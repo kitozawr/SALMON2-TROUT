@@ -485,8 +485,9 @@ python3 layers_plot.py --set 0.6 'ef0.6_L1/runs/*/*_rt.data' 'ef0.6_L2/runs/*/*_
 
 T₁² is HIGH at every field and both dopings — the reactive branch, because a coherent
 doped sheet at 14 meV is an inductor (band-averaged z = 0.017 − 1.195i at 0.6 eV).
-Inverting a measured bilayer transmission as √T₂ therefore understates the monolayer
-conductance by ~5 %. Two further checks: `--predict-layers 2`, which uses the run's
+√T₂ is then SMALLER than T₁ (0.660 against 0.709 at 3 kV/cm), so inverting a measured
+bilayer as √T₂ makes the monolayer look darker than it is and **overstates** its
+conductance. With the ring on the inequality reverses — see §7.11b. Two further checks: `--predict-layers 2`, which uses the run's
 own σ(ω), reproduces T₂ to 1.5 % in the linear regime (against 14 % for the
 single-frequency formula) and degrades to 27 % at u = 5.6, always predicting the
 stack too bright; and bin by bin across the driven band the two-layer run returns
