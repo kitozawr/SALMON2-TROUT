@@ -98,8 +98,9 @@ this same drive, that at an unconverged dt the carrier density *climbs* with the
 band count and "converges" to a wrong, dt-inflated value — "the dt-error was filling
 each newly-available band, **faking** a basis-insufficiency". At nstate = 28…36 the
 Si levels reach 54 eV, which is 8.2 rad of phase per 0.1 fs step, and the S4
-composition leaks there. The default here is therefore `dt = 0.05 fs`, and `wiki/06`
-§7 asks for ≤0.02–0.05 fs at this field strength.
+composition leaks there. `wiki/06` §7 asks for ≤0.02–0.05 fs at this field
+strength; the measurement below pins the default of this exercise at the tight end of
+that range, `dt = 0.025 fs`.
 
 **Measured, and it is worse than §7 suggests.** Si $5^3$, 1000 kV/cm, coherent,
 post-pulse plateau:
